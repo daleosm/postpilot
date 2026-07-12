@@ -70,7 +70,7 @@ function SignOffRow({ signOff: item, canOpenEpisodes }: { signOff: WorkflowSignO
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Button variant="primary" onClick={signOff} isDisabled={saving} className="bg-[#3f7563] text-white"><Check size={15} /> {saving ? "Saving…" : "Sign off"}</Button>
+          <Button variant="primary" onClick={signOff} isDisabled={saving} className="button--success"><Check size={15} /> {saving ? "Saving…" : "Sign off"}</Button>
         </div>
       </div>
       {message && <p role="status" className={`mt-3 text-xs ${message.includes("recorded") || message.includes("signed off") ? "text-[#3f7563]" : "text-[#a35e41]"}`}>{message}</p>}

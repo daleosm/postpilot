@@ -55,6 +55,17 @@ button, a { -webkit-tap-highlight-color: transparent; }
   background: #394542;
 }
 
+.button.button--success {
+  border-color: #3f7563;
+  background: #3f7563;
+  color: #fff;
+}
+
+.button.button--success:hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: #4d866f;
+  background: #4d866f;
+}
+
 /* Tertiary actions stay intentionally quiet so menus, tabs and compact tools
  * do not compete with the page's primary action. Components can still add a
  * border or background when they need the dashboard's secondary treatment. */
