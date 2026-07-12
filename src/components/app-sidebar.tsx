@@ -43,7 +43,7 @@ export function AppSidebar() {
         ))}
       </nav>
       <div className="mt-auto border-t border-[#e9e8e4] pt-3">
-        <Link href="#" className="flex h-9 items-center gap-3 rounded-md px-3 text-[13px] text-[#6d7270] transition hover:bg-[#f0f1ee] hover:text-[#353a39]"><Settings size={16} strokeWidth={1.75} /> Settings</Link>
+        <Link href="/settings/workflow" className="flex h-9 items-center gap-3 rounded-md px-3 text-[13px] text-[#6d7270] transition hover:bg-[#f0f1ee] hover:text-[#353a39]"><Settings size={16} strokeWidth={1.75} /> Settings</Link>
         <div className="mt-4 flex items-center gap-2.5 px-3 pb-1">
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#b3937e] text-[10px] font-semibold text-white">MO</span>
           <div className="min-w-0">

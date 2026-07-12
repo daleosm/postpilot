@@ -1,4 +1,3 @@
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { reviewNotes } from "@/lib/db/schema";

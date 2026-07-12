@@ -1,5 +1,5 @@
 import { BookingFormDialog } from "@/components/booking-form-dialog";
-import { ScheduleBoard, type ScheduleBooking } from "@/components/schedule-board";
+import { ScheduleBoard } from "@/components/schedule-board";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can, getCurrentPerson, roleHome } from "@/lib/permissions";
 import { getScheduleResources, listSchedule } from "@/server/data";
