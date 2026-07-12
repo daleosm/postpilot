@@ -1,6 +1,7 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { workflowSignOffLabel } from "../src/lib/workflow";
 
 import {
   activityLog,
@@ -42,20 +43,32 @@ const seedOrganizationIds = [
 ] as const;
 
 const stages = [
-  ["Assembly cut", "assembly_cut", "#71869a", "editor"],
+  ["Post setup and delivery specifications", "post_setup_delivery_specifications", "#71869a", "post_supervisor"],
+  ["Ingest, verification and editorial preparation", "ingest_verification_editorial_preparation", "#5f7ee6", "assistant_editor"],
+  ["Assembly cut", "assembly_cut", "#7b8eb3", "editor"],
   ["Editor’s cut", "editor_cut", "#5f7ee6", "editor"],
   ["Director’s cut / review", "director_review", "#9b70e5", "director"],
-  ["Producer, studio & network review", "producer_network_review", "#9c6fb9", "producer"],
-  ["Fine cut & final approvals", "fine_cut_approvals", "#c58a52", "producer"],
-  ["Picture lock", "picture_lock", "#d99a45", "post_supervisor"],
-  ["VFX, graphics & titles", "vfx_graphics_titles", "#af7195", "vfx_coordinator"],
-  ["Colour grade / online conform", "colour_online_conform", "#4d9687", "colorist"],
-  ["Sound edit, ADR, music & final mix", "sound_final_mix", "#56889a", "sound_mixer"],
-  ["Quality control (QC)", "quality_control", "#b56d54", "qc"],
-  ["Mastering & delivery", "mastering_delivery", "#647c70", "post_supervisor"],
+  ["Producer review", "producer_review", "#a7785d", "producer"],
+  ["Studio, network or client review", "studio_network_client_review", "#9c6fb9", "network_client_executive"],
+  ["Legal, compliance and clearances", "legal_compliance_clearances", "#977a67", "producer"],
+  ["Fine cut and final creative approval", "fine_cut_final_creative_approval", "#c58a52", "producer"],
+  ["Picture lock", "picture_lock", "#d99a45", "producer"],
+  ["Department turnovers", "department_turnovers", "#8a8173", "post_supervisor"],
+  ["VFX, graphics and titles", "vfx_graphics_titles", "#af7195", "vfx_supervisor"],
+  ["Online conform", "online_conform", "#658da4", "online_editor"],
+  ["Colour grade", "colour_grade", "#4d9687", "colorist"],
+  ["Sound editorial, ADR, Foley and music", "sound_editorial_adr_foley_music", "#56889a", "supervising_sound_editor"],
+  ["Final mix", "final_mix", "#4d7b8d", "rerecording_mixer"],
+  ["Captions, localisation and accessibility", "captions_localisation_accessibility", "#7c8c78", "post_supervisor"],
+  ["Mastering and versioning", "mastering_versioning", "#647c70", "post_supervisor"],
+  ["Quality control", "quality_control", "#b56d54", "qc"],
+  ["Corrections and re-QC", "corrections_re_qc", "#bd7650", "qc"],
+  ["Delivery", "delivery", "#607b70", "post_supervisor"],
+  ["Client or network acceptance", "client_network_acceptance", "#8c719d", "network_client_representative"],
+  ["Archive and closeout", "archive_closeout", "#6d7671", "post_supervisor"],
 ] as const;
 
-type PersonRole = "producer" | "post_supervisor" | "finance" | "editor" | "assistant_editor" | "colorist" | "sound_mixer" | "vfx_coordinator" | "qc" | "director" | "client" | "runner";
+type PersonRole = "producer" | "post_supervisor" | "finance" | "editor" | "assistant_editor" | "online_editor" | "colorist" | "sound_mixer" | "supervising_sound_editor" | "rerecording_mixer" | "vfx_coordinator" | "vfx_supervisor" | "qc" | "director" | "network_client_executive" | "network_client_representative" | "client" | "runner";
 type MembershipRole = "owner" | "admin" | "member" | "guest";
 type PersonSeed = { name: string; email: string; role: PersonRole; userId?: string; membershipRole?: MembershipRole };
 type TenantSeed = {
@@ -71,6 +84,15 @@ type TenantSeed = {
   people: PersonSeed[];
   budgetProfile: { currency: string; multiplier: number; vendor: string };
 };
+
+const specialistRoleSeeds: Array<{ role: PersonRole; title: string }> = [
+  { role: "online_editor", title: "Online Editor" },
+  { role: "vfx_supervisor", title: "VFX Supervisor" },
+  { role: "supervising_sound_editor", title: "Supervising Sound Editor" },
+  { role: "rerecording_mixer", title: "Re-recording Mixer" },
+  { role: "network_client_executive", title: "Network Client Executive" },
+  { role: "network_client_representative", title: "Network Client Representative" },
+];
 
 const tenants: TenantSeed[] = [
   {
@@ -278,7 +300,8 @@ async function seedTenant(tenant: TenantSeed) {
   const bookingId = (position: number) => id(tenant.number, "29", position);
   // Each facility person has a tenant-local Auth.js identity and membership.
   // Maya is intentionally the only shared debug platform administrator.
-  const tenantPeople = tenant.people.map((person, index) => ({
+  const sourcePeople: PersonSeed[] = [...tenant.people, ...specialistRoleSeeds.map((specialist, index) => ({ name: `${tenant.name} ${specialist.title}`, email: `${specialist.role}.${index + 1}@${tenant.slug}.test`, role: specialist.role }))];
+  const tenantPeople = sourcePeople.map((person, index) => ({
     ...person,
     userId: person.userId ?? `user_${tenant.slug.replaceAll("-", "_")}_${index + 1}`,
     membershipRole: person.membershipRole ?? (person.role === "client" || person.role === "director" ? "guest" : "member") as MembershipRole,
@@ -296,8 +319,8 @@ async function seedTenant(tenant: TenantSeed) {
   })));
 
   await db.insert(postWorkflows).values({ id: workflowId, organizationId: tenant.id, name: tenant.workflowName, description: tenant.workflowDescription, isDefault: true });
-  await db.insert(workflowStages).values(stages.map(([name, key, color], index) => ({ id: stageId(index + 1), organizationId: tenant.id, workflowId, name, key, color, position: index + 1, isTerminal: key === "mastering_delivery" })));
-  await db.insert(workflowStageApprovalRules).values(stages.map(([, , , approverRole], index) => ({ id: ruleId(index + 1), organizationId: tenant.id, workflowStageId: stageId(index + 1), approverRole, label: `${approverRole.replaceAll("_", " ")} sign-off`, approvalOrder: 1, isRequired: true })));
+  await db.insert(workflowStages).values(stages.map(([name, key, color], index) => ({ id: stageId(index + 1), organizationId: tenant.id, workflowId, name, key, color, position: index + 1, isTerminal: key === "archive_closeout" })));
+  await db.insert(workflowStageApprovalRules).values(stages.map(([, , , approverRole], index) => ({ id: ruleId(index + 1), organizationId: tenant.id, workflowStageId: stageId(index + 1), approverRole, label: workflowSignOffLabel(approverRole), approvalOrder: 1, isRequired: true })));
 
   await db.insert(shows).values(tenant.shows.map((show, index) => ({ id: showId(index + 1), organizationId: tenant.id, title: show.title, code: show.code, network: tenant.networks[index] ?? primaryNetwork, productionCompany: show.company, timeZone: "Europe/London" })));
   await db.insert(seasons).values(tenant.shows.map((show, index) => ({ id: seasonId(index + 1), organizationId: tenant.id, showId: showId(index + 1), number: 1, title: `${show.title} · Season 1`, startDate: day(-100 + index * 18) })));
@@ -306,14 +329,14 @@ async function seedTenant(tenant: TenantSeed) {
     .map((_, personIndex) => ({ organizationId: tenant.id, showId: showId(showIndex + 1), personId: personId(personIndex + 1) }))));
 
   const lifecyclePatterns = [
-    ["editor_cut", "in_progress", 2],
-    ["review", "not_started", 4],
-    ["locked", "passed", 6],
-    ["online", "needs_attention", 8],
-    ["assembly", "not_started", 1],
-    ["delivered", "passed", 11],
-    ["review", "needs_attention", 4],
-    ["locked", "in_progress", 6],
+    ["editor_cut", "in_progress", 4],
+    ["review", "not_started", 6],
+    ["locked", "passed", 10],
+    ["online", "needs_attention", 13],
+    ["assembly", "not_started", 3],
+    ["delivered", "passed", 21],
+    ["review", "needs_attention", 7],
+    ["locked", "in_progress", 10],
   ] as const;
   const episodeRows = tenant.shows.flatMap((show, showIndex) => show.episodes.map((title, episodeIndex) => {
     const position = showIndex * 4 + episodeIndex + 1;
@@ -354,8 +377,8 @@ async function seedTenant(tenant: TenantSeed) {
   await db.insert(qcIssues).values([{ id: id(tenant.number, "34", 1), organizationId: tenant.id, qcReportId: id(tenant.number, "33", 1), code: "PHOTOSENS-01", severity: "high", description: "Photosensitivity warning at transition; regrade and rerun external QC.", timecodeSeconds: "1817.700", status: "open" }]);
 
   await db.insert(tasks).values([
-    { id: id(tenant.number, "2f", 1), organizationId: tenant.id, showId: showId(1), episodeId: episodeId(1), workflowStageId: stageId(2), assigneeId: byRole("editor"), createdByUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId, title: "Address producer note at 25:34", status: "in_progress", priority: "high", dueAt: at(1, 16) },
-    { id: id(tenant.number, "2f", 2), organizationId: tenant.id, showId: showId(2), episodeId: episodeId(4), workflowStageId: stageId(10), assigneeId: byRole("qc"), createdByUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId, title: "Clear technical QC exception", status: "blocked", priority: "urgent", dueAt: at(2, 12) },
+    { id: id(tenant.number, "2f", 1), organizationId: tenant.id, showId: showId(1), episodeId: episodeId(1), workflowStageId: stageId(4), assigneeId: byRole("editor"), createdByUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId, title: "Address producer note at 25:34", status: "in_progress", priority: "high", dueAt: at(1, 16) },
+    { id: id(tenant.number, "2f", 2), organizationId: tenant.id, showId: showId(2), episodeId: episodeId(4), workflowStageId: stageId(19), assigneeId: byRole("qc"), createdByUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId, title: "Clear technical QC exception", status: "blocked", priority: "urgent", dueAt: at(2, 12) },
   ]);
   const budgetCategories = ["Edit suite", "Editorial artists", "VFX", "Colour", "Sound", "QC", "Finalisation"];
   await db.insert(budgetLines).values(budgetCategories.map((category, index) => {

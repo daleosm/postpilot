@@ -51,7 +51,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ep
     }
   }
   await db.update(episodes).set({ workflowStageId: stage.id, status: statusForWorkflowKey(stage.key), updatedAt: new Date() }).where(and(eq(episodes.id, episode.id), eq(episodes.organizationId, context.organization.organizationId)));
-  if (["vfx_graphics_titles", "colour_online_conform", "sound_final_mix"].includes(stage.key)) {
+  if (["vfx_graphics_titles", "online_conform", "colour_grade", "sound_editorial_adr_foley_music", "final_mix"].includes(stage.key)) {
     await db.insert(episodeWorkflowTracks).values({ organizationId: context.organization.organizationId, episodeId: episode.id, workflowStageId: stage.id, status: "in_progress", startedAt: new Date() })
       .onConflictDoUpdate({ target: [episodeWorkflowTracks.episodeId, episodeWorkflowTracks.workflowStageId], set: { status: "in_progress", startedAt: new Date(), updatedAt: new Date(), blockedReason: null } });
   }
@@ -115,7 +115,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ epi
   if (parsed.data.action === "approve" && approvals.some((approval) => approval.approvalOrder < candidate.approvalOrder && approval.status !== "approved")) return NextResponse.json({ error: "Complete the earlier sign-offs first." }, { status: 409 });
   await db.update(episodeWorkflowApprovals).set({ status: parsed.data.action === "approve" ? "approved" : "changes_requested", approverPersonId: person?.id ?? null, comment: parsed.data.comment || null, respondedAt: new Date(), updatedAt: new Date() }).where(and(eq(episodeWorkflowApprovals.id, candidate.id), eq(episodeWorkflowApprovals.organizationId, organizationId)));
   const stageWillBeApproved = parsed.data.action === "approve" && approvals.every((approval) => approval.id === candidate.id || approval.status === "approved");
-  if (stageWillBeApproved && ["vfx_graphics_titles", "colour_online_conform", "sound_final_mix"].includes(stage.key)) {
+  if (stageWillBeApproved && ["vfx_graphics_titles", "online_conform", "colour_grade", "sound_editorial_adr_foley_music", "final_mix"].includes(stage.key)) {
     await db.insert(episodeWorkflowTracks).values({ organizationId: context.organization.organizationId, episodeId, workflowStageId: stage.id, status: "approved", completedAt: new Date() })
       .onConflictDoUpdate({ target: [episodeWorkflowTracks.episodeId, episodeWorkflowTracks.workflowStageId], set: { status: "approved", completedAt: new Date(), updatedAt: new Date() } });
   }

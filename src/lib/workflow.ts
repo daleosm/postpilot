@@ -1,51 +1,52 @@
-export const defaultEpisodicWorkflow = [
-  { id: "demo-stage-1", key: "assembly_cut", name: "Assembly cut", position: 1 },
-  { id: "demo-stage-2", key: "editor_cut", name: "Editor’s cut", position: 2 },
-  { id: "demo-stage-3", key: "director_review", name: "Director’s cut / review", position: 3 },
-  { id: "demo-stage-4", key: "producer_network_review", name: "Producer, studio & network review", position: 4 },
-  { id: "demo-stage-5", key: "fine_cut_approvals", name: "Fine cut & final approvals", position: 5 },
-  { id: "demo-stage-6", key: "picture_lock", name: "Picture lock", position: 6 },
-  { id: "demo-stage-7", key: "vfx_graphics_titles", name: "VFX, graphics & titles", position: 7 },
-  { id: "demo-stage-8", key: "colour_online_conform", name: "Colour grade / online conform", position: 8 },
-  { id: "demo-stage-9", key: "sound_final_mix", name: "Sound edit, ADR, music & final mix", position: 9 },
-  { id: "demo-stage-10", key: "quality_control", name: "Quality control (QC)", position: 10 },
-  { id: "demo-stage-11", key: "mastering_delivery", name: "Mastering & delivery", position: 11 },
+const stages = [
+  ["post_setup_delivery_specifications", "Post setup and delivery specifications", "post_supervisor"],
+  ["ingest_verification_editorial_preparation", "Ingest, verification and editorial preparation", "assistant_editor"],
+  ["assembly_cut", "Assembly cut", "editor"],
+  ["editor_cut", "Editor’s cut", "editor"],
+  ["director_review", "Director’s cut / review", "director"],
+  ["producer_review", "Producer review", "producer"],
+  ["studio_network_client_review", "Studio, network or client review", "network_client_executive"],
+  ["legal_compliance_clearances", "Legal, compliance and clearances", "producer"],
+  ["fine_cut_final_creative_approval", "Fine cut and final creative approval", "producer"],
+  ["picture_lock", "Picture lock", "producer"],
+  ["department_turnovers", "Department turnovers", "post_supervisor"],
+  ["vfx_graphics_titles", "VFX, graphics and titles", "vfx_supervisor"],
+  ["online_conform", "Online conform", "online_editor"],
+  ["colour_grade", "Colour grade", "colorist"],
+  ["sound_editorial_adr_foley_music", "Sound editorial, ADR, Foley and music", "supervising_sound_editor"],
+  ["final_mix", "Final mix", "rerecording_mixer"],
+  ["captions_localisation_accessibility", "Captions, localisation and accessibility", "post_supervisor"],
+  ["mastering_versioning", "Mastering and versioning", "post_supervisor"],
+  ["quality_control", "Quality control", "qc"],
+  ["corrections_re_qc", "Corrections and re-QC", "qc"],
+  ["delivery", "Delivery", "post_supervisor"],
+  ["client_network_acceptance", "Client or network acceptance", "network_client_representative"],
+  ["archive_closeout", "Archive and closeout", "post_supervisor"],
 ] as const;
 
-const approvalPolicies = [
-  [["editor", "Editor sign-off", true]],
-  [["editor", "Editor sign-off", true]],
-  [["director", "Director approval", true]],
-  [["producer", "Producer approval", true], ["network", "Studio / network approval", false]],
-  [["director", "Director approval", true], ["producer", "Producer approval", true]],
-  [["post_supervisor", "Post supervisor lock approval", true], ["producer", "Producer lock approval", true], ["network", "Studio / network lock approval", false]],
-  [["vfx_coordinator", "VFX coordinator sign-off", true], ["post_supervisor", "Post supervisor approval", true], ["director", "Director creative approval", false]],
-  [["colorist", "Colourist completion", true], ["post_supervisor", "Post supervisor approval", true], ["director", "Director grade approval", false]],
-  [["sound_mixer", "Sound mixer completion", true], ["post_supervisor", "Post supervisor approval", true], ["director", "Director sound approval", false]],
-  [["qc", "QC operator sign-off", true], ["post_supervisor", "Post supervisor disposition", true]],
-  [["post_supervisor", "Post supervisor delivery approval", true], ["network", "Network / streamer acceptance", false]],
-] as const;
+export const defaultEpisodicWorkflow = stages.map(([key, name], index) => ({ id: `demo-stage-${index + 1}`, key, name, position: index + 1 }));
 
-export const defaultEpisodicApprovalRules = approvalPolicies.flatMap((rules, stageIndex) => rules.map(([approverRole, label, isRequired], ruleIndex) => ({
-  id: `demo-rule-${stageIndex + 1}-${ruleIndex + 1}`,
-  workflowStageId: defaultEpisodicWorkflow[stageIndex].id,
-  approverRole,
-  label,
-  approvalOrder: ruleIndex + 1,
-  isRequired,
-})));
+export const defaultEpisodicApprovalRules = stages.map(([, , approverRole], index) => ({
+  id: `demo-rule-${index + 1}-1`, workflowStageId: defaultEpisodicWorkflow[index].id, approverRole, label: workflowSignOffLabel(approverRole), approvalOrder: 1, isRequired: true,
+}));
+
+export function workflowSignOffLabel(role: string) {
+  return ({
+    post_supervisor: "Post Supervisor sign-off", assistant_editor: "Assistant Editor sign-off", editor: "Editor sign-off", director: "Director sign-off", producer: "Producer sign-off", network_client_executive: "Network / Client Executive sign-off", vfx_supervisor: "VFX Supervisor sign-off", online_editor: "Online Editor sign-off", colorist: "Colourist sign-off", supervising_sound_editor: "Supervising Sound Editor sign-off", rerecording_mixer: "Re-recording Mixer sign-off", qc: "QC Operator sign-off", network_client_representative: "Network / Client Representative sign-off",
+  } as Record<string, string>)[role] ?? `${role.replaceAll("_", " ")} sign-off`;
+}
 
 export function statusForWorkflowKey(key: string) {
-  if (key === "assembly_cut") return "assembly" as const;
+  if (["post_setup_delivery_specifications", "ingest_verification_editorial_preparation", "assembly_cut"].includes(key)) return "assembly" as const;
   if (key === "editor_cut") return "editor_cut" as const;
-  if (["director_review", "producer_network_review", "fine_cut_approvals"].includes(key)) return "review" as const;
+  if (["director_review", "producer_review", "studio_network_client_review", "legal_compliance_clearances", "fine_cut_final_creative_approval"].includes(key)) return "review" as const;
   if (key === "picture_lock") return "locked" as const;
-  if (key === "mastering_delivery") return "delivered" as const;
-  if (["vfx_graphics_titles", "colour_online_conform", "sound_final_mix", "quality_control"].includes(key)) return "online" as const;
+  if (["delivery", "client_network_acceptance", "archive_closeout"].includes(key)) return "delivered" as const;
+  if (["department_turnovers", "vfx_graphics_titles", "online_conform", "colour_grade", "sound_editorial_adr_foley_music", "final_mix", "captions_localisation_accessibility", "mastering_versioning", "quality_control", "corrections_re_qc"].includes(key)) return "online" as const;
   return "development" as const;
 }
 
 export function defaultWorkflowStageForStatus(status: string) {
-  const key = status === "assembly" ? "assembly_cut" : status === "editor_cut" ? "editor_cut" : status === "review" ? "producer_network_review" : status === "locked" ? "picture_lock" : status === "online" ? "colour_online_conform" : status === "delivered" ? "mastering_delivery" : "assembly_cut";
+  const key = status === "assembly" ? "assembly_cut" : status === "editor_cut" ? "editor_cut" : status === "review" ? "producer_review" : status === "locked" ? "picture_lock" : status === "online" ? "online_conform" : status === "delivered" ? "delivery" : "post_setup_delivery_specifications";
   return defaultEpisodicWorkflow.find((stage) => stage.key === key)!;
 }

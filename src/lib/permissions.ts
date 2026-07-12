@@ -14,12 +14,18 @@ export const roleDefinitions = [
   { role: "head_of_production", label: "Head of production" },
   { role: "editor", label: "Editor" },
   { role: "assistant_editor", label: "Assistant editor" },
+  { role: "online_editor", label: "Online editor" },
   { role: "colorist", label: "Colorist" },
   { role: "sound_mixer", label: "Sound mixer" },
+  { role: "supervising_sound_editor", label: "Supervising sound editor" },
+  { role: "rerecording_mixer", label: "Re-recording mixer" },
   { role: "vfx_coordinator", label: "VFX coordinator" },
+  { role: "vfx_supervisor", label: "VFX supervisor" },
   { role: "qc", label: "QC operator" },
   { role: "director", label: "Director" },
   { role: "network", label: "Network reviewer" },
+  { role: "network_client_executive", label: "Network / client executive" },
+  { role: "network_client_representative", label: "Network / client representative" },
   { role: "client", label: "Client reviewer" },
   { role: "finance", label: "Finance" },
   { role: "runner", label: "Runner" },
@@ -28,8 +34,8 @@ export const roleDefinitions = [
 
 export type TenantRolePolicy = { role: string; label: string; permissions: Permission[] };
 
-const artists = new Set(["editor", "assistant_editor", "colorist", "sound_mixer", "qc", "vfx_coordinator"]);
-const externalReviewers = new Set(["client", "director", "network"]);
+const artists = new Set(["editor", "assistant_editor", "online_editor", "colorist", "sound_mixer", "supervising_sound_editor", "rerecording_mixer", "qc", "vfx_coordinator", "vfx_supervisor"]);
+const externalReviewers = new Set(["client", "director", "network", "network_client_executive", "network_client_representative"]);
 // Runner desk is intentionally excluded from the general production default.
 // It exposes floor-hospitality fulfilment, which belongs to runners (and tenant
 // admins), not producers or post supervisors unless explicitly configured.

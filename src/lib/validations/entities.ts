@@ -9,7 +9,7 @@ const metadata = z.record(z.string(), z.unknown()).default({});
 
 const episodeStatuses = ["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"] as const;
 const qcStatuses = ["not_started", "in_progress", "passed", "needs_attention", "waived"] as const;
-const personRoles = ["producer", "post_supervisor", "head_of_production", "finance", "editor", "assistant_editor", "colorist", "sound_mixer", "vfx_coordinator", "qc", "director", "network", "client", "runner", "freelancer"] as const;
+const personRoles = ["producer", "post_supervisor", "head_of_production", "finance", "editor", "assistant_editor", "online_editor", "colorist", "sound_mixer", "supervising_sound_editor", "rerecording_mixer", "vfx_coordinator", "vfx_supervisor", "qc", "director", "network", "network_client_executive", "network_client_representative", "client", "runner", "freelancer"] as const;
 
 export const insertUserSchema = z.object({
   id: z.string().min(1),
