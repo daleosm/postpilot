@@ -98,12 +98,10 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
                   <div className="flex items-center justify-between gap-3"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7d837f]">Approval policy</p><Button size="sm" variant="tertiary" onClick={() => addApprovalRule(stage.id)} className="h-7 border border-[#dfe5e1] bg-white px-2 text-xs text-[#45685e]"><Plus size={13} /> Add sign-off</Button></div>
                   <p className="mt-1 text-xs text-[#858a87]">Each row can be assigned to a different person when the stage is submitted.</p>
                   {stageRules.map((rule, index) => (
-                    <div key={rule.id} className="mt-2 grid gap-2 sm:grid-cols-[28px_minmax(170px,1fr)_160px_auto_28px] sm:items-center">
+                    <div key={rule.id} className="mt-2 grid gap-2 sm:grid-cols-[28px_minmax(170px,1fr)_28px] sm:items-center">
                       <span className="text-center text-xs font-semibold text-[#7c837f]">{index + 1}</span>
-                      <input value={rule.label} onChange={(event) => updateRule(rule.id, { label: event.target.value })} className="h-8 rounded-md border border-[#dedfda] bg-white px-2 text-xs" />
-                      <select value={rule.approverRole} onChange={(event) => updateRule(rule.id, { approverRole: event.target.value })} className="h-8 rounded-md border border-[#dedfda] bg-white px-2 text-xs">{roles.map((role) => <option key={role.role} value={role.role}>{role.label}</option>)}</select>
-                      <label className="flex items-center gap-2 text-xs text-[#59615e]"><input type="checkbox" checked={rule.isRequired} onChange={(event) => updateRule(rule.id, { isRequired: event.target.checked })} /> Required</label>
-                      <button type="button" onClick={() => removeApprovalRule(rule.id, stage.id)} className="rounded p-1 text-[#8b918e] hover:bg-[#f3e9e4] hover:text-[#a35e41]" aria-label={`Remove ${rule.label}`}><Trash2 size={14} /></button>
+                      <select aria-label={`Sign-off role ${index + 1}`} value={rule.approverRole} onChange={(event) => { const role = roles.find((item) => item.role === event.target.value); updateRule(rule.id, { approverRole: event.target.value, label: `${role?.label ?? event.target.value.replaceAll("_", " ")} sign-off` }); }} className="h-8 rounded-md border border-[#dedfda] bg-white px-2 text-xs">{roles.map((role) => <option key={role.role} value={role.role}>{role.label}</option>)}</select>
+                      <button type="button" onClick={() => removeApprovalRule(rule.id, stage.id)} className="rounded p-1 text-[#8b918e] hover:bg-[#f3e9e4] hover:text-[#a35e41]" aria-label={`Remove sign-off ${index + 1}`}><Trash2 size={14} /></button>
                     </div>
                   ))}
                   {!stageRules.length && <p className="mt-2 text-xs text-[#858a87]">No approval roles configured for this stage.</p>}
