@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getDb } from "@/lib/db";
-import { episodes, reviewCuts, seasons, shows } from "@/lib/db/schema";
+import { episodes, seasons, shows } from "@/lib/db/schema";
 import { ACTIVE_ORGANIZATION_COOKIE, ACTIVE_SHOW_COOKIE, activeOrganizationCookieOptions, getActiveContextUserId, userCanAccessOrganization } from "@/lib/organizations";
 
 const requestSchema = z.object({
@@ -41,7 +41,6 @@ async function validTenantRoute(organizationId: string, pathname: string) {
   const path = pathname.split("?")[0];
   const show = path.match(/^\/shows\/([^/]+)$/);
   const episode = path.match(/^\/episodes\/([^/]+)$/);
-  const reviewCut = path.match(/^\/review\/([^/]+)$/);
   const db = getDb();
 
   if (show) {
@@ -53,9 +52,6 @@ async function validTenantRoute(organizationId: string, pathname: string) {
       .where(and(eq(episodes.id, episode[1]), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId))).limit(1);
     return record ? path : "/";
   }
-  if (reviewCut) {
-    const [record] = await db.select({ id: reviewCuts.id }).from(reviewCuts).where(and(eq(reviewCuts.id, reviewCut[1]), eq(reviewCuts.organizationId, organizationId))).limit(1);
-    return record ? path : "/";
-  }
+  if (/^\/review\/[^/]+$/.test(path)) return "/";
   return path;
 }

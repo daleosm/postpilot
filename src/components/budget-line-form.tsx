@@ -8,7 +8,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-const categories = ["edit suite", "editor", "assistant editor", "color", "sound", "VFX", "QC", "deliverables", "storage", "overtime"] as const;
+const categories = ["edit suite", "editor", "assistant editor", "color", "sound", "VFX", "QC", "finalisation", "storage", "overtime"] as const;
 const schema = z.object({
   episodeId: z.string().min(1, "Select an episode."),
   category: z.enum(categories),

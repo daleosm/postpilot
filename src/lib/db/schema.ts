@@ -25,13 +25,7 @@ export const qcStatus = pgEnum("qc_status", ["not_started", "in_progress", "pass
 export const personRole = pgEnum("person_role", ["producer", "post_supervisor", "head_of_production", "finance", "editor", "assistant_editor", "online_editor", "colorist", "sound_mixer", "supervising_sound_editor", "rerecording_mixer", "vfx_coordinator", "vfx_supervisor", "qc", "director", "network", "network_client_executive", "network_client_representative", "client", "runner", "freelancer"]);
 export const bookingStatus = pgEnum("booking_status", ["tentative", "confirmed", "hold", "cancelled"]);
 export const bookingType = pgEnum("booking_type", ["edit", "color", "mix", "qc", "client_review", "ingest", "conform"]);
-export const taskStatus = pgEnum("task_status", ["not_started", "in_progress", "blocked", "complete"]);
-export const taskPriority = pgEnum("task_priority", ["low", "normal", "high", "urgent"]);
-export const reviewStatus = pgEnum("review_status", ["draft", "in_review", "approved", "changes_requested", "superseded"]);
 export const approvalStatus = pgEnum("approval_status", ["pending", "approved", "changes_requested"]);
-export const noteStatus = pgEnum("note_status", ["open", "addressed", "wont_fix"]);
-export const notePriority = pgEnum("note_priority", ["low", "normal", "high", "critical"]);
-export const deliverableStatus = pgEnum("deliverable_status", ["not_started", "in_progress", "qc", "ready", "ready_for_qc", "failed_qc", "approved", "delivered", "rejected"]);
 export const billableStatus = pgEnum("billable_status", ["draft", "approved", "invoiced", "paid", "void"]);
 export const costType = pgEnum("cost_type", ["billable", "internal"]);
 export const availabilityStatus = pgEnum("availability_status", ["available", "limited", "booked_out", "away"]);
@@ -251,8 +245,6 @@ export const episodeWorkflowApprovals = pgTable("episode_workflow_approvals", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
   workflowStageId: uuid("workflow_stage_id").notNull().references(() => workflowStages.id, { onDelete: "cascade" }),
-  /** The immutable review-cut version that was approved, when creative approval is required. */
-  reviewCutId: uuid("review_cut_id").references(() => reviewCuts.id, { onDelete: "set null" }),
   approvalRuleId: uuid("approval_rule_id").notNull().references(() => workflowStageApprovalRules.id, { onDelete: "cascade" }),
   approverRole: text("approver_role").notNull(),
   requiredPersonId: uuid("required_person_id").references(() => people.id, { onDelete: "set null" }),
@@ -275,7 +267,6 @@ export const episodeWorkflowTracks = pgTable("episode_workflow_tracks", {
   episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
   workflowStageId: uuid("workflow_stage_id").notNull().references(() => workflowStages.id, { onDelete: "cascade" }),
   status: workflowTrackStatus("status").default("not_started").notNull(),
-  sourceReviewCutId: uuid("source_review_cut_id").references(() => reviewCuts.id, { onDelete: "set null" }),
   startedAt: timestamp("started_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   blockedReason: text("blocked_reason"),
@@ -325,112 +316,10 @@ export const cateringRequests = pgTable("catering_requests", {
   index("catering_requests_booking_idx").on(table.bookingId),
 ]);
 
-export const tasks = pgTable("tasks", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-  showId: uuid("show_id").references(() => shows.id, { onDelete: "cascade" }),
-  episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "cascade" }),
-  workflowStageId: uuid("workflow_stage_id").references(() => workflowStages.id, { onDelete: "set null" }),
-  assigneeId: uuid("assignee_id").references(() => people.id, { onDelete: "set null" }),
-  createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
-  title: text("title").notNull(),
-  description: text("description"),
-  status: taskStatus("status").default("not_started").notNull(),
-  priority: taskPriority("priority").default("normal").notNull(),
-  dueAt: timestamp("due_at", { withTimezone: true }),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-  ...auditColumns,
-}, (table) => [
-  index("tasks_organization_status_idx").on(table.organizationId, table.status),
-  index("tasks_episode_id_idx").on(table.episodeId),
-]);
-
-export const reviewCuts = pgTable("review_cuts", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-  episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
-  createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
-  title: text("title").notNull(),
-  version: integer("version").notNull(),
-  runtimeSeconds: numeric("runtime_seconds", { precision: 12, scale: 3 }),
-  status: reviewStatus("status").default("draft").notNull(),
-  approvalStatus: approvalStatus("approval_status").default("pending").notNull(),
-  submittedAt: timestamp("submitted_at", { withTimezone: true }),
-  dueAt: timestamp("due_at", { withTimezone: true }),
-  ...auditColumns,
-}, (table) => [
-  uniqueIndex("review_cuts_episode_version_idx").on(table.episodeId, table.version),
-  index("review_cuts_organization_status_idx").on(table.organizationId, table.status),
-]);
-
-/** Named approval evidence for a cut; reviewCuts.approvalStatus remains a fast summary. */
-export const reviewCutApprovals = pgTable("review_cut_approvals", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-  reviewCutId: uuid("review_cut_id").notNull().references(() => reviewCuts.id, { onDelete: "cascade" }),
-  approverPersonId: uuid("approver_person_id").references(() => people.id, { onDelete: "set null" }),
-  approverRole: text("approver_role").notNull(),
-  decision: approvalStatus("decision").notNull(),
-  comment: text("comment"),
-  decidedAt: timestamp("decided_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  index("review_cut_approvals_cut_idx").on(table.reviewCutId, table.decidedAt),
-  index("review_cut_approvals_organization_id_idx").on(table.organizationId),
-]);
-
-export const reviewNotes = pgTable("review_notes", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-  reviewCutId: uuid("review_cut_id").notNull().references(() => reviewCuts.id, { onDelete: "cascade" }),
-  authorUserId: text("author_user_id").references(() => users.id, { onDelete: "set null" }),
-  authorName: text("author_name"),
-  department: text("department").default("Editorial").notNull(),
-  priority: notePriority("priority").default("normal").notNull(),
-  body: text("body").notNull(),
-  timecodeSeconds: numeric("timecode_seconds", { precision: 12, scale: 3 }),
-  status: noteStatus("status").default("open").notNull(),
-  addressedAt: timestamp("addressed_at", { withTimezone: true }),
-  ...auditColumns,
-}, (table) => [
-  index("review_notes_cut_status_idx").on(table.reviewCutId, table.status),
-  index("review_notes_organization_id_idx").on(table.organizationId),
-]);
-
-export const deliverables = pgTable("deliverables", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-  episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  destination: text("destination").notNull(),
-  status: deliverableStatus("status").default("not_started").notNull(),
-  dueAt: timestamp("due_at", { withTimezone: true }),
-  deliveredAt: timestamp("delivered_at", { withTimezone: true }),
-  ...auditColumns,
-}, (table) => [index("deliverables_episode_status_idx").on(table.episodeId, table.status)]);
-
-export const deliveryRequirements = pgTable("delivery_requirements", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-  deliverableId: uuid("deliverable_id").notNull().references(() => deliverables.id, { onDelete: "cascade" }),
-  label: text("label").notNull(),
-  specification: text("specification"),
-  isRequired: boolean("is_required").default(true).notNull(),
-  isComplete: boolean("is_complete").default(false).notNull(),
-  evidenceUrl: text("evidence_url"),
-  checksum: text("checksum"),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-  ...auditColumns,
-}, (table) => [
-  index("delivery_requirements_deliverable_id_idx").on(table.deliverableId),
-  index("delivery_requirements_organization_id_idx").on(table.organizationId),
-]);
-
 export const qcReports = pgTable("qc_reports", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
-  deliverableId: uuid("deliverable_id").references(() => deliverables.id, { onDelete: "set null" }),
-  reviewCutId: uuid("review_cut_id").references(() => reviewCuts.id, { onDelete: "set null" }),
   status: qcReportStatus("status").default("draft").notNull(),
   reportUrl: text("report_url"),
   checksum: text("checksum"),
@@ -457,21 +346,6 @@ export const qcIssues = pgTable("qc_issues", {
   index("qc_issues_report_status_idx").on(table.qcReportId, table.status),
   index("qc_issues_organization_id_idx").on(table.organizationId),
 ]);
-
-/** Explicit resource sharing is required before a client reviewer can access it. */
-export const clientShares = pgTable("client_shares", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-  clientPersonId: uuid("client_person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
-  showId: uuid("show_id").references(() => shows.id, { onDelete: "cascade" }),
-  episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "cascade" }),
-  reviewCutId: uuid("review_cut_id").references(() => reviewCuts.id, { onDelete: "cascade" }),
-  deliverableId: uuid("deliverable_id").references(() => deliverables.id, { onDelete: "cascade" }),
-  canApprove: boolean("can_approve").default(false).notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }),
-  createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [index("client_shares_person_idx").on(table.clientPersonId)]);
 
 export const budgetLines = pgTable("budget_lines", {
   id: uuid("id").defaultRandom().primaryKey(),

@@ -10,20 +10,20 @@ test.describe("Review usability", () => {
     await openReview(page);
 
     await expect(page.getByRole("heading", { name: "Approvals" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "My approval queue" })).toBeVisible();
-    await expect(page.getByText("Only approval gates assigned to you appear here.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Awaiting my sign-off" })).toBeVisible();
+    await expect(page.getByText("Current workflow stages that have reached your configured sign-off role.")).toBeVisible();
   });
 
-  test("explains when the current signer has no approvals waiting", async ({ page }) => {
+  test("uses workflow-only sign-off language", async ({ page }) => {
     await openReview(page);
 
-    await expect(page.getByText("No workflow approvals are waiting for your sign-off.")).toBeVisible();
+    await expect(page.getByText("Workflow stages awaiting the next configured sign-off.")).toBeVisible();
   });
 
-  test("does not expose the retired review-cut registration queue", async ({ page }) => {
+  test("does not expose retired media-review controls", async ({ page }) => {
     await openReview(page);
 
     await expect(page.getByRole("button", { name: "Register cut", exact: true })).not.toBeVisible();
-    await expect(page.getByRole("link", { name: /producer review/ })).not.toBeVisible();
+    await expect(page.getByText("Version history")).not.toBeVisible();
   });
 });

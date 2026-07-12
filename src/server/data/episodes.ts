@@ -3,10 +3,9 @@ import "server-only";
 import { aliasedTable, and, asc, eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { episodeWorkflowApprovals, episodes, people, postWorkflows, reviewCuts, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
+import { episodeWorkflowApprovals, episodes, people, postWorkflows, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
 import { getBudgetData } from "./budget";
 import { getDashboardData } from "./dashboard";
-import { listDeliverables } from "./deliverables";
 import { listSchedule } from "./schedule";
 
 const editors = aliasedTable(people, "episode_editors");
@@ -38,11 +37,8 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
   const db = getDb();
   const episode = await getEpisode(organizationId, episodeId);
   if (!episode) return null;
-  const [schedule, reviews, deliverables, budget, dashboard, stages, approvalRules, approvals, workflowApprovers] = await Promise.all([
+  const [schedule, budget, dashboard, stages, approvalRules, approvals, workflowApprovers] = await Promise.all([
     listSchedule(organizationId, new Date(Date.now() - 90 * 86_400_000), new Date(Date.now() + 120 * 86_400_000)),
-    db.select({ id: reviewCuts.id, title: reviewCuts.title, version: reviewCuts.version, status: reviewCuts.status, submittedAt: reviewCuts.submittedAt, dueAt: reviewCuts.dueAt })
-      .from(reviewCuts).where(and(eq(reviewCuts.organizationId, organizationId), eq(reviewCuts.episodeId, episodeId))).orderBy(asc(reviewCuts.version)),
-    listDeliverables(organizationId),
     getBudgetData(organizationId),
     getDashboardData(organizationId),
     db.select({ id: workflowStages.id, name: workflowStages.name, key: workflowStages.key, position: workflowStages.position, canStartEarly: workflowStages.canStartEarly })
@@ -59,8 +55,6 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
   return {
     episode,
     schedule: schedule.filter((booking) => booking.episodeTitle === episode.title && booking.episodeNumber === episode.number),
-    reviews,
-    deliverables: deliverables.filter((deliverable) => deliverable.episodeTitle === episode.title && deliverable.episodeNumber === episode.number),
     budget: budget.lines.filter((line) => line.showTitle === episode.showTitle),
     activity: dashboard.activity,
     workflowStages: stages,

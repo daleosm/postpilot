@@ -10,11 +10,8 @@ type Policy = { role: string; label: string; permissions: string[] };
 const permissionLabels: Record<string, string> = {
   manage_shows: "Shows & episodes",
   manage_bookings: "Bookings",
-  manage_reviews: "Review administration",
+  manage_reviews: "Approval administration",
   approve_reviews: "Approve workflow gates",
-  update_notes: "Notes",
-  update_tasks: "Tasks",
-  manage_deliverables: "Deliverables",
   manage_budget: "Budget",
   request_catering: "Request catering",
   manage_catering: "Runner desk",

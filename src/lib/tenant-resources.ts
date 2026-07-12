@@ -6,11 +6,9 @@ import { getDb } from "@/lib/db";
 import {
   bookings,
   budgetLines,
-  deliverables,
   episodes,
   people,
   qcReports,
-  reviewCuts,
   rooms,
   seasons,
   shows,
@@ -25,8 +23,6 @@ type TenantReferences = Partial<{
   personId: string | null;
   roomId: string | null;
   bookingId: string | null;
-  reviewCutId: string | null;
-  deliverableId: string | null;
   budgetLineId: string | null;
   workflowStageId: string | null;
   workflowRuleId: string | null;
@@ -43,8 +39,6 @@ export async function missingTenantReferences(organizationId: string, references
     references.personId ? ["person", db.select({ id: people.id }).from(people).where(and(eq(people.id, references.personId), eq(people.organizationId, organizationId))).limit(1)] as const : null,
     references.roomId ? ["room", db.select({ id: rooms.id }).from(rooms).where(and(eq(rooms.id, references.roomId), eq(rooms.organizationId, organizationId))).limit(1)] as const : null,
     references.bookingId ? ["booking", db.select({ id: bookings.id }).from(bookings).where(and(eq(bookings.id, references.bookingId), eq(bookings.organizationId, organizationId))).limit(1)] as const : null,
-    references.reviewCutId ? ["review cut", db.select({ id: reviewCuts.id }).from(reviewCuts).where(and(eq(reviewCuts.id, references.reviewCutId), eq(reviewCuts.organizationId, organizationId))).limit(1)] as const : null,
-    references.deliverableId ? ["deliverable", db.select({ id: deliverables.id }).from(deliverables).where(and(eq(deliverables.id, references.deliverableId), eq(deliverables.organizationId, organizationId))).limit(1)] as const : null,
     references.budgetLineId ? ["budget line", db.select({ id: budgetLines.id }).from(budgetLines).where(and(eq(budgetLines.id, references.budgetLineId), eq(budgetLines.organizationId, organizationId))).limit(1)] as const : null,
     references.workflowStageId ? ["workflow stage", db.select({ id: workflowStages.id }).from(workflowStages).where(and(eq(workflowStages.id, references.workflowStageId), eq(workflowStages.organizationId, organizationId))).limit(1)] as const : null,
     references.workflowRuleId ? ["workflow approval rule", db.select({ id: workflowStageApprovalRules.id }).from(workflowStageApprovalRules).where(and(eq(workflowStageApprovalRules.id, references.workflowRuleId), eq(workflowStageApprovalRules.organizationId, organizationId))).limit(1)] as const : null,

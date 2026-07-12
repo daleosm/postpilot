@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Archive, CalendarRange, Coffee, Clapperboard, DollarSign, FileCheck2, House, Layers3, Settings, UsersRound } from "lucide-react";
+import { CalendarRange, Coffee, Clapperboard, DollarSign, FileCheck2, House, Layers3, Settings, UsersRound } from "lucide-react";
 import { LogoutButton } from "@/components/logout-button";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can, getCurrentPerson, isExternalReviewerRole, type Permission } from "@/lib/permissions";
@@ -8,12 +8,11 @@ import { listWorkflowSignOffInbox } from "@/server/data";
 const navigation = [
   { label: "Dashboard", icon: House, href: "/" },
   { label: "Shows", icon: Clapperboard, href: "/shows", permissions: ["manage_shows"] as Permission[] },
-  { label: "Episodes", icon: Layers3, href: "/episodes", permissions: ["manage_shows", "update_tasks"] as Permission[] },
+  { label: "Episodes", icon: Layers3, href: "/episodes", permissions: ["manage_shows", "view_assigned"] as Permission[] },
   { label: "Bookings", icon: CalendarRange, href: "/bookings", permissions: ["manage_bookings"] as Permission[] },
-  { label: "Approvals", icon: FileCheck2, href: "/review", permissions: ["manage_reviews", "approve_reviews", "update_notes"] as Permission[] },
+  { label: "Approvals", icon: FileCheck2, href: "/review", permissions: ["manage_reviews", "approve_reviews"] as Permission[] },
   { label: "Catering", icon: Coffee, href: "/catering", permissions: ["request_catering"] as Permission[] },
   { label: "Runner desk", icon: Coffee, href: "/runner", permissions: ["manage_catering"] as Permission[] },
-  { label: "Deliverables", icon: Archive, href: "/deliverables", permissions: ["manage_deliverables"] as Permission[] },
   { label: "Budget", icon: DollarSign, href: "/budget", permissions: ["manage_budget"] as Permission[] },
   { label: "Team", icon: UsersRound, href: "/team", permissions: ["manage_shows"] as Permission[] },
 ];

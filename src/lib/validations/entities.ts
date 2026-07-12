@@ -171,75 +171,8 @@ export const updateCateringRequestSchema = z.object({
   runnerNote: z.string().trim().max(1000).nullable().optional(),
 });
 
-export const insertTaskSchema = z.object({
-  organizationId: id,
-  showId: nullableId,
-  episodeId: nullableId,
-  workflowStageId: nullableId,
-  assigneeId: nullableId,
-  title: z.string().trim().min(1).max(240),
-  description: z.string().trim().max(8000).nullable().optional(),
-  status: z.enum(["not_started", "in_progress", "blocked", "complete"]).default("not_started"),
-  priority: z.enum(["low", "normal", "high", "urgent"]).default("normal"),
-  dueAt: optionalTimestamp.nullable(),
-});
-export const updateTaskSchema = insertTaskSchema.omit({ organizationId: true }).partial();
-
-export const insertReviewCutSchema = z.object({
-  organizationId: id,
-  episodeId: id,
-  title: z.string().trim().min(1).max(240),
-  version: z.coerce.number().int().positive(),
-  runtimeSeconds: z.coerce.number().positive().nullable().optional(),
-  status: z.enum(["draft", "in_review", "approved", "changes_requested", "superseded"]).default("draft"),
-  approvalStatus: z.enum(["pending", "approved", "changes_requested"]).default("pending"),
-  submittedAt: optionalTimestamp.nullable(),
-  dueAt: optionalTimestamp.nullable(),
-});
-export const updateReviewCutSchema = insertReviewCutSchema.omit({ organizationId: true, episodeId: true }).partial();
-export const reviewCutRequestSchema = insertReviewCutSchema.omit({ organizationId: true });
-
-export const insertReviewNoteSchema = z.object({
-  reviewCutId: id,
-  authorName: z.string().trim().max(120).nullable().optional(),
-  department: z.string().trim().min(1).max(80).default("Editorial"),
-  priority: z.enum(["low", "normal", "high", "critical"]).default("normal"),
-  body: z.string().trim().min(1).max(8000),
-  timecodeSeconds: z.coerce.number().nonnegative().nullable().optional(),
-  status: z.enum(["open", "addressed", "wont_fix"]).default("open"),
-});
-export const updateReviewNoteSchema = insertReviewNoteSchema.omit({ reviewCutId: true }).partial();
-
-export const insertDeliverableSchema = z.object({
-  organizationId: id,
-  episodeId: id,
-  name: z.string().trim().min(1).max(240),
-  destination: z.string().trim().min(1).max(240),
-  status: z.enum(["not_started", "in_progress", "qc", "ready", "ready_for_qc", "failed_qc", "approved", "delivered", "rejected"]).default("not_started"),
-  dueAt: optionalTimestamp.nullable(),
-});
-export const updateDeliverableSchema = insertDeliverableSchema.omit({ organizationId: true, episodeId: true }).partial();
-
-export const insertDeliveryRequirementSchema = z.object({
-  deliverableId: id,
-  label: z.string().trim().min(1).max(240),
-  specification: z.string().trim().max(4000).nullable().optional(),
-  isRequired: z.boolean().default(true),
-  isComplete: z.boolean().default(false),
-});
-export const updateDeliveryRequirementSchema = insertDeliveryRequirementSchema.omit({ deliverableId: true }).partial();
-
-export const updateDeliveryRequirementProgressSchema = z.object({
-  isComplete: z.boolean(),
-  evidenceUrl: z.string().url().max(2000).nullable().optional(),
-  checksum: z.string().trim().min(8).max(255).nullable().optional(),
-  deliverableStatus: z.enum(["not_started", "in_progress", "qc", "ready", "ready_for_qc", "failed_qc", "approved", "delivered", "rejected"]).optional(),
-});
-
 export const insertQcReportSchema = z.object({
   episodeId: id,
-  deliverableId: nullableId,
-  reviewCutId: nullableId,
   status: z.enum(["draft", "in_progress", "passed", "failed", "waived"]),
   reportUrl: z.string().url().max(2000).nullable().optional(),
   checksum: z.string().trim().min(8).max(255).nullable().optional(),
@@ -255,11 +188,6 @@ export const insertQcIssueSchema = z.object({
   severity: z.enum(["minor", "major", "critical"]),
   description: z.string().trim().min(1).max(4000),
   timecodeSeconds: z.coerce.number().nonnegative().nullable().optional(),
-});
-
-export const reviewCutApprovalRequestSchema = z.object({
-  action: z.enum(["approve", "request_changes"]),
-  comment: z.string().trim().max(4000).optional(),
 });
 
 export const insertBudgetLineSchema = z.object({
@@ -328,4 +256,3 @@ export const insertActivityLogSchema = z.object({
 
 export type EpisodeInput = z.infer<typeof insertEpisodeSchema>;
 export type ShowInput = z.infer<typeof insertShowSchema>;
-export type TaskInput = z.infer<typeof insertTaskSchema>;

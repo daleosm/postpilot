@@ -10,7 +10,7 @@ import { isDebugDemoMode } from "@/lib/runtime";
 import { insertQcReportSchema } from "@/lib/validations/entities";
 
 export async function POST(request: Request) {
-  if (!(await can("manage_reviews")) && !(await can("update_tasks"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await can("manage_reviews")) && !(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const parsed = insertQcReportSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: "Check the QC report details and waiver reason." }, { status: 400 });
   if (isDebugDemoMode) return NextResponse.json({ id: "demo-qc-report", debug: true, status: parsed.data.status }, { status: 201 });

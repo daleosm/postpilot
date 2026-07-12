@@ -1,11 +1,11 @@
 import { and, eq, or } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { episodes, organizationRolePolicies, tasks } from "@/lib/db/schema";
+import { episodes, organizationRolePolicies } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
 
-export const permissions = ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "update_notes", "update_tasks", "manage_deliverables", "manage_budget", "request_catering", "manage_catering", "view_assigned"] as const;
+export const permissions = ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "manage_budget", "request_catering", "manage_catering", "view_assigned"] as const;
 export type Permission = (typeof permissions)[number];
 
 export const roleDefinitions = [
@@ -39,8 +39,8 @@ const externalReviewers = new Set(["client", "director", "network", "network_cli
 // Runner desk is intentionally excluded from the general production default.
 // It exposes floor-hospitality fulfilment, which belongs to runners (and tenant
 // admins), not producers or post supervisors unless explicitly configured.
-const allProductionPermissions: Permission[] = ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "update_notes", "update_tasks", "manage_deliverables", "manage_budget", "request_catering", "view_assigned"];
-const artistPermissions: Permission[] = ["view_assigned", "update_notes", "update_tasks", "request_catering"];
+const allProductionPermissions: Permission[] = ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "manage_budget", "request_catering", "view_assigned"];
+const artistPermissions: Permission[] = ["view_assigned", "request_catering"];
 
 export function defaultPermissionsForRole(role: string | undefined): Permission[] {
   if (["producer", "post_supervisor"].includes(role ?? "")) return allProductionPermissions;
@@ -48,7 +48,7 @@ export function defaultPermissionsForRole(role: string | undefined): Permission[
   if (role === "finance") return ["manage_budget", "view_assigned"];
   if (role && artists.has(role)) return artistPermissions;
   if (role === "runner") return ["request_catering", "manage_catering", "view_assigned"];
-  if (role && externalReviewers.has(role)) return ["approve_reviews", "update_notes", "view_assigned"];
+  if (role && externalReviewers.has(role)) return ["approve_reviews", "view_assigned"];
   return [];
 }
 
@@ -72,7 +72,7 @@ export async function can(permission: Permission) {
   return (policy?.permissions ?? defaultPermissionsForRole(context.person?.role)).includes(permission);
 }
 
-/** An artist may submit workflow work only on an episode they are assigned to or tasked on. */
+/** An artist may submit workflow work only on an episode they are assigned to. */
 export async function isAssignedToEpisode(episodeId: string) {
   if (isDebugDemoMode) return true;
   const context = await getActiveOrganizationContext();
@@ -81,8 +81,7 @@ export async function isAssignedToEpisode(episodeId: string) {
   if (["producer", "post_supervisor", "head_of_production"].includes(current.role)) return true;
   const [assignment] = await db.select({ id: episodes.id }).from(episodes).where(and(eq(episodes.id, episodeId), eq(episodes.organizationId, context.organization.organizationId), or(eq(episodes.editorId, current.id), eq(episodes.coloristId, current.id), eq(episodes.soundMixerId, current.id), eq(episodes.assignedProducerId, current.id)))).limit(1);
   if (assignment) return true;
-  const [task] = await db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.organizationId, context.organization.organizationId), eq(tasks.episodeId, episodeId), eq(tasks.assigneeId, current.id))).limit(1);
-  return Boolean(task);
+  return false;
 }
 
 export function isExternalReviewerRole(role: string | undefined) {

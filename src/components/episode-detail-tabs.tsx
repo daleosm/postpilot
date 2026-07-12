@@ -4,14 +4,14 @@ import { Button } from "@heroui/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-const tabs = ["Overview", "Workflow", "Bookings", "Review Cuts", "Deliverables", "Budget", "Activity"] as const;
+const tabs = ["Overview", "Workflow", "Bookings", "Budget", "Activity"] as const;
 type TabName = (typeof tabs)[number];
 type Row = { id: string; [key: string]: unknown };
 type EpisodeData = { id?: string; title: string; showTitle: string; seasonNumber: number; number: number; status: string; qcStatus: string; workflowStageId: string | null; workflowStage: string | null; editorName: string | null; producerName: string | null; lockedCutDate: string | null; deliveryDeadline: Date | string | null };
 type WorkflowStage = { id: string; name: string; key: string; position: number; canStartEarly?: boolean };
 type WorkflowApprovalRule = { id: string; workflowStageId: string; approverRole: string; label: string; approvalOrder: number; isRequired: boolean };
 type WorkflowApproval = { id: string; workflowStageId: string; approvalRuleId: string; approverRole: string; requiredPersonId: string | null; status: string; comment: string | null; submittedAt: Date | string; respondedAt: Date | string | null };
-type WorkspaceData = { episode: EpisodeData; schedule: Array<Row & { title: string; startsAt: Date | string; roomName: string | null }>; reviews: Array<Row & { title: string; version: number; status: string; approvalStatus?: string }>; deliverables: Array<Row & { name: string; destination: string; status: string }>; budget: Array<Row & { category: string; actualAmount: string | number; budgetedAmount: string | number }>; activity: Array<Row & { action: string; createdAt: Date | string }>; workflowStages: readonly WorkflowStage[]; workflowApprovalRules: WorkflowApprovalRule[]; workflowApprovals: WorkflowApproval[] };
+type WorkspaceData = { episode: EpisodeData; schedule: Array<Row & { title: string; startsAt: Date | string; roomName: string | null }>; budget: Array<Row & { category: string; actualAmount: string | number; budgetedAmount: string | number }>; activity: Array<Row & { action: string; createdAt: Date | string }>; workflowStages: readonly WorkflowStage[]; workflowApprovalRules: WorkflowApprovalRule[]; workflowApprovals: WorkflowApproval[] };
 
 export function EpisodeDetailTabs({ data }: { data: WorkspaceData }) {
   const [tab, setTab] = useState<TabName>("Overview");
@@ -36,8 +36,6 @@ function TabContent({ tab, data }: { tab: TabName; data: WorkspaceData }) {
   }
   if (tab === "Workflow") return <WorkflowPanel episodeId={data.episode.id} initialStageId={data.episode.workflowStageId} stages={data.workflowStages} rules={data.workflowApprovalRules} approvals={data.workflowApprovals} />;
   if (tab === "Bookings") return <List empty="No scheduled room bookings." items={data.schedule} render={(item) => <><b>{item.title}</b><span>{formatDate(item.startsAt)} · {item.roomName}</span></>} />;
-  if (tab === "Review Cuts") return <List empty="No review cuts have been created." items={data.reviews} render={(item) => <><b>{item.title} · v{item.version}</b><span className="capitalize">{item.status.replaceAll("_", " ")}</span></>} />;
-  if (tab === "Deliverables") return <List empty="No deliverables are scheduled." items={data.deliverables} render={(item) => <><b>{item.name}</b><span>{item.destination} · {item.status.replaceAll("_", " ")}</span></>} />;
   if (tab === "Budget") return <List empty="No budget lines are linked." items={data.budget} render={(item) => <><b>{item.category}</b><span>${Number(item.actualAmount).toLocaleString()} actual / ${Number(item.budgetedAmount).toLocaleString()} estimate</span></>} />;
   return <List empty="No recent activity." items={data.activity} render={(item) => <><b className="capitalize">{item.action.replaceAll(".", " ").replaceAll("_", " ")}</b><span>{formatDate(item.createdAt)}</span></>} />;
 }

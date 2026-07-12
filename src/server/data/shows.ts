@@ -5,7 +5,6 @@ import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { episodes, seasons, showTeamAssignments, shows } from "@/lib/db/schema";
 import { getDashboardData } from "./dashboard";
-import { listDeliverables } from "./deliverables";
 import { listEpisodes } from "./episodes";
 import { listTeam } from "./team";
 
@@ -57,25 +56,22 @@ export async function listShowTeam(organizationId: string, showId: string) {
 }
 
 export async function getShowWorkspace(organizationId: string, showId: string) {
-  const [show, episodeRows, availableTeam, team, deliverables, dashboard, showRows] = await Promise.all([
+  const [show, episodeRows, availableTeam, team, dashboard, showRows] = await Promise.all([
     getShow(organizationId, showId),
     listEpisodes(organizationId, showId),
     listTeam(organizationId),
     listShowTeam(organizationId, showId),
-    listDeliverables(organizationId),
     getDashboardData(organizationId),
     listShows(organizationId),
   ]);
   if (!show) return null;
 
-  const showDeliverables = deliverables.filter((deliverable) => deliverable.showTitle === show.title);
   return {
     show,
     seasons: (showRows.find((row) => row.id === showId)?.seasons ?? []).map((season) => ({ ...season, activeCount: season.activeEpisodeCount })),
     episodes: episodeRows,
     team,
     availableTeam,
-    deliverables: showDeliverables,
     activity: dashboard.activity,
   };
 }

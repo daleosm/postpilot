@@ -9,7 +9,6 @@ import {
   bookings,
   budgetLines,
   cateringRequests,
-  clientShares,
   episodes,
   organizationMembers,
   organizations,
@@ -22,7 +21,6 @@ import {
   serviceRates,
   showTeamAssignments,
   shows,
-  tasks,
   users,
   workflowStageApprovalRules,
   workflowStages,
@@ -369,17 +367,9 @@ async function seedTenant(tenant: TenantSeed) {
     { id: id(tenant.number, "2a", 2), organizationId: tenant.id, bookingId: bookingId(3), roomId: roomId(4), requestedByPersonId: byRole("sound_mixer"), requestType: "tea_coffee", item: "Oat flat white", quantity: 2, notes: "One decaf", requestedFor: at(2, 11), status: "acknowledged" },
   ]);
 
-  const client = byRole("client");
-  await db.insert(clientShares).values([
-    { id: id(tenant.number, "35", 1), organizationId: tenant.id, clientPersonId: client, episodeId: episodeId(2), canApprove: tenant.number === 2, createdByUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId },
-  ]);
   await db.insert(qcReports).values([{ id: id(tenant.number, "33", 1), organizationId: tenant.id, episodeId: episodeId(4), status: "failed", summary: "Flash-frame and caption timing failures require a corrected post package.", completedAt: at(-1, 16) }]);
   await db.insert(qcIssues).values([{ id: id(tenant.number, "34", 1), organizationId: tenant.id, qcReportId: id(tenant.number, "33", 1), code: "PHOTOSENS-01", severity: "high", description: "Photosensitivity warning at transition; regrade and rerun external QC.", timecodeSeconds: "1817.700", status: "open" }]);
 
-  await db.insert(tasks).values([
-    { id: id(tenant.number, "2f", 1), organizationId: tenant.id, showId: showId(1), episodeId: episodeId(1), workflowStageId: stageId(4), assigneeId: byRole("editor"), createdByUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId, title: "Address producer note at 25:34", status: "in_progress", priority: "high", dueAt: at(1, 16) },
-    { id: id(tenant.number, "2f", 2), organizationId: tenant.id, showId: showId(2), episodeId: episodeId(4), workflowStageId: stageId(19), assigneeId: byRole("qc"), createdByUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId, title: "Clear technical QC exception", status: "blocked", priority: "urgent", dueAt: at(2, 12) },
-  ]);
   const budgetCategories = ["Edit suite", "Editorial artists", "VFX", "Colour", "Sound", "QC", "Finalisation"];
   await db.insert(budgetLines).values(budgetCategories.map((category, index) => {
     const base = (index + 1) * 12500 * tenant.budgetProfile.multiplier;

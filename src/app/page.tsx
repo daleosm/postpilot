@@ -10,7 +10,6 @@ import {
   DollarSign,
   Film,
   Gauge,
-  ListChecks,
   Plus,
   RadioTower,
 } from "lucide-react";
@@ -23,22 +22,10 @@ import {
   getBudgetData,
   getDashboardData,
   getDemoCommandCenterData,
-  listDeliverables,
   listSchedule,
   listShows,
   listTeam,
 } from "@/server/data";
-
-const statusStyles: Record<string, string> = {
-  draft: "bg-[#eceae6] text-[#707572]",
-  in_review: "bg-[#e7ecfb] text-[#4c68ba]",
-  approved: "bg-[#e5f1eb] text-[#3d8065]",
-  changes_requested: "bg-[#f9e8dc] text-[#aa6338]",
-  qc: "bg-[#f8e8e2] text-[#a35d4a]",
-  ready: "bg-[#e6f0ed] text-[#3d7d70]",
-  in_progress: "bg-[#e8edf4] text-[#536a88]",
-  delivered: "bg-[#e4f0e8] text-[#3c785e]",
-};
 
 function formatDate(value: Date | string | null) {
   if (!value) return "—";
@@ -47,10 +34,6 @@ function formatDate(value: Date | string | null) {
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
-}
-
-function statusLabel(value: string) {
-  return value.replaceAll("_", " ");
 }
 
 export default async function DashboardPage() {
@@ -89,13 +72,12 @@ export default async function DashboardPage() {
   const weekStart = new Date(now);
   weekStart.setHours(0, 0, 0, 0);
 
-  const { dashboard, showRows, deliverables, schedule, budget, team, organizationName, isDemo } = screen;
+  const { dashboard, showRows, schedule, budget, team, organizationName, isDemo } = screen;
 
   const activeShows = showRows.filter((show) => show.seasons.some((season) => season.activeEpisodeCount > 0));
   const dueThisWeek = dashboard.episodes.filter((episode) => episode.deliveryDeadline && episode.deliveryDeadline >= weekStart && episode.deliveryDeadline <= endOfWeek);
   const lockedCuts = dashboard.episodes.filter((episode) => episode.status === "locked");
   const qcFailures = dashboard.episodes.filter((episode) => episode.qcStatus === "needs_attention");
-  const deliveryDeadlines = deliverables.filter((deliverable) => deliverable.status !== "delivered" && deliverable.dueAt).slice(0, 5);
   const budgetBurn = budget.totals.budgeted ? Math.round((budget.totals.actual / budget.totals.budgeted) * 100) : 0;
   const suiteHours = schedule.reduce<Record<string, number>>((total, booking) => {
     if (!booking.roomName) return total;
@@ -117,38 +99,15 @@ export default async function DashboardPage() {
         <div className="flex items-center gap-2"><Link href="/bookings" className="inline-flex h-10 items-center gap-2 rounded-md border border-[#e4e4df] bg-white px-3 text-sm font-medium text-[#4e5653] shadow-sm hover:bg-[#fafaf8]"><CalendarDays size={15} /> Next 7 days</Link><Link href="/bookings" className="inline-flex h-10 items-center gap-2 rounded-md bg-[#263130] px-3 text-sm font-medium text-white hover:bg-[#394542]"><Plus size={16} /> New work</Link></div>
       </section>
 
-      <section className="grid grid-cols-2 gap-3 xl:grid-cols-6">
+      <section className="grid grid-cols-2 gap-3 xl:grid-cols-5">
         <Metric href="/shows" label="Active shows" value={String(activeShows.length)} detail={`${showRows.length} total shows`} icon={<Film size={15} />} />
         <Metric href="/episodes" label="Episodes due" value={String(dueThisWeek.length)} detail="Next 7 days" icon={<Clock3 size={15} />} alert={dueThisWeek.length > 0} />
         <Metric href="/review" label="Locks awaiting approval" value={String(lockedCuts.length)} detail="Picture lock stage" icon={<CheckCircle2 size={15} />} />
         <Metric href="/episodes" label="QC failures" value={String(qcFailures.length)} detail="Need attention" icon={<CircleAlert size={15} />} alert={qcFailures.length > 0} />
-        <Metric href="/deliverables" label="Open deliveries" value={String(deliveryDeadlines.length)} detail="Targeting this week" icon={<ListChecks size={15} />} />
         <Metric href="/budget" label="Budget burn" value={`${budgetBurn}%`} detail={`${formatMoney(budget.totals.actual)} actual`} icon={<DollarSign size={15} />} alert={budgetBurn > 90} />
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.58fr)_minmax(330px,0.82fr)]">
-        <div className="panel overflow-hidden">
-          <div className="flex items-center justify-between border-b border-[#ebeae6] px-5 py-3.5">
-            <div>
-              <h2 className="text-sm font-semibold text-[#303534]">Delivery deadlines</h2>
-              <p className="mt-0.5 text-xs text-[#838886]">Network, streaming, M&E, captions, audio stems, and masters</p>
-            </div>
-            <Link href="/deliverables" className="flex items-center gap-1 text-xs font-medium text-[#526d69] hover:text-[#314a45]">Deliverables <ChevronRight size={14} /></Link>
-          </div>
-          <div className="divide-y divide-[#efeeea]">
-            {deliveryDeadlines.length ? deliveryDeadlines.map((delivery) => (
-              <Link href="/deliverables" key={delivery.id} className="grid gap-3 px-5 py-3 transition hover:bg-[#fbfbf9] sm:grid-cols-[minmax(0,1fr)_110px_110px] sm:items-center">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-[#363b3a]">{delivery.name}</p>
-                  <p className="mt-1 truncate text-xs text-[#838886]">{delivery.showTitle} · E{String(delivery.episodeNumber).padStart(2, "0")} {delivery.episodeTitle} · {delivery.destination}</p>
-                </div>
-                <span className={`w-fit rounded-full px-2 py-1 text-[10px] font-semibold capitalize ${statusStyles[delivery.status] ?? statusStyles.draft}`}>{statusLabel(delivery.status)}</span>
-                <p className="text-xs font-medium text-[#8c633f]">Due {formatDate(delivery.dueAt)}</p>
-              </Link>
-            )) : <EmptyRow label="No delivery deadlines in the selected period." />}
-          </div>
-        </div>
-
+      <section>
         <div className="panel p-5">
           <div className="flex items-center justify-between">
             <div><h2 className="text-sm font-semibold text-[#303534]">Suite utilization</h2><p className="mt-0.5 text-xs text-[#838886]">Booked hours · next 7 days</p></div>
@@ -221,15 +180,14 @@ async function getCommandCenterData() {
   endOfWeek.setDate(now.getDate() + 7);
   const weekStart = new Date(now);
   weekStart.setHours(0, 0, 0, 0);
-  const [dashboard, showRows, deliverables, schedule, budget, team] = await Promise.all([
+  const [dashboard, showRows, schedule, budget, team] = await Promise.all([
     getDashboardData(organizationId),
     listShows(organizationId),
-    listDeliverables(organizationId),
     listSchedule(organizationId, weekStart, endOfWeek),
     getBudgetData(organizationId),
     listTeam(organizationId),
   ]);
-  return { organizationName: context.organization.organizationName, dashboard, showRows, deliverables, schedule, budget, team, isDemo: false };
+  return { organizationName: context.organization.organizationName, dashboard, showRows, schedule, budget, team, isDemo: false };
 }
 
 function Metric({ href, label, value, detail, icon, alert = false }: { href: string; label: string; value: string; detail: string; icon: React.ReactNode; alert?: boolean }) {
@@ -255,8 +213,6 @@ function formatActivityDetail(metadata: unknown) {
 }
 
 function activityHref(entityType: string) {
-  if (entityType === "review_cut") return "/review";
-  if (entityType === "deliverable") return "/deliverables";
   if (entityType === "booking") return "/bookings";
   if (entityType === "budget_line") return "/budget";
   return "/episodes";
