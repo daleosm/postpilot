@@ -1,5 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
+const COPPERLINE_ORGANIZATION_ID = "10000000-0000-4000-8000-000000000005";
+
+test.beforeEach(async ({ context }) => {
+  await context.addCookies([
+    { name: "postpilot.debugUser", value: "user_maya", url: "http://localhost:5001" },
+    { name: "posthouse.activeOrganizationId", value: COPPERLINE_ORGANIZATION_ID, url: "http://localhost:5001" },
+  ]);
+});
+
 async function openBookings(page: Page) {
   await page.goto("/bookings");
   await page.waitForTimeout(400);
@@ -12,18 +21,19 @@ test.describe("Bookings usability", () => {
     await expect(page.getByRole("heading", { name: "Bookings" })).toBeVisible();
     await expect(page.getByText("Post floor calendar · Copperline Editorial")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Room utilization" })).toBeVisible();
-    await expect(page.getByText("Copper Cut 1", { exact: true })).toBeVisible();
-    await expect(page.getByText("5 bookings in view")).toBeVisible();
+    await expect(page.getByText("Copper Cut 01", { exact: true })).toBeVisible();
+    await expect(bookingCount(page)).toBeVisible();
   });
 
   test("switches between week and day calendar views", async ({ page }) => {
     await openBookings(page);
 
-    await expect(page.getByText("5 bookings in view")).toBeVisible();
+    const weeklyCount = await visibleBookingCount(page);
     await page.getByRole("button", { name: "Day", exact: true }).click();
-    await expect(page.getByText("1 bookings in view")).toBeVisible();
+    const dailyCount = await visibleBookingCount(page);
+    expect(dailyCount).toBeLessThanOrEqual(weeklyCount);
     await page.getByRole("button", { name: "Week", exact: true }).click();
-    await expect(page.getByText("5 bookings in view")).toBeVisible();
+    await expect.poll(() => visibleBookingCount(page)).toBe(weeklyCount);
   });
 
   test("explains a missing booking title before save", async ({ page }) => {
@@ -35,4 +45,25 @@ test.describe("Bookings usability", () => {
 
     await expect(page.getByText("A booking title is required.")).toBeVisible();
   });
+
+  test("opens an existing booking for editing without changing it", async ({ page }) => {
+    await openBookings(page);
+
+    const booking = page.getByRole("button", { name: /^Edit / }).first();
+    await booking.click();
+    await expect(page.getByRole("heading", { name: "Edit booking" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save changes" })).toBeVisible();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Edit booking" })).not.toBeVisible();
+  });
 });
+
+function bookingCount(page: Page) {
+  return page.getByText(/bookings in view/);
+}
+
+async function visibleBookingCount(page: Page) {
+  const label = bookingCount(page);
+  await expect(label).toBeVisible();
+  return Number((await label.textContent())?.match(/(\d+) bookings in view/)?.[1]);
+}

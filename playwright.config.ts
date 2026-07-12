@@ -17,7 +17,6 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       NEXT_DIST_DIR: ".next-playwright",
-      DATABASE_URL: process.env.DATABASE_URL ?? "",
     },
   },
 });

@@ -10,6 +10,7 @@ export async function listSchedule(organizationId: string, from: Date, to: Date)
   const db = getDb();
   return db.select({
     id: bookings.id, title: bookings.title, startsAt: bookings.startsAt, endsAt: bookings.endsAt, status: bookings.status, bookingType: bookings.bookingType,
+    roomId: bookings.roomId, episodeId: bookings.episodeId, personId: bookings.personId, notes: bookings.notes,
     roomName: rooms.name, roomType: rooms.type, episodeTitle: episodes.title, episodeNumber: episodes.number, personName: people.name,
   }).from(bookings)
     .leftJoin(rooms, and(eq(bookings.roomId, rooms.id), eq(rooms.organizationId, organizationId)))
