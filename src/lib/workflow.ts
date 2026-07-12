@@ -14,7 +14,7 @@ export const defaultEpisodicWorkflow = [
 
 const approvalPolicies = [
   [["editor", "Editor sign-off", true]],
-  [["post_supervisor", "Post supervisor sign-off", true]],
+  [["editor", "Editor sign-off", true]],
   [["director", "Director approval", true]],
   [["producer", "Producer approval", true], ["network", "Studio / network approval", false]],
   [["director", "Director approval", true], ["producer", "Producer approval", true]],

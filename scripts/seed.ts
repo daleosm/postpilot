@@ -43,7 +43,7 @@ const seedOrganizationIds = [
 
 const stages = [
   ["Assembly cut", "assembly_cut", "#71869a", "editor"],
-  ["Editor’s cut", "editor_cut", "#5f7ee6", "post_supervisor"],
+  ["Editor’s cut", "editor_cut", "#5f7ee6", "editor"],
   ["Director’s cut / review", "director_review", "#9b70e5", "director"],
   ["Producer, studio & network review", "producer_network_review", "#9c6fb9", "producer"],
   ["Fine cut & final approvals", "fine_cut_approvals", "#c58a52", "producer"],

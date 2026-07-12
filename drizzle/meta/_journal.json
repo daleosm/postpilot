@@ -127,6 +127,13 @@
       "when": 1783875035837,
       "tag": "0017_tough_boom_boom",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1783877000000,
+      "tag": "0018_editor_cut_editor_signoff",
+      "breakpoints": true
     }
   ]
 }
