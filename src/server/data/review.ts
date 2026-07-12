@@ -1,50 +1,68 @@
 import "server-only";
 
-import { and, asc, desc, eq, gt, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
 import { clientShares, episodeWorkflowApprovals, episodes, people, reviewCuts, reviewNotes, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
 
-/** Pending workflow approval actions assigned to the current tenant person. */
-export async function listWorkflowApprovalInbox(organizationId: string, userId: string) {
+/** Current workflow stages for which this user is the next configured sign-off. */
+export async function listWorkflowSignOffInbox(organizationId: string, userId: string) {
   const db = getDb();
   const [person] = await db.select({ id: people.id, role: people.role }).from(people)
     .where(and(eq(people.organizationId, organizationId), eq(people.userId, userId))).limit(1);
   if (!person) return [];
 
-  return db.select({
-    id: episodeWorkflowApprovals.id,
+  const stageRules = await db.select({
     episodeId: episodes.id,
+    showId: shows.id,
     workflowStageId: workflowStages.id,
     stageName: workflowStages.name,
     stagePosition: workflowStages.position,
-    approvalLabel: workflowStageApprovalRules.label,
-    approverRole: episodeWorkflowApprovals.approverRole,
+    ruleId: workflowStageApprovalRules.id,
+    signOffLabel: workflowStageApprovalRules.label,
+    approverRole: workflowStageApprovalRules.approverRole,
     approvalOrder: workflowStageApprovalRules.approvalOrder,
-    submittedAt: episodeWorkflowApprovals.submittedAt,
+    passedAt: episodes.updatedAt,
     showTitle: shows.title,
     episodeTitle: episodes.title,
     episodeNumber: episodes.number,
-    reviewCutId: reviewCuts.id,
-    reviewCutTitle: reviewCuts.title,
-    reviewCutVersion: reviewCuts.version,
-  }).from(episodeWorkflowApprovals)
-    .innerJoin(episodes, eq(episodeWorkflowApprovals.episodeId, episodes.id))
+  }).from(episodes)
     .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
     .innerJoin(shows, eq(seasons.showId, shows.id))
-    .innerJoin(workflowStages, eq(episodeWorkflowApprovals.workflowStageId, workflowStages.id))
-    .innerJoin(workflowStageApprovalRules, eq(episodeWorkflowApprovals.approvalRuleId, workflowStageApprovalRules.id))
-    .leftJoin(reviewCuts, and(eq(episodeWorkflowApprovals.reviewCutId, reviewCuts.id), eq(reviewCuts.organizationId, organizationId)))
+    .innerJoin(workflowStages, eq(episodes.workflowStageId, workflowStages.id))
+    .innerJoin(workflowStageApprovalRules, eq(workflowStageApprovalRules.workflowStageId, workflowStages.id))
     .where(and(
-      eq(episodeWorkflowApprovals.organizationId, organizationId),
-      eq(episodeWorkflowApprovals.requiredPersonId, person.id),
-      eq(episodeWorkflowApprovals.status, "pending"),
       eq(episodes.organizationId, organizationId),
       eq(seasons.organizationId, organizationId),
       eq(shows.organizationId, organizationId),
       eq(workflowStages.organizationId, organizationId),
       eq(workflowStageApprovalRules.organizationId, organizationId),
-    )).orderBy(asc(episodeWorkflowApprovals.submittedAt), asc(workflowStageApprovalRules.approvalOrder));
+    )).orderBy(asc(workflowStages.position), asc(workflowStageApprovalRules.approvalOrder));
+  if (!stageRules.length) return [];
+
+  const episodeIds = [...new Set(stageRules.map((rule) => rule.episodeId))];
+  const approvals = await db.select({ episodeId: episodeWorkflowApprovals.episodeId, workflowStageId: episodeWorkflowApprovals.workflowStageId, approvalRuleId: episodeWorkflowApprovals.approvalRuleId, status: episodeWorkflowApprovals.status })
+    .from(episodeWorkflowApprovals)
+    .where(and(eq(episodeWorkflowApprovals.organizationId, organizationId), inArray(episodeWorkflowApprovals.episodeId, episodeIds)));
+  const approvalsByStage = new Map<string, Set<string>>();
+  for (const approval of approvals) {
+    if (approval.status !== "approved") continue;
+    const key = `${approval.episodeId}:${approval.workflowStageId}`;
+    approvalsByStage.set(key, new Set([...(approvalsByStage.get(key) ?? []), approval.approvalRuleId]));
+  }
+  const roleMatches = (role: string) => role === person.role || (role === "director" && person.role === "client") || (role === "network" && ["network", "client"].includes(person.role));
+  const byStage = new Map<string, typeof stageRules>();
+  for (const rule of stageRules) {
+    const key = `${rule.episodeId}:${rule.workflowStageId}`;
+    byStage.set(key, [...(byStage.get(key) ?? []), rule]);
+  }
+
+  return [...byStage.entries()].flatMap(([, rules]) => {
+    const approved = approvalsByStage.get(`${rules[0].episodeId}:${rules[0].workflowStageId}`) ?? new Set<string>();
+    const nextRule = rules.find((rule) => !approved.has(rule.ruleId));
+    if (!nextRule || !roleMatches(nextRule.approverRole)) return [];
+    return [{ ...nextRule, id: `${nextRule.episodeId}:${nextRule.ruleId}` }];
+  });
 }
 
 export async function listReviewQueue(organizationId: string) {

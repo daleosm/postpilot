@@ -1,57 +1,55 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { Check, ExternalLink, RotateCcw } from "lucide-react";
+import { Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-export type WorkflowApprovalItem = {
+export type WorkflowSignOffItem = {
   id: string;
   episodeId: string;
+  showId: string;
   workflowStageId: string;
   stageName: string;
   stagePosition: number;
-  approvalLabel: string;
+  signOffLabel: string;
   approverRole: string;
   approvalOrder: number;
-  submittedAt: Date;
+  passedAt: Date;
   showTitle: string;
   episodeTitle: string;
   episodeNumber: number;
-  reviewCutId: string | null;
-  reviewCutTitle: string | null;
-  reviewCutVersion: number | null;
 };
 
-export function WorkflowApprovalQueue({ approvals, canOpenEpisodes }: { approvals: WorkflowApprovalItem[]; canOpenEpisodes: boolean }) {
+export function WorkflowSignOffQueue({ signOffs, canOpenEpisodes }: { signOffs: WorkflowSignOffItem[]; canOpenEpisodes: boolean }) {
   return (
     <section className="panel overflow-hidden">
-      <div className="border-b border-[#ebeae6] px-5 py-4"><h2 className="text-sm font-semibold text-[#343b38]">My approval queue</h2><p className="mt-1 text-xs text-[#858a87]">Only approval gates assigned to you appear here.</p></div>
+      <div className="border-b border-[#ebeae6] px-5 py-4"><h2 className="text-sm font-semibold text-[#343b38]">Awaiting my sign-off</h2><p className="mt-1 text-xs text-[#858a87]">Current workflow stages that have reached your configured sign-off role.</p></div>
       <div className="divide-y divide-[#efeeea]">
-        {approvals.map((approval) => <ApprovalRow key={approval.id} approval={approval} canOpenEpisodes={canOpenEpisodes} />)}
-        {!approvals.length && <p className="px-5 py-10 text-center text-sm text-[#858a87]">No workflow approvals are waiting for your sign-off.</p>}
+        {signOffs.map((signOff) => <SignOffRow key={signOff.id} signOff={signOff} canOpenEpisodes={canOpenEpisodes} />)}
+        {!signOffs.length && <p className="px-5 py-10 text-center text-sm text-[#858a87]">No workflow stages are waiting for your sign-off.</p>}
       </div>
     </section>
   );
 }
 
-function ApprovalRow({ approval, canOpenEpisodes }: { approval: WorkflowApprovalItem; canOpenEpisodes: boolean }) {
+function SignOffRow({ signOff: item, canOpenEpisodes }: { signOff: WorkflowSignOffItem; canOpenEpisodes: boolean }) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  async function respond(action: "approve" | "request_changes") {
+  async function signOff() {
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/episodes/${approval.episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId: approval.workflowStageId, action }) });
+      const response = await fetch(`/api/episodes/${item.episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId: item.workflowStageId, action: "sign_off" }) });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
         setMessage(body?.error ?? "Could not record your decision.");
         return;
       }
-      setMessage(action === "approve" ? "Approval recorded." : "Changes requested.");
+      setMessage(body?.stageComplete ? "Stage fully signed off." : "Sign-off recorded.");
       router.refresh();
     } catch {
       setMessage("Could not record your decision.");
@@ -64,21 +62,18 @@ function ApprovalRow({ approval, canOpenEpisodes }: { approval: WorkflowApproval
     <article className="px-5 py-4">
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
         <div className="min-w-0">
-          <p className="text-xs font-medium text-[#617b75]">{approval.showTitle} · E{String(approval.episodeNumber).padStart(2, "0")} {approval.episodeTitle}</p>
-          <h3 className="mt-1 text-sm font-semibold text-[#3c4440]">{approval.stageName}</h3>
-          <p className="mt-1 text-xs text-[#6e7772]">{approval.approvalLabel} · Step {approval.approvalOrder} · Requested {formatDate(approval.submittedAt)}</p>
+          <p className="text-xs font-medium text-[#617b75]">{item.showTitle} · E{String(item.episodeNumber).padStart(2, "0")} {item.episodeTitle}</p>
+          <h3 className="mt-1 text-sm font-semibold text-[#3c4440]">{item.stageName}</h3>
+          <p className="mt-1 text-xs text-[#6e7772]">{item.signOffLabel} · Step {item.approvalOrder} · Current since {formatDate(item.passedAt)}</p>
           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-            {canOpenEpisodes && <Link href={`/episodes/${approval.episodeId}`} className="font-medium text-[#54776d] hover:underline">Open workflow</Link>}
-            {approval.reviewCutId && <Link href={`/review/${approval.reviewCutId}`} className="inline-flex items-center gap-1 font-medium text-[#54776d] hover:underline"><ExternalLink size={12} /> Evidence: v{approval.reviewCutVersion} · {approval.reviewCutTitle}</Link>}
-            {!approval.reviewCutId && <span className="text-[#858a87]">No review-cut evidence attached</span>}
+            {canOpenEpisodes && <Link href={`/episodes/${item.episodeId}`} className="font-medium text-[#54776d] hover:underline">Open workflow</Link>}
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Button variant="tertiary" onClick={() => respond("request_changes")} isDisabled={saving} className="border border-[#e5d4c9] bg-[#fffaf7] text-[#9b5d41]"><RotateCcw size={14} /> Request changes</Button>
-          <Button variant="primary" onClick={() => respond("approve")} isDisabled={saving} className="bg-[#3f7563] text-white"><Check size={15} /> {saving ? "Saving…" : "Approve"}</Button>
+          <Button variant="primary" onClick={signOff} isDisabled={saving} className="bg-[#3f7563] text-white"><Check size={15} /> {saving ? "Saving…" : "Sign off"}</Button>
         </div>
       </div>
-      {message && <p role="status" className={`mt-3 text-xs ${message === "Approval recorded." ? "text-[#3f7563]" : "text-[#a35e41]"}`}>{message}</p>}
+      {message && <p role="status" className={`mt-3 text-xs ${message.includes("recorded") || message.includes("signed off") ? "text-[#3f7563]" : "text-[#a35e41]"}`}>{message}</p>}
     </article>
   );
 }

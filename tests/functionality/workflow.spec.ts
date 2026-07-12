@@ -119,15 +119,18 @@ test.describe("Configurable workflow functionality", () => {
     await expect(policyPreview.getByText("Creative gate approval", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Update stage", exact: true }).click();
 
-    await expect(page.getByRole("status")).toContainText("Complete the current approval gate first.");
+    await expect(page.getByRole("status")).toContainText("Complete the current sign-off first.");
   });
 
-  test("records a direct role sign-off and makes the next configured stage actionable", async ({ page }) => {
-    await openWorkflow(page);
-
+  test("shows the current workflow on Review when it is this user's turn to sign off", async ({ page }) => {
+    await activateWorkflowLab(page);
+    await page.goto("/review");
+    await expect(page.getByRole("heading", { name: "Awaiting my sign-off" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Editorial handoff" })).toBeVisible();
     await page.getByRole("button", { name: "Sign off", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Stage fully signed off.");
+    await expect(page.getByRole("heading", { name: "Editorial handoff" })).not.toBeVisible();
 
+    await openWorkflow(page);
     await page.getByLabel("Select workflow stage").selectOption(lockStageId);
     await expect(page.getByRole("button", { name: "Update stage", exact: true })).toBeEnabled();
   });

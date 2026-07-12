@@ -1,10 +1,11 @@
 import { ChevronRight, FileCheck2, MessageSquareText } from "lucide-react";
 import Link from "next/link";
 
+import { WorkflowSignOffQueue } from "@/components/workflow-approval-queue";
 import { getActiveOrganizationContext, getActiveShow } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { can, getCurrentPerson, roleHome } from "@/lib/permissions";
-import { listReviewQueueForUser } from "@/server/data";
+import { listReviewQueueForUser, listWorkflowSignOffInbox } from "@/server/data";
 import { redirect } from "next/navigation";
 
 type ReviewItem = {
@@ -25,8 +26,11 @@ export default async function ReviewPage() {
   const [mayManage, mayApprove, mayAddNotes, person] = await Promise.all([can("manage_reviews"), can("approve_reviews"), can("update_notes"), getCurrentPerson()]);
   if (!(mayManage || mayApprove || mayAddNotes)) redirect(roleHome(person?.role));
   const activeShow = await getActiveShow();
-  const { organizationName, items } = await getReviewData();
+  const [reviewData, context] = await Promise.all([getReviewData(), getActiveOrganizationContext()]);
+  const { organizationName, items } = reviewData;
   const reviewItems = activeShow ? items.filter((item) => item.showId === activeShow.id) : items;
+  const signOffs = context?.organization ? await listWorkflowSignOffInbox(context.organization.organizationId, context.userId) : [];
+  const visibleSignOffs = activeShow ? signOffs.filter((item) => item.showId === activeShow.id) : signOffs;
 
   return (
     <div className="space-y-5">
@@ -38,6 +42,8 @@ export default async function ReviewPage() {
         </div>
         <span className="inline-flex items-center gap-2 text-xs font-medium text-[#5e746c]"><FileCheck2 size={15} /> {reviewItems.length} item{reviewItems.length === 1 ? "" : "s"}</span>
       </header>
+
+      <WorkflowSignOffQueue signOffs={visibleSignOffs} canOpenEpisodes={mayManage} />
 
       <section className="panel overflow-hidden">
         <div className="border-b border-[#ebeae6] px-5 py-4">

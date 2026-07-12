@@ -4,7 +4,7 @@ export { getDashboardData } from "./dashboard";
 export { getDemoCommandCenterData } from "./demo-dashboard";
 export { listDeliverables } from "./deliverables";
 export { getEpisode, getEpisodeWorkspace, listEpisodes } from "./episodes";
-export { getReviewCutWorkspace, listReviewCuts, listReviewCutsForUser, listReviewNotes, listReviewQueue, listReviewQueueForUser, listWorkflowApprovalInbox } from "./review";
+export { getReviewCutWorkspace, listReviewCuts, listReviewCutsForUser, listReviewNotes, listReviewQueue, listReviewQueueForUser, listWorkflowSignOffInbox } from "./review";
 export { getScheduleResources, listRooms, listSchedule } from "./schedule";
 export { getShow, getShowWorkspace, listShowTeam, listShows } from "./shows";
 export { listTeam } from "./team";
