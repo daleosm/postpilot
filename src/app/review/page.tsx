@@ -3,7 +3,9 @@ import Link from "next/link";
 
 import { getActiveOrganizationContext, getActiveShow } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
+import { can, getCurrentPerson, roleHome } from "@/lib/permissions";
 import { listReviewQueueForUser } from "@/server/data";
+import { redirect } from "next/navigation";
 
 type ReviewItem = {
   id: string;
@@ -20,6 +22,8 @@ type ReviewItem = {
 };
 
 export default async function ReviewPage() {
+  const [mayManage, mayApprove, mayAddNotes, person] = await Promise.all([can("manage_reviews"), can("approve_reviews"), can("update_notes"), getCurrentPerson()]);
+  if (!(mayManage || mayApprove || mayAddNotes)) redirect(roleHome(person?.role));
   const activeShow = await getActiveShow();
   const { organizationName, items } = await getReviewData();
   const reviewItems = activeShow ? items.filter((item) => item.showId === activeShow.id) : items;
