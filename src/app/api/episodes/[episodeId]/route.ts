@@ -4,13 +4,13 @@ import { z } from "zod";
 
 import { getDb } from "@/lib/db";
 import { activityLog, episodeWorkflowApprovals, episodeWorkflowTracks, episodes, people, postWorkflows, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
-import { can, isAssignedToEpisode } from "@/lib/permissions";
+import { can } from "@/lib/permissions";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { defaultEpisodicApprovalRules, defaultEpisodicWorkflow, statusForWorkflowKey } from "@/lib/workflow";
 
 const stageUpdateSchema = z.object({ workflowStageId: z.string().min(1) });
-const approvalActionSchema = z.object({ workflowStageId: z.string().min(1), action: z.enum(["submit", "approve", "request_changes"]), comment: z.string().trim().max(2000).optional(), assignments: z.array(z.object({ ruleId: z.string().uuid(), personId: z.string().uuid() })).optional() });
+const approvalActionSchema = z.object({ workflowStageId: z.string().min(1), action: z.literal("sign_off"), comment: z.string().trim().max(2000).optional() });
 const DEBUG_WORKFLOW_COOKIE = "postpilot.debugEpisodeWorkflows";
 const DEBUG_WORKFLOW_APPROVALS_COOKIE = "postpilot.debugWorkflowApprovals";
 
@@ -60,7 +60,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ep
 
 export async function POST(request: Request, { params }: { params: Promise<{ episodeId: string }> }) {
   const parsed = approvalActionSchema.safeParse(await request.json());
-  if (!parsed.success) return NextResponse.json({ error: "Choose a valid workflow approval action." }, { status: 400 });
+  if (!parsed.success) return NextResponse.json({ error: "Choose a valid workflow sign-off action." }, { status: 400 });
   const { episodeId } = await params;
   if (isDebugDemoMode) {
     const stored = request.headers.get("cookie")?.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${DEBUG_WORKFLOW_APPROVALS_COOKIE}=`))?.slice(DEBUG_WORKFLOW_APPROVALS_COOKIE.length + 1);
@@ -68,14 +68,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ epi
     const stageRules = defaultEpisodicApprovalRules.filter((rule) => rule.workflowStageId === parsed.data.workflowStageId).sort((a, b) => a.approvalOrder - b.approvalOrder);
     if (!stageRules.length) return NextResponse.json({ error: "Workflow stage not found." }, { status: 404 });
     const stageState = state[episodeId]?.[parsed.data.workflowStageId] ?? {};
-    if (parsed.data.action === "submit") stageRules.forEach((rule) => { stageState[rule.id] ??= "pending"; });
-    else {
-      const target = stageRules.find((rule) => stageState[rule.id] === "pending");
-      if (!target) return NextResponse.json({ error: "All expected approvals are already recorded." }, { status: 409 });
-      stageState[target.id] = parsed.data.action === "approve" ? "approved" : "changes_requested";
-    }
+    const target = stageRules.find((rule) => stageState[rule.id] !== "approved");
+    if (!target) return NextResponse.json({ error: "All configured sign-offs are already recorded." }, { status: 409 });
+    stageState[target.id] = "approved";
     state[episodeId] ??= {}; state[episodeId][parsed.data.workflowStageId] = stageState;
-    const response = NextResponse.json({ ok: true, debug: true, action: parsed.data.action });
+    const response = NextResponse.json({ ok: true, debug: true, action: parsed.data.action, approvalRuleId: target.id, stageComplete: stageRules.every((rule) => stageState[rule.id] === "approved") });
     response.cookies.set(DEBUG_WORKFLOW_APPROVALS_COOKIE, JSON.stringify(state), { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 12 });
     return response;
   }
@@ -85,40 +82,36 @@ export async function POST(request: Request, { params }: { params: Promise<{ epi
   const organizationId = context.organization.organizationId;
   const db = getDb();
   const [[episode], [stage], [person]] = await Promise.all([
-    db.select({ id: episodes.id, qcStatus: episodes.qcStatus }).from(episodes).innerJoin(seasons, eq(episodes.seasonId, seasons.id)).innerJoin(shows, eq(seasons.showId, shows.id)).where(and(eq(episodes.id, episodeId), eq(episodes.organizationId, context.organization.organizationId), eq(seasons.organizationId, context.organization.organizationId), eq(shows.organizationId, context.organization.organizationId))).limit(1),
+    db.select({ id: episodes.id, workflowStageId: episodes.workflowStageId, qcStatus: episodes.qcStatus }).from(episodes).innerJoin(seasons, eq(episodes.seasonId, seasons.id)).innerJoin(shows, eq(seasons.showId, shows.id)).where(and(eq(episodes.id, episodeId), eq(episodes.organizationId, context.organization.organizationId), eq(seasons.organizationId, context.organization.organizationId), eq(shows.organizationId, context.organization.organizationId))).limit(1),
     db.select({ id: workflowStages.id, name: workflowStages.name, key: workflowStages.key }).from(workflowStages).innerJoin(postWorkflows, eq(workflowStages.workflowId, postWorkflows.id)).where(and(eq(workflowStages.id, parsed.data.workflowStageId), eq(workflowStages.organizationId, context.organization.organizationId), eq(postWorkflows.organizationId, context.organization.organizationId))).limit(1),
     db.select({ id: people.id, role: people.role }).from(people).where(and(eq(people.organizationId, context.organization.organizationId), eq(people.userId, context.userId))).limit(1),
   ]);
   if (!episode || !stage) return NextResponse.json({ error: "Episode or workflow stage not found." }, { status: 404 });
-
-  if (parsed.data.action === "submit") {
-    const mayManage = await can("manage_shows");
-    if (!mayManage && (!(await can("update_tasks")) || !(await isAssignedToEpisode(episodeId)))) return NextResponse.json({ error: "Only the assigned post team can submit a stage for approval." }, { status: 403 });
-    const rules = await db.select().from(workflowStageApprovalRules).where(and(eq(workflowStageApprovalRules.organizationId, organizationId), eq(workflowStageApprovalRules.workflowStageId, stage.id)));
-    if (!rules.length) return NextResponse.json({ error: "This workflow stage has no approval policy." }, { status: 409 });
-    const assignments = new Map((parsed.data.assignments ?? []).map((assignment) => [assignment.ruleId, assignment.personId]));
-    const assignees = assignments.size ? await db.select({ id: people.id, role: people.role }).from(people).where(eq(people.organizationId, context.organization.organizationId)) : [];
-    const roleMatches = (requiredRole: string, actualRole: string) => requiredRole === actualRole || (requiredRole === "director" && actualRole === "client") || (requiredRole === "network" && ["network", "client"].includes(actualRole));
-    if (rules.some((rule) => !assignments.get(rule.id) || !assignees.some((person) => person.id === assignments.get(rule.id) && roleMatches(rule.approverRole, person.role)))) return NextResponse.json({ error: "Assign a valid named approver to every sign-off before submitting." }, { status: 400 });
-    await db.insert(episodeWorkflowApprovals).values(rules.map((rule) => ({ organizationId, episodeId, workflowStageId: stage.id, approvalRuleId: rule.id, approverRole: rule.approverRole, requiredPersonId: assignments.get(rule.id) ?? null, comment: null }))).onConflictDoNothing();
-    await db.insert(activityLog).values({ organizationId: context.organization.organizationId, actorUserId: context.userId, action: "workflow.submitted_for_approval", entityType: "episode", entityId: episodeId, metadata: { stage: stage.name } });
-    return NextResponse.json({ ok: true, status: "ready_for_approval" });
-  }
+  if (episode.workflowStageId !== stage.id) return NextResponse.json({ error: "Only the current workflow stage can be signed off." }, { status: 409 });
 
   if (!person) return NextResponse.json({ error: "Your account is not set up as a named workflow approver." }, { status: 403 });
-  const approvals = await db.select({ id: episodeWorkflowApprovals.id, approverRole: episodeWorkflowApprovals.approverRole, requiredPersonId: episodeWorkflowApprovals.requiredPersonId, status: episodeWorkflowApprovals.status, approvalOrder: workflowStageApprovalRules.approvalOrder, isRequired: workflowStageApprovalRules.isRequired })
-    .from(episodeWorkflowApprovals).innerJoin(workflowStageApprovalRules, eq(episodeWorkflowApprovals.approvalRuleId, workflowStageApprovalRules.id))
-    .where(and(eq(episodeWorkflowApprovals.organizationId, organizationId), eq(workflowStageApprovalRules.organizationId, organizationId), eq(episodeWorkflowApprovals.episodeId, episodeId), eq(episodeWorkflowApprovals.workflowStageId, stage.id)));
+  const [rules, approvals] = await Promise.all([
+    db.select({ id: workflowStageApprovalRules.id, approverRole: workflowStageApprovalRules.approverRole, approvalOrder: workflowStageApprovalRules.approvalOrder, isRequired: workflowStageApprovalRules.isRequired })
+      .from(workflowStageApprovalRules).where(and(eq(workflowStageApprovalRules.organizationId, organizationId), eq(workflowStageApprovalRules.workflowStageId, stage.id))).orderBy(workflowStageApprovalRules.approvalOrder),
+    db.select({ id: episodeWorkflowApprovals.id, approvalRuleId: episodeWorkflowApprovals.approvalRuleId, status: episodeWorkflowApprovals.status })
+      .from(episodeWorkflowApprovals).where(and(eq(episodeWorkflowApprovals.organizationId, organizationId), eq(episodeWorkflowApprovals.episodeId, episodeId), eq(episodeWorkflowApprovals.workflowStageId, stage.id))),
+  ]);
+  if (!rules.length) return NextResponse.json({ error: "This workflow stage has no configured sign-offs." }, { status: 409 });
   const roleMatches = (requiredRole: string) => requiredRole === person.role || (requiredRole === "director" && person.role === "client") || (requiredRole === "network" && ["network", "client"].includes(person.role));
-  const candidate = approvals.sort((a, b) => a.approvalOrder - b.approvalOrder).find((approval) => approval.status === "pending" && roleMatches(approval.approverRole) && approval.requiredPersonId === person.id);
-  if (!candidate) return NextResponse.json({ error: "You are not an expected approver for this stage, or your approval has already been recorded." }, { status: 403 });
-  if (parsed.data.action === "approve" && approvals.some((approval) => approval.approvalOrder < candidate.approvalOrder && approval.status !== "approved")) return NextResponse.json({ error: "Complete the earlier sign-offs first." }, { status: 409 });
-  await db.update(episodeWorkflowApprovals).set({ status: parsed.data.action === "approve" ? "approved" : "changes_requested", approverPersonId: person?.id ?? null, comment: parsed.data.comment || null, respondedAt: new Date(), updatedAt: new Date() }).where(and(eq(episodeWorkflowApprovals.id, candidate.id), eq(episodeWorkflowApprovals.organizationId, organizationId)));
-  const stageWillBeApproved = parsed.data.action === "approve" && approvals.every((approval) => approval.id === candidate.id || approval.status === "approved");
+  const candidate = rules.find((rule) => !approvals.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved") && roleMatches(rule.approverRole));
+  if (!candidate) return NextResponse.json({ error: "Your role is not the next required sign-off for this stage, or it has already been recorded." }, { status: 403 });
+  if (rules.some((rule) => rule.approvalOrder < candidate.approvalOrder && !approvals.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"))) return NextResponse.json({ error: "Complete the earlier sign-offs first." }, { status: 409 });
+  const existingApproval = approvals.find((approval) => approval.approvalRuleId === candidate.id);
+  if (existingApproval) {
+    await db.update(episodeWorkflowApprovals).set({ status: "approved", requiredPersonId: person.id, approverPersonId: person.id, comment: parsed.data.comment || null, respondedAt: new Date(), updatedAt: new Date() }).where(and(eq(episodeWorkflowApprovals.id, existingApproval.id), eq(episodeWorkflowApprovals.organizationId, organizationId)));
+  } else {
+    await db.insert(episodeWorkflowApprovals).values({ organizationId, episodeId, workflowStageId: stage.id, approvalRuleId: candidate.id, approverRole: candidate.approverRole, requiredPersonId: person.id, approverPersonId: person.id, status: "approved", comment: parsed.data.comment || null, respondedAt: new Date() });
+  }
+  const stageWillBeApproved = rules.every((rule) => rule.id === candidate.id || approvals.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"));
   if (stageWillBeApproved && ["vfx_graphics_titles", "online_conform", "colour_grade", "sound_editorial_adr_foley_music", "final_mix"].includes(stage.key)) {
     await db.insert(episodeWorkflowTracks).values({ organizationId: context.organization.organizationId, episodeId, workflowStageId: stage.id, status: "approved", completedAt: new Date() })
       .onConflictDoUpdate({ target: [episodeWorkflowTracks.episodeId, episodeWorkflowTracks.workflowStageId], set: { status: "approved", completedAt: new Date(), updatedAt: new Date() } });
   }
-  await db.insert(activityLog).values({ organizationId: context.organization.organizationId, actorUserId: context.userId, action: parsed.data.action === "approve" ? "workflow.approved" : "workflow.changes_requested", entityType: "episode", entityId: episodeId, metadata: { stage: stage.name, approverRole: candidate.approverRole } });
-  return NextResponse.json({ ok: true, status: parsed.data.action === "approve" ? "approved" : "changes_requested" });
+  await db.insert(activityLog).values({ organizationId: context.organization.organizationId, actorUserId: context.userId, action: "workflow.signed_off", entityType: "episode", entityId: episodeId, metadata: { stage: stage.name, approverRole: candidate.approverRole } });
+  return NextResponse.json({ ok: true, status: "approved", approvalRuleId: candidate.id, stageComplete: stageWillBeApproved });
 }

@@ -65,7 +65,7 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) return setMessage(body?.error ?? "Could not save the workflow.");
-      setMessage("Workflow saved. New approval submissions use these rules.");
+      setMessage("Workflow saved. New sign-offs use these roles.");
       router.refresh();
     } catch {
       setMessage("Could not save the workflow.");
@@ -76,12 +76,12 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
 
   return (
     <div className="space-y-5">
-      <p className="rounded-lg border border-[#e5e6e1] bg-[#fafaf8] px-4 py-3 text-xs leading-5 text-[#7d837f]">This is your organization’s single workflow. Stages are sequential by default; allow an early start only where your facility has agreed that work can begin before its normal turn. Existing submitted approvals remain as recorded.</p>
+      <p className="rounded-lg border border-[#e5e6e1] bg-[#fafaf8] px-4 py-3 text-xs leading-5 text-[#7d837f]">This is your organization’s single workflow. Stages are sequential by default; allow an early start only where your facility has agreed that work can begin before its normal turn. Existing sign-offs remain as recorded.</p>
 
       <section className="panel overflow-hidden">
         <div className="border-b border-[#ebeae6] px-5 py-4">
-          <h2 className="text-sm font-semibold text-[#353b39]">Workflow stages and approval gates</h2>
-          <p className="mt-1 text-xs text-[#858a87]">Drag stages to set the order. Add as many sign-off rows as this post house needs for each stage.</p>
+          <h2 className="text-sm font-semibold text-[#353b39]">Workflow stages and sign-off roles</h2>
+          <p className="mt-1 text-xs text-[#858a87]">Drag stages to set the order. Add as many role-based sign-offs as this post house needs for each stage.</p>
         </div>
         <div className="divide-y divide-[#efeeea]">
           {[...stages].sort((a, b) => a.position - b.position).map((stage) => {
@@ -95,8 +95,8 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
                 </div>
                 {stage.canStartEarly && <p className="mt-2 text-xs leading-5 text-[#68716d]">This stage may start out of sequence.</p>}
                 <div className="mt-4 rounded-lg bg-[#fafaf8] p-3">
-                  <div className="flex items-center justify-between gap-3"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7d837f]">Approval policy</p><Button size="sm" variant="tertiary" onClick={() => addApprovalRule(stage.id)} className="h-7 border border-[#dfe5e1] bg-white px-2 text-xs text-[#45685e]"><Plus size={13} /> Add sign-off</Button></div>
-                  <p className="mt-1 text-xs text-[#858a87]">Each row can be assigned to a different person when the stage is submitted.</p>
+                  <div className="flex items-center justify-between gap-3"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7d837f]">Sign-off roles</p><Button size="sm" variant="tertiary" onClick={() => addApprovalRule(stage.id)} className="h-7 border border-[#dfe5e1] bg-white px-2 text-xs text-[#45685e]"><Plus size={13} /> Add sign-off</Button></div>
+                  <p className="mt-1 text-xs text-[#858a87]">The matching role records its own sign-off directly when this stage is current.</p>
                   {stageRules.map((rule, index) => (
                     <div key={rule.id} className="mt-2 grid gap-2 sm:grid-cols-[28px_minmax(170px,1fr)_28px] sm:items-center">
                       <span className="text-center text-xs font-semibold text-[#7c837f]">{index + 1}</span>
@@ -104,7 +104,7 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
                       <button type="button" onClick={() => removeApprovalRule(rule.id, stage.id)} className="rounded p-1 text-[#8b918e] hover:bg-[#f3e9e4] hover:text-[#a35e41]" aria-label={`Remove sign-off ${index + 1}`}><Trash2 size={14} /></button>
                     </div>
                   ))}
-                  {!stageRules.length && <p className="mt-2 text-xs text-[#858a87]">No approval roles configured for this stage.</p>}
+                  {!stageRules.length && <p className="mt-2 text-xs text-[#858a87]">No sign-off roles configured for this stage.</p>}
                 </div>
               </div>
             );

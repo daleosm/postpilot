@@ -106,7 +106,7 @@ test.describe("Configurable workflow functionality", () => {
     await expect(stages.nth(3)).toContainText("Graphics finishing");
   });
 
-  test("enforces normal stage order and blocks the next stage until the current gate is approved", async ({ page }) => {
+  test("enforces normal stage order and blocks the next stage until the current sign-off is complete", async ({ page }) => {
     await openWorkflow(page);
 
     await page.getByLabel("Select workflow stage").selectOption(deliveryPrepStageId);
@@ -114,7 +114,7 @@ test.describe("Configurable workflow functionality", () => {
     await expect(page.getByRole("status")).toContainText("Workflow stages normally proceed in order.");
 
     await page.getByLabel("Select workflow stage").selectOption(lockStageId);
-    const policyPreview = page.getByText("Selected-stage approval policy · Creative sign-off").locator("..");
+    const policyPreview = page.getByText("Selected-stage sign-off roles · Creative sign-off").locator("..");
     await expect(policyPreview).toBeVisible();
     await expect(policyPreview.getByText("Creative gate approval", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Update stage", exact: true }).click();
@@ -122,25 +122,12 @@ test.describe("Configurable workflow functionality", () => {
     await expect(page.getByRole("status")).toContainText("Complete the current approval gate first.");
   });
 
-  test("requires a named approver, records that approval, and makes the next configured stage actionable", async ({ page }) => {
+  test("records a direct role sign-off and makes the next configured stage actionable", async ({ page }) => {
     await openWorkflow(page);
 
-    await page.getByRole("button", { name: "Submit for approval", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Assign a valid named approver");
+    await page.getByRole("button", { name: "Sign off", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("Stage fully signed off.");
 
-    await page.getByLabel("Editorial lead approval").selectOption(mayaPersonId);
-    await page.getByRole("button", { name: "Submit for approval", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Stage submitted for approval.");
-
-    await page.goto("/review");
-    await expect(page.getByRole("heading", { name: "Review" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Editorial handoff" })).toBeVisible();
-    await expect(page.getByText("Editorial lead approval")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Approve", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Approval recorded.");
-
-    await openWorkflow(page);
     await page.getByLabel("Select workflow stage").selectOption(lockStageId);
     await expect(page.getByRole("button", { name: "Update stage", exact: true })).toBeEnabled();
   });
