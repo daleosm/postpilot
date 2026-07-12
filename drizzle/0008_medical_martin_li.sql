@@ -1,0 +1,1 @@
+ALTER TABLE "review_cuts" ADD COLUMN "external_url" text;

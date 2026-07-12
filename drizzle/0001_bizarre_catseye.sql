@@ -1,0 +1,2 @@
+CREATE TYPE "public"."booking_type" AS ENUM('edit', 'color', 'mix', 'qc', 'client_review', 'ingest', 'conform');--> statement-breakpoint
+ALTER TABLE "bookings" ADD COLUMN "booking_type" "booking_type" DEFAULT 'edit' NOT NULL;

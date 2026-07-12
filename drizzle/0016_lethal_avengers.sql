@@ -1,0 +1,1 @@
+ALTER TABLE "people" ALTER COLUMN "role" SET DATA TYPE text;

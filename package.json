@@ -1,0 +1,53 @@
+{
+  "name": "posthouse",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test:e2e": "playwright test",
+    "test:shows": "playwright test tests/usability/shows.spec.ts",
+    "test:shows-isolation": "playwright test tests/isolation/shows-tenancy.spec.ts",
+    "test:episodes": "playwright test tests/usability/episodes.spec.ts",
+    "test:episodes-isolation": "playwright test tests/isolation/episodes-tenancy.spec.ts",
+    "test:bookings": "playwright test tests/usability/bookings.spec.ts",
+    "test:bookings-isolation": "playwright test tests/isolation/bookings-tenancy.spec.ts",
+    "test:review": "playwright test tests/usability/review.spec.ts",
+    "test:review-isolation": "playwright test tests/isolation/review-tenancy.spec.ts",
+    "test:workflow": "playwright test tests/functionality/workflow.spec.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed": "tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "@auth/drizzle-adapter": "^1.11.2",
+    "@heroui/react": "^3.2.2",
+    "@heroui/theme": "^2.4.26",
+    "@hookform/resolvers": "^5.4.0",
+    "drizzle-orm": "^0.45.2",
+    "framer-motion": "^12.42.2",
+    "lucide-react": "^1.24.0",
+    "next": "16.2.10",
+    "next-auth": "^4.24.14",
+    "postgres": "^3.4.9",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-hook-form": "^7.81.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.0",
+    "typescript": "^5"
+  }
+}

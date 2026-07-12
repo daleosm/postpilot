@@ -1,0 +1,3 @@
+ALTER TYPE "public"."person_role" ADD VALUE 'director' BEFORE 'network';--> statement-breakpoint
+ALTER TABLE "episode_workflow_approvals" ADD COLUMN "required_person_id" uuid;--> statement-breakpoint
+ALTER TABLE "episode_workflow_approvals" ADD CONSTRAINT "episode_workflow_approvals_required_person_id_people_id_fk" FOREIGN KEY ("required_person_id") REFERENCES "public"."people"("id") ON DELETE set null ON UPDATE no action;

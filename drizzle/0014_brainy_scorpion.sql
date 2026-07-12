@@ -1,0 +1,1 @@
+ALTER TABLE "workflow_stages" ADD COLUMN "can_start_early" boolean DEFAULT false NOT NULL;
