@@ -166,7 +166,7 @@ export default async function DashboardPage() {
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.12fr)_minmax(0,1.12fr)_minmax(300px,0.76fr)]">
         <div className="panel overflow-hidden">
-          <SectionHeading title="Approval & QC queue" detail="Picture locks and technical exceptions" action="Review queue" href="/review" />
+          <SectionHeading title="Approval & QC queue" detail="Picture locks and technical exceptions" action="Approval queue" href="/review" />
           <div className="divide-y divide-[#efeeea]">
             {[...lockedCuts, ...qcFailures].slice(0, 5).map((episode) => (
               <Link href={`/episodes/${episode.id}`} key={`${episode.id}-${episode.qcStatus}`} className="flex items-center gap-3 px-5 py-3 transition hover:bg-[#fbfbf9]">

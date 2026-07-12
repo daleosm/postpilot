@@ -9,7 +9,7 @@ test.describe("Review usability", () => {
   test("shows the signer-specific workflow approval inbox", async ({ page }) => {
     await openReview(page);
 
-    await expect(page.getByRole("heading", { name: "Review" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Approvals" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "My approval queue" })).toBeVisible();
     await expect(page.getByText("Only approval gates assigned to you appear here.")).toBeVisible();
   });

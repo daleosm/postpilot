@@ -36,9 +36,9 @@ export default async function ReviewPage() {
     <div className="space-y-5">
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
-          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[#7c827f]">Review items · {organizationName}</p>
-          <h1 className="mt-2 text-[27px] font-semibold tracking-[-0.045em] text-[#202524]">Review</h1>
-          <p className="mt-1 text-sm text-[#747977]">Open a review item to add, resolve, and track feedback.</p>
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[#7c827f]">Approvals · {organizationName}</p>
+          <h1 className="mt-2 text-[27px] font-semibold tracking-[-0.045em] text-[#202524]">Approvals</h1>
+          <p className="mt-1 text-sm text-[#747977]">Track pending sign-offs, approval evidence, and feedback.</p>
         </div>
         <span className="inline-flex items-center gap-2 text-xs font-medium text-[#5e746c]"><FileCheck2 size={15} /> {reviewItems.length} item{reviewItems.length === 1 ? "" : "s"}</span>
       </header>
@@ -47,12 +47,12 @@ export default async function ReviewPage() {
 
       <section className="panel overflow-hidden">
         <div className="border-b border-[#ebeae6] px-5 py-4">
-          <h2 className="text-sm font-semibold text-[#343b38]">Review items</h2>
-          <p className="mt-1 text-xs text-[#858a87]">Select an item to view its notes and record your feedback.</p>
+          <h2 className="text-sm font-semibold text-[#343b38]">Approval items</h2>
+          <p className="mt-1 text-xs text-[#858a87]">Select an item to view its notes and approval history.</p>
         </div>
         <div className="divide-y divide-[#efeeea]">
           {reviewItems.map((item) => <ReviewItemRow key={item.id} item={item} />)}
-          {!reviewItems.length && <p className="px-5 py-10 text-center text-sm text-[#858a87]">No review items are available for this show.</p>}
+          {!reviewItems.length && <p className="px-5 py-10 text-center text-sm text-[#858a87]">No approval items are available for this show.</p>}
         </div>
       </section>
     </div>
