@@ -124,7 +124,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .panel {
   border: 1px solid #e7e6e2;
   border-radius: 10px;
-  background: #fff;
+  background: #fafbf9;
   box-shadow: 0 1px 2px rgb(31 37 37 / 0.02);
 }
 
@@ -133,7 +133,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   height: 2.5rem;
   border: 1px solid #dfe1dc;
   border-radius: 0.5rem;
-  background: #fff;
+  background: #fafbf9;
   padding: 0 0.75rem;
   color: #303936;
   font: inherit;
@@ -143,4 +143,12 @@ button, a { -webkit-tap-highlight-color: transparent; }
   outline: 2px solid #93aca3;
   outline-offset: 1px;
   border-color: #77948a;
+}
+
+/* Keep every editable surface on the same soft card tone, including controls
+ * that are styled locally by a feature rather than with the shared .control. */
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  background-color: #fafbf9 !important;
 }

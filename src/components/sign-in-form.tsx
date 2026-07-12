@@ -35,7 +35,7 @@ export function SignInForm({ debugMode }: { debugMode: boolean }) {
 
   return (
     <main className="flex min-h-[calc(100vh-122px)] items-center justify-center px-6">
-      <section className="w-full max-w-[400px] rounded-xl border border-[#e6e5e1] bg-white p-7 shadow-sm">
+      <section className="w-full max-w-[400px] rounded-xl border border-[#e6e5e1] bg-[#fafbf9] p-7 shadow-sm">
         <div className="mb-7 flex items-center gap-2.5"><span className="flex h-9 w-9 items-center justify-center rounded-[9px] bg-[#283131] text-white"><Clapperboard size={18} /></span><span className="text-lg font-semibold tracking-[-0.03em] text-[#2d3332]">PostPilot</span></div>
         <h1 className="text-xl font-semibold tracking-[-0.035em] text-[#272c2b]">Sign in to your post floor</h1>
         <p className="mt-2 text-sm leading-6 text-[#737776]">We’ll send a six-digit passcode to your work email.</p>

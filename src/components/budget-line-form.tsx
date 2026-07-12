@@ -45,7 +45,7 @@ export function BudgetLineForm({ episodes }: { episodes: Array<{ id: string; lab
   return <>
     <Button variant="primary" onPress={() => setOpen(true)} isDisabled={episodes.length === 0} className="bg-[#263130] text-white"><Plus size={16} /> Add episode budget</Button>
     {open && <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-0 sm:items-center sm:p-4">
-      <form onSubmit={form.handleSubmit(submit)} className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-xl sm:p-6">
+      <form onSubmit={form.handleSubmit(submit)} className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-[#fafbf9] p-5 shadow-xl sm:rounded-xl sm:p-6">
         <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-[#29322f]">Add episode budget line</h2><p className="mt-1 text-sm text-[#747977]">Costs are assigned to an episode and roll up to its show.</p></div><button type="button" onClick={() => setOpen(false)} className="rounded p-1 text-[#727b76] hover:bg-[#f2f2ef]" aria-label="Close"><X size={18} /></button></div>
         <div className="mt-5 space-y-4">
           <Field label="Episode" error={form.formState.errors.episodeId?.message}><select {...form.register("episodeId")} className="control"><option value="">Select episode</option>{episodes.map((episode) => <option key={episode.id} value={episode.id}>{episode.label}</option>)}</select></Field>
