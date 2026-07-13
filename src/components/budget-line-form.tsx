@@ -16,14 +16,15 @@ const schema = z.object({
   budgetedAmount: z.coerce.number().nonnegative("Estimate cannot be negative."),
   actualAmount: z.coerce.number().nonnegative("Actual cost cannot be negative."),
   costType: z.enum(["billable", "internal"]),
+  purchaseOrderId: z.string().optional(),
 });
 type Values = z.infer<typeof schema>;
 
-export function BudgetLineForm({ episodes }: { episodes: Array<{ id: string; label: string }> }) {
+export function BudgetLineForm({ episodes, purchaseOrders = [] }: { episodes: Array<{ id: string; label: string }>; purchaseOrders?: Array<{ id: string; poNumber: string; kind: string; amount: string | number | null; consumedAmount: string | number; currency: string; episodeId: string | null }> }) {
   const [open, setOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const router = useRouter();
-  const form = useForm<z.input<typeof schema>, unknown, Values>({ resolver: zodResolver(schema), defaultValues: { episodeId: "", category: "editor", description: "", budgetedAmount: 0, actualAmount: 0, costType: "internal" } });
+  const form = useForm<z.input<typeof schema>, unknown, Values>({ resolver: zodResolver(schema), defaultValues: { episodeId: "", category: "editor", description: "", budgetedAmount: 0, actualAmount: 0, costType: "internal", purchaseOrderId: "" } });
 
   async function submit(values: Values) {
     setSubmitError(null);
@@ -49,6 +50,7 @@ export function BudgetLineForm({ episodes }: { episodes: Array<{ id: string; lab
         <div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-[#29322f]">Add episode budget line</h2><p className="mt-1 text-sm text-[#747977]">Costs are assigned to an episode and roll up to its show.</p></div><button type="button" onClick={() => setOpen(false)} className="rounded p-1 text-[#727b76] hover:bg-[#f2f2ef]" aria-label="Close"><X size={18} /></button></div>
         <div className="mt-5 space-y-4">
           <Field label="Episode" error={form.formState.errors.episodeId?.message}><select {...form.register("episodeId")} className="control"><option value="">Select episode</option>{episodes.map((episode) => <option key={episode.id} value={episode.id}>{episode.label}</option>)}</select></Field>
+          <Field label="Vendor PO (optional)"><select {...form.register("purchaseOrderId")} className="control"><option value="">No PO allocation</option>{purchaseOrders.filter((po) => po.kind === "vendor_commitment").map((po) => <option key={po.id} value={po.id}>{po.poNumber} · {po.currency} {(Number(po.amount ?? 0) - Number(po.consumedAmount)).toFixed(2)} remaining</option>)}</select><span className="mt-1 block text-[11px] font-normal text-[#7b817d]">A PO allocation reconciles its consumed balance automatically.</span></Field>
           <div className="grid gap-4 sm:grid-cols-2"><Field label="Category" error={form.formState.errors.category?.message}><select {...form.register("category")} className="control">{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></Field><Field label="Cost type" error={form.formState.errors.costType?.message}><select {...form.register("costType")} className="control"><option value="internal">Internal</option><option value="billable">Billable</option></select></Field></div>
           <Field label="Description" error={form.formState.errors.description?.message}><input {...form.register("description")} placeholder="e.g. Final mix and audio stems" className="control" /></Field>
           <div className="grid gap-4 sm:grid-cols-2"><Field label="Estimated cost (USD)" error={form.formState.errors.budgetedAmount?.message}><input type="number" min="0" step="0.01" inputMode="decimal" {...form.register("budgetedAmount")} className="control" /></Field><Field label="Actual cost (USD)" error={form.formState.errors.actualAmount?.message}><input type="number" min="0" step="0.01" inputMode="decimal" {...form.register("actualAmount")} className="control" /></Field></div>

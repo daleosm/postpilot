@@ -3,7 +3,7 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { episodeTeamAssignments, episodes, people, seasons, shows } from "@/lib/db/schema";
+import { crmCompanies, crmContacts, episodeTeamAssignments, episodes, people, seasons, showContacts, shows } from "@/lib/db/schema";
 import { getDashboardData } from "./dashboard";
 import { listEpisodes } from "./episodes";
 
@@ -68,13 +68,15 @@ export async function listShowEpisodeTeam(organizationId: string, showId: string
 }
 
 export async function getShowWorkspace(organizationId: string, showId: string) {
-  const [show, episodeRows, team, dashboard, showRows, peopleRows] = await Promise.all([
+  const [show, episodeRows, team, dashboard, showRows, peopleRows, contactAssignments, contactOptions] = await Promise.all([
     getShow(organizationId, showId),
     listEpisodes(organizationId, showId),
     listShowEpisodeTeam(organizationId, showId),
     getDashboardData(organizationId),
     listShows(organizationId),
     getDb().select({ id: people.id, name: people.name, role: people.role }).from(people).where(and(eq(people.organizationId, organizationId), eq(people.isActive, true))).orderBy(asc(people.name)),
+    getDb().select({ responsibility: showContacts.responsibility, name: crmContacts.name, title: crmContacts.title, email: crmContacts.email, phone: crmContacts.phone, companyName: crmCompanies.name }).from(showContacts).innerJoin(crmContacts, eq(showContacts.contactId, crmContacts.id)).innerJoin(crmCompanies, eq(crmContacts.companyId, crmCompanies.id)).where(and(eq(showContacts.organizationId, organizationId), eq(showContacts.showId, showId), eq(crmContacts.organizationId, organizationId), eq(crmCompanies.organizationId, organizationId))),
+    getDb().select({ id: crmContacts.id, name: crmContacts.name, contactType: crmContacts.contactType, companyName: crmCompanies.name }).from(crmContacts).innerJoin(crmCompanies, eq(crmContacts.companyId, crmCompanies.id)).where(and(eq(crmContacts.organizationId, organizationId), eq(crmCompanies.organizationId, organizationId))).orderBy(asc(crmContacts.name)),
   ]);
   if (!show) return null;
 
@@ -84,6 +86,8 @@ export async function getShowWorkspace(organizationId: string, showId: string) {
     episodes: episodeRows,
     team,
     people: peopleRows,
+    contacts: contactAssignments,
+    contactOptions,
     activity: dashboard.activity,
   };
 }

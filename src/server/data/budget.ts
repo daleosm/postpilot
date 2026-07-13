@@ -40,7 +40,7 @@ export async function getBudgetData(organizationId: string) {
       .innerJoin(shows, eq(seasons.showId, shows.id))
       .where(and(eq(postWorkOrders.organizationId, organizationId), eq(postWorkOrders.billingScope, "billable_change"), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId)))
       .orderBy(asc(postWorkOrders.createdAt)),
-    db.select({ id: purchaseOrders.id, amount: purchaseOrders.amount, status: purchaseOrders.status, showTitle: shows.title, vendorName: crmCompanies.name }).from(purchaseOrders).innerJoin(crmCompanies, eq(purchaseOrders.companyId, crmCompanies.id)).leftJoin(shows, eq(purchaseOrders.showId, shows.id)).where(and(eq(purchaseOrders.organizationId, organizationId), eq(purchaseOrders.status, "open"))),
+    db.select({ id: purchaseOrders.id, poNumber: purchaseOrders.poNumber, kind: purchaseOrders.kind, amount: purchaseOrders.amount, consumedAmount: purchaseOrders.consumedAmount, currency: purchaseOrders.currency, status: purchaseOrders.status, showId: purchaseOrders.showId, episodeId: purchaseOrders.episodeId, showTitle: shows.title, vendorName: crmCompanies.name }).from(purchaseOrders).innerJoin(crmCompanies, eq(purchaseOrders.companyId, crmCompanies.id)).leftJoin(shows, eq(purchaseOrders.showId, shows.id)).where(and(eq(purchaseOrders.organizationId, organizationId), eq(purchaseOrders.status, "open"))),
   ]);
   return {
     lines,

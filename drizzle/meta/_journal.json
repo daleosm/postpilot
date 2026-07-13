@@ -281,6 +281,55 @@
       "when": 1783987200014,
       "tag": "0039_catering_markup_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1783987200015,
+      "tag": "0040_crm_contact_operational_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1783987200016,
+      "tag": "0041_show_contact_responsibilities",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1783987200017,
+      "tag": "0042_strengthen_purchase_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1783987200018,
+      "tag": "0043_vendor_supplier_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1783987200019,
+      "tag": "0044_link_work_orders_and_budget_lines_to_pos",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1783987200020,
+      "tag": "0045_po_commercial_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1783987200021,
+      "tag": "0046_vendor_invoice_work_order",
+      "breakpoints": true
     }
   ]
 }

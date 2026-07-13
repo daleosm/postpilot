@@ -164,6 +164,7 @@ const bookingFormSchema = z.object({
   roomId: nullableId,
   episodeId: nullableId,
   personId: nullableId,
+  clientContactId: nullableId,
   title: z.string().trim().min(1).max(160),
   startsAt: z.coerce.date(),
   endsAt: z.coerce.date(),
@@ -236,6 +237,8 @@ export const createPostWorkOrderSchema = z.object({
   episodeId: id,
   workflowStageId: nullableId,
   bookingId: nullableId,
+  vendorCompanyId: nullableId,
+  purchaseOrderId: nullableId,
   kind: z.enum(["work_order", "qc_exception"]).default("work_order"),
   title: z.string().trim().min(2, "A work-order title is required.").max(160),
   description: z.string().trim().max(4000).nullable().optional(),
@@ -262,6 +265,8 @@ export const updatePostWorkOrderSchema = z.object({
   department: z.string().trim().max(120).nullable().optional(),
   assigneePersonId: nullableId,
   assigneeRole: z.string().trim().max(80).nullable().optional(),
+  vendorCompanyId: nullableId,
+  purchaseOrderId: nullableId,
   priority: z.enum(workOrderPriorities).optional(),
   isBlocking: z.boolean().optional(),
   billingScope: z.enum(workOrderBillingScopes).optional(),
@@ -276,6 +281,7 @@ export const postWorkOrderChargeSchema = z.object({
   actualAmount: money.positive("Enter the approved client charge."),
   category: z.string().trim().min(2).max(120).optional(),
   reference: z.string().trim().max(120).nullable().optional(),
+  purchaseOrderId: nullableId,
 });
 
 export const insertBudgetLineSchema = z.object({
@@ -283,6 +289,7 @@ export const insertBudgetLineSchema = z.object({
   showId: nullableId,
   seasonId: nullableId,
   episodeId: nullableId,
+  purchaseOrderId: nullableId,
   code: z.string().trim().max(40).nullable().optional(),
   category: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000).nullable().optional(),
@@ -323,6 +330,7 @@ export const insertBillableSchema = z.object({
   organizationId: id,
   showId: nullableId,
   episodeId: nullableId,
+  purchaseOrderId: nullableId,
   vendor: z.string().trim().min(1).max(160),
   reference: z.string().trim().max(120).nullable().optional(),
   description: z.string().trim().max(2000).nullable().optional(),
@@ -333,6 +341,20 @@ export const insertBillableSchema = z.object({
   dueDate: optionalDate.nullable(),
 });
 export const updateBillableSchema = insertBillableSchema.omit({ organizationId: true }).partial();
+
+export const insertVendorInvoiceSchema = z.object({
+  vendorCompanyId: id,
+  purchaseOrderId: nullableId,
+  workOrderId: nullableId,
+  episodeId: id,
+  invoiceNumber: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(2000).nullable().optional(),
+  amount: money.positive(),
+  currency: z.string().trim().length(3).toUpperCase().default("GBP"),
+  status: z.enum(["received", "approved", "paid", "disputed", "void"]).default("received"),
+  invoiceDate: optionalDate.nullable(),
+  dueDate: optionalDate.nullable(),
+});
 
 export const insertActivityLogSchema = z.object({
   organizationId: id,

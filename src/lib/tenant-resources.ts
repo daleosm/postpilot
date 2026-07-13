@@ -6,6 +6,7 @@ import { getDb } from "@/lib/db";
 import {
   bookings,
   budgetLines,
+  crmCompanies,
   episodes,
   people,
   qcIssues,
@@ -29,6 +30,7 @@ type TenantReferences = Partial<{
   workflowRuleId: string | null;
   qcReportId: string | null;
   qcIssueId: string | null;
+  companyId: string | null;
 }>;
 
 /** Validates client-supplied resource IDs against the active tenant before a mutation. */
@@ -46,6 +48,7 @@ export async function missingTenantReferences(organizationId: string, references
     references.workflowRuleId ? ["workflow approval rule", db.select({ id: workflowStageApprovalRules.id }).from(workflowStageApprovalRules).where(and(eq(workflowStageApprovalRules.id, references.workflowRuleId), eq(workflowStageApprovalRules.organizationId, organizationId))).limit(1)] as const : null,
     references.qcReportId ? ["QC report", db.select({ id: qcReports.id }).from(qcReports).where(and(eq(qcReports.id, references.qcReportId), eq(qcReports.organizationId, organizationId))).limit(1)] as const : null,
     references.qcIssueId ? ["QC issue", db.select({ id: qcIssues.id }).from(qcIssues).where(and(eq(qcIssues.id, references.qcIssueId), eq(qcIssues.organizationId, organizationId))).limit(1)] as const : null,
+    references.companyId ? ["company", db.select({ id: crmCompanies.id }).from(crmCompanies).where(and(eq(crmCompanies.id, references.companyId), eq(crmCompanies.organizationId, organizationId))).limit(1)] as const : null,
   ].filter((check): check is NonNullable<typeof check> => Boolean(check));
 
   const results = await Promise.all(checks.map(async ([label, query]) => ({ label, found: (await query).length > 0 })));

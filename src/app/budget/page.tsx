@@ -31,7 +31,7 @@ type BudgetData = {
   lines: Line[];
   episodes: Array<{ id: string; label: string; showTitle: string }>;
   workOrderCharges: Array<{ id: string; title: string; department: string | null; status: string; billingStatus: string; estimatedAmount: string | number | null; currency: string; billingNotes: string | null; episodeTitle: string; episodeNumber: number; showTitle: string }>;
-  commitments?: Array<{ id: string; amount: string | number | null; status: string; showTitle: string | null; vendorName: string }>;
+  commitments?: Array<{ id: string; poNumber: string; kind: string; amount: string | number | null; consumedAmount: string | number; currency: string; status: string; showId: string | null; episodeId: string | null; showTitle: string | null; vendorName: string }>;
 };
 
 export default async function BudgetPage({ searchParams }: { searchParams: Promise<{ network?: string; show?: string; episode?: string }> }) {
@@ -74,7 +74,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
         <h1 className="mt-2 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Budget</h1>
         <p className="mt-1 text-sm text-[#747977]">Episode-level costs with show roll-ups for post-production control.</p>
       </div>
-      <div className="flex gap-2"><Link href={`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`} className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">All episodes</Link><BudgetLineForm episodes={episodes} /></div>
+      <div className="flex gap-2"><Link href={`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`} className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">All episodes</Link><BudgetLineForm episodes={episodes} purchaseOrders={(data.commitments ?? []).filter((po) => !po.episodeId || po.episodeId === selectedEpisodeId)} /></div>
     </header>
 
     <section className="grid gap-3 sm:grid-cols-4">

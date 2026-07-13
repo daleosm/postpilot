@@ -13,7 +13,7 @@ export async function listEpisodeWorkOrders(organizationId: string, episodeId: s
   return db.select({
     id: postWorkOrders.id, episodeId: postWorkOrders.episodeId, workflowStageId: postWorkOrders.workflowStageId, workflowStageName: workflowStages.name,
     kind: postWorkOrders.kind, title: postWorkOrders.title, description: postWorkOrders.description, department: postWorkOrders.department,
-    assigneePersonId: postWorkOrders.assigneePersonId, assigneeName: assignees.name, assigneeRole: postWorkOrders.assigneeRole,
+    assigneePersonId: postWorkOrders.assigneePersonId, assigneeName: assignees.name, assigneeRole: postWorkOrders.assigneeRole, vendorCompanyId: postWorkOrders.vendorCompanyId, purchaseOrderId: postWorkOrders.purchaseOrderId,
     priority: postWorkOrders.priority, isBlocking: postWorkOrders.isBlocking, status: postWorkOrders.status, externalUrl: postWorkOrders.externalUrl,
     billingScope: postWorkOrders.billingScope, billingStatus: postWorkOrders.billingStatus, estimatedAmount: postWorkOrders.estimatedAmount, actualAmount: postWorkOrders.actualAmount, currency: postWorkOrders.currency, billingNotes: postWorkOrders.billingNotes, budgetLineId: workOrderBudgetLines.id,
     dueAt: postWorkOrders.dueAt, completedAt: postWorkOrders.completedAt, createdAt: postWorkOrders.createdAt,
