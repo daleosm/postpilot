@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Building2, CalendarRange, Coffee, Clapperboard, DollarSign, FileCheck2, House, Layers3, Settings, UsersRound } from "lucide-react";
+import { Building2, CalendarRange, Clock3, Coffee, Clapperboard, DollarSign, FileCheck2, House, Layers3, Settings, UsersRound } from "lucide-react";
 import { LogoutButton } from "@/components/logout-button";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can, getCurrentPerson, type Permission } from "@/lib/permissions";
@@ -10,6 +10,7 @@ const navigation = [
   { label: "Shows", icon: Clapperboard, href: "/shows", permissions: ["manage_shows"] as Permission[] },
   { label: "Episodes", icon: Layers3, href: "/episodes", permissions: ["manage_shows", "view_assigned"] as Permission[] },
   { label: "Bookings", icon: CalendarRange, href: "/bookings", permissions: ["manage_bookings"] as Permission[] },
+  { label: "My time", icon: Clock3, href: "/my-time", permissions: ["update_assigned_work"] as Permission[] },
   { label: "Approvals", icon: FileCheck2, href: "/review", permissions: ["manage_reviews", "approve_reviews", "update_assigned_work"] as Permission[] },
   { label: "Catering", icon: Coffee, href: "/catering", permissions: ["request_catering"] as Permission[] },
   { label: "Runner desk", icon: Coffee, href: "/runner", permissions: ["manage_catering"] as Permission[] },

@@ -106,7 +106,7 @@ const defaultRolePolicies: Record<string, string[]> = {
   post_supervisor: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "approve_time", "manage_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "request_catering", "view_assigned"],
   producer: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "approve_time", "manage_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "request_catering", "view_assigned"],
   head_of_production: ["manage_shows", "manage_bookings", "manage_work_orders", "manage_budget", "request_catering", "view_assigned"],
-  finance: ["manage_budget", "approve_time", "manage_rates", "approve_rate_overrides", "approve_po_overruns", "view_assigned"],
+  finance: ["manage_budget", "approve_time", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "approve_po_overruns", "view_assigned"],
   runner: ["request_catering", "manage_catering", "view_assigned"],
   qc: ["update_assigned_work", "manage_qc", "verify_qc", "request_catering", "view_assigned"],
   editor: ["update_assigned_work", "request_catering", "view_assigned"],

@@ -9,7 +9,7 @@ import { WorkOrderChargeQueue } from "@/components/work-order-charge-queue";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { can } from "@/lib/permissions";
-import { getBudgetData, listEpisodes, listServiceRates } from "@/server/data";
+import { getBudgetData, listEpisodeBookingCosts, listEpisodes, listServiceRates } from "@/server/data";
 import { redirect } from "next/navigation";
 
 type Line = {
@@ -35,6 +35,27 @@ type BudgetData = {
   commitments?: Array<{ id: string; poNumber: string; kind: string; amount: string | number | null; consumedAmount: string | number; currency: string; status: string; showId: string | null; episodeId: string | null; showTitle: string | null; vendorName: string }>;
 };
 
+type BookingCost = {
+  id: string;
+  episodeId: string;
+  category: string | null;
+  roomName: string;
+  artistName: string;
+  bookingType: string;
+  startsAt: Date;
+  endsAt: Date;
+  plannedHours: number;
+  actualHours: number | null;
+  approvedOvertimeMinutes: number;
+  rate: number | null;
+  rateUnit: string | null;
+  rateSource: string | null;
+  currency: string | null;
+  plannedCost: number | null;
+  actualCost: number | null;
+  variance: number | null;
+};
+
 export default async function BudgetPage({ searchParams }: { searchParams: Promise<{ network?: string; show?: string; episode?: string }> }) {
   if (!(await can("manage_budget"))) redirect("/");
   const params = await searchParams;
@@ -52,6 +73,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
   if (!selectedEpisodeId) return <BudgetEpisodePicker network={selectedNetwork} show={activeShow} episodes={data.episodes.filter((episode) => episode.showTitle === activeShow)} lines={data.lines.filter((line) => line.showTitle === activeShow)} rates={serviceRates} showId={showRows.find((show) => show.title === activeShow)?.id} commitments={data.commitments ?? []} />;
   const selectedEpisode = data.episodes.find((episode) => episode.id === selectedEpisodeId && episode.showTitle === activeShow);
   if (!selectedEpisode) redirect(`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`);
+  const bookingCosts = await loadBookingCosts(selectedEpisodeId);
   const episodes = [selectedEpisode];
   const lines = data.lines.filter((line) => line.episodeId === selectedEpisodeId && line.showTitle === activeShow);
   const currency = lines[0]?.currency ?? "USD";
@@ -87,6 +109,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
     </section>
 
     <RateOverrideCard rates={serviceRates} scope={{ type: "episode", episodeId: selectedEpisodeId }} title="Episode service rate card" />
+    <BookingCostBasis entries={bookingCosts} fallbackCurrency={currency} />
     <WorkOrderChargeQueue charges={activeShow ? data.workOrderCharges.filter((charge) => charge.showTitle === activeShow) : data.workOrderCharges} />
 
     <section className="panel p-5">
@@ -133,6 +156,12 @@ async function loadServiceRates() {
   return context?.organization ? listServiceRates(context.organization.organizationId) : [];
 }
 
+async function loadBookingCosts(episodeId: string): Promise<BookingCost[]> {
+  if (isDebugDemoMode) return [];
+  const context = await getActiveOrganizationContext();
+  return context?.organization ? listEpisodeBookingCosts(context.organization.organizationId, episodeId) : [];
+}
+
 function Metric({ icon, label, value, detail, warning = false }: { icon: React.ReactNode; label: string; value: string; detail: string; warning?: boolean }) {
   return <div className="panel p-4"><div className={`flex items-center gap-2 text-xs font-semibold uppercase tracking-[.08em] ${warning ? "text-[#a65f42]" : "text-[#76807b]"}`}>{icon}{label}</div><p className="mt-3 text-xl font-semibold tracking-[-.035em] text-[#343d39]">{value}</p><p className="mt-1 text-xs text-[#858a87]">{detail}</p></div>;
 }
@@ -144,6 +173,31 @@ function episodeLabel(line: Line) {
 function money(value: number, currency = "USD") {
   try { return new Intl.NumberFormat("en-GB", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value); } catch { return `${currency} ${value.toFixed(2)}`; }
 }
+
+function BookingCostBasis({ entries, fallbackCurrency }: { entries: BookingCost[]; fallbackCurrency: string }) {
+  return <section className="panel overflow-hidden">
+    <div className="flex flex-col justify-between gap-2 border-b border-[#ebeae6] px-5 py-4 sm:flex-row sm:items-end"><div><h2 className="text-sm font-semibold text-[#343b38]">Booked room and artist cost basis</h2><p className="mt-1 text-xs text-[#858a87]">Live booking dates, approved actuals, and inherited rates. Matching booking-derived cost lines roll up from this data automatically.</p></div><p className="text-xs font-medium text-[#718079]">9-hour facility day</p></div>
+    {!entries.length ? <div className="px-5 py-12 text-center text-sm text-[#7d837f]">No active episode bookings yet. Create a room or artist booking to build its cost basis.</div> : <div className="overflow-x-auto"><div className="min-w-[1010px]">
+      <div className="grid grid-cols-[minmax(175px,1.3fr)_145px_100px_130px_130px_130px] gap-3 bg-[#f5f5f1] px-5 py-3 text-[10px] font-semibold uppercase tracking-[.08em] text-[#747c77]"><span>Room / artist</span><span>Date</span><span>Hours</span><span>Rate</span><span>Planned cost</span><span>Actual / variance</span></div>
+      <div className="divide-y divide-[#efeeea]">{entries.map((entry) => {
+        const currency = entry.currency ?? fallbackCurrency;
+        return <div key={entry.id} className="grid grid-cols-[minmax(175px,1.3fr)_145px_100px_130px_130px_130px] items-center gap-3 px-5 py-4 text-sm text-[#4f5753]">
+          <div className="min-w-0"><p className="truncate font-semibold text-[#37413d]">{entry.roomName}</p><p className="mt-1 truncate text-xs text-[#858a87]">{entry.artistName} · {entry.bookingType.replaceAll("_", " ")}</p></div>
+          <div className="text-xs text-[#59635e]"><p>{bookingDateRange(entry.startsAt, entry.endsAt)}</p><p className="mt-1 text-[#858a87]">{bookingTime(entry.startsAt)}–{bookingTime(entry.endsAt)}</p></div>
+          <div className="text-xs"><p>{hours(entry.plannedHours)} planned</p><p className="mt-1 text-[#858a87]">{entry.actualHours === null ? "Actual pending" : `${hours(entry.actualHours)} actual`}{entry.approvedOvertimeMinutes ? " incl. approved OT" : ""}</p></div>
+          <div className="text-xs">{entry.rate === null ? <span className="text-[#a65f42]">No rate configured</span> : <><p className="font-medium text-[#4d5752]">{money(entry.rate, currency)} / {entry.rateUnit}</p><p className="mt-1 text-[#858a87]">{rateSource(entry.rateSource)}</p></>}</div>
+          <p className="text-xs font-medium text-[#4d5752]">{entry.plannedCost === null ? "—" : money(entry.plannedCost, currency)}</p>
+          <div className="text-xs">{entry.actualCost === null ? <p className="text-[#858a87]">Awaiting actuals</p> : <><p className="font-medium text-[#4d5752]">{money(entry.actualCost, currency)}</p><p className={`mt-1 ${entry.variance && entry.variance > 0 ? "text-[#a65f42]" : "text-[#4f7767]"}`}>{entry.variance === null ? "—" : `${entry.variance > 0 ? "+" : ""}${money(entry.variance, currency)}`}</p></>}</div>
+        </div>;
+      })}</div>
+    </div></div>}
+  </section>;
+}
+
+function bookingDateRange(startsAt: Date, endsAt: Date) { const format = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/London" }); const start = format.format(startsAt); const end = format.format(endsAt); return start === end ? start : `${start}–${end}`; }
+function bookingTime(date: Date) { return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Europe/London" }).format(date); }
+function hours(value: number) { return `${Number.isInteger(value) ? value : value.toFixed(1)}h`; }
+function rateSource(source: string | null) { return source === "episode_rate_card" ? "Episode rate card" : source === "show_rate_card" ? "Show rate card" : source === "network_rate_card" ? "Network rate card" : source === "client_rate_card" ? "Client rate card" : source === "facility_rate_card" ? "Facility rate card" : ""; }
 
 type Commitment = NonNullable<BudgetData["commitments"]>[number];
 

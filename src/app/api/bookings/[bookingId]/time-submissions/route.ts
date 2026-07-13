@@ -17,6 +17,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
   const [booking] = await db.select({ id: bookings.id, personId: bookings.personId }).from(bookings).where(and(eq(bookings.id, bookingId), eq(bookings.organizationId, context.organization.organizationId))).limit(1);
   if (!booking) return NextResponse.json({ error: "Booking not found." }, { status: 404 });
   if (booking.personId !== context.person.id) return NextResponse.json({ error: "You can only confirm time for your own booking." }, { status: 403 });
+  const [pending] = await db.select({ id: bookingTimeSubmissions.id }).from(bookingTimeSubmissions).where(and(
+    eq(bookingTimeSubmissions.organizationId, context.organization.organizationId),
+    eq(bookingTimeSubmissions.bookingId, bookingId),
+    eq(bookingTimeSubmissions.submittedByPersonId, context.person.id),
+    eq(bookingTimeSubmissions.status, "pending"),
+  )).limit(1);
+  if (pending) return NextResponse.json({ error: "Actual time is already awaiting approval for this booking." }, { status: 409 });
   const [submission] = await db.insert(bookingTimeSubmissions).values({ ...parsed.data, organizationId: context.organization.organizationId, bookingId, submittedByPersonId: context.person.id }).returning({ id: bookingTimeSubmissions.id, status: bookingTimeSubmissions.status });
   return NextResponse.json(submission, { status: 201 });
 }

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
 import { bookingTimeSubmissions, bookings, crmCompanies, crmContacts, episodes, people, rooms } from "@/lib/db/schema";
@@ -35,6 +35,30 @@ export async function listPendingBookingTimeSubmissions(organizationId: string) 
   return getDb().select({ id: bookingTimeSubmissions.id, bookingTitle: bookings.title, personName: people.name, actualStartsAt: bookingTimeSubmissions.actualStartsAt, actualEndsAt: bookingTimeSubmissions.actualEndsAt, overtimeMinutes: bookingTimeSubmissions.overtimeMinutes, note: bookingTimeSubmissions.note })
     .from(bookingTimeSubmissions).innerJoin(bookings, and(eq(bookingTimeSubmissions.bookingId, bookings.id), eq(bookings.organizationId, organizationId))).innerJoin(people, and(eq(bookingTimeSubmissions.submittedByPersonId, people.id), eq(people.organizationId, organizationId)))
     .where(and(eq(bookingTimeSubmissions.organizationId, organizationId), eq(bookingTimeSubmissions.status, "pending"))).orderBy(asc(bookingTimeSubmissions.createdAt));
+}
+
+/**
+ * The personal time sheet deliberately contains only the active person's own
+ * bookings. The scheduling calendar remains a separate, manager-facing view.
+ */
+export async function listMyTimeBookings(organizationId: string, personId: string, from: Date, to: Date) {
+  const scheduled = await listSchedule(organizationId, from, to, personId);
+  if (!scheduled.length) return [];
+
+  const pending = await getDb().select({ bookingId: bookingTimeSubmissions.bookingId })
+    .from(bookingTimeSubmissions)
+    .where(and(
+      eq(bookingTimeSubmissions.organizationId, organizationId),
+      eq(bookingTimeSubmissions.submittedByPersonId, personId),
+      eq(bookingTimeSubmissions.status, "pending"),
+      inArray(bookingTimeSubmissions.bookingId, scheduled.map((booking) => booking.id)),
+    ));
+  const pendingBookingIds = new Set(pending.map((submission) => submission.bookingId));
+
+  return scheduled.map((booking) => ({
+    ...booking,
+    timeStatus: booking.actualStartsAt ? "approved" as const : pendingBookingIds.has(booking.id) ? "pending" as const : "ready" as const,
+  }));
 }
 
 /** Tenant-owned room setup data. Kept separate from booking rows for Settings. */
