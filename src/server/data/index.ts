@@ -5,7 +5,7 @@ export { getDemoCommandCenterData } from "./demo-dashboard";
 export { getEpisode, getEpisodeWorkspace, listEpisodes } from "./episodes";
 export { listWorkflowSignOffInbox } from "./workflow-approvals";
 export { listEpisodeWorkOrders, listWorkOrderInbox } from "./work-orders";
-export { getScheduleResources, listRooms, listSchedule } from "./schedule";
+export { getScheduleResources, listPendingBookingTimeSubmissions, listRooms, listSchedule } from "./schedule";
 export { getShow, getShowWorkspace, listShowEpisodeTeam, listShows } from "./shows";
 export { listTeam } from "./team";
 export { getDefaultWorkflowConfig } from "./workflows";

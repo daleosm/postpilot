@@ -155,6 +155,8 @@ export const insertEpisodeSchema = z.object({
 export const updateEpisodeSchema = insertEpisodeSchema.omit({ seasonId: true }).partial();
 export const episodeTeamAssignmentSchema = z.object({ personId: id, responsibility: z.string().trim().min(2, "Enter a responsibility.").max(80), isLead: z.boolean().default(false) });
 
+const bookingTypes = ["edit", "color", "mix", "qc", "client_review", "ingest", "conform", "leave", "training", "sick", "unavailable"] as const;
+const personnelAvailabilityTypes = ["leave", "training", "sick", "unavailable"] as const;
 const bookingFormSchema = z.object({
   organizationId: id,
   roomId: nullableId,
@@ -163,12 +165,25 @@ const bookingFormSchema = z.object({
   title: z.string().trim().min(1).max(160),
   startsAt: z.coerce.date(),
   endsAt: z.coerce.date(),
+  setupMinutes: z.coerce.number().int().min(0).max(480).default(0),
+  handoverMinutes: z.coerce.number().int().min(0).max(480).default(0),
+  strikeMinutes: z.coerce.number().int().min(0).max(480).default(0),
   status: z.enum(["tentative", "confirmed", "hold", "cancelled"]).default("tentative"),
-  bookingType: z.enum(["edit", "color", "mix", "qc", "client_review", "ingest", "conform"]).default("edit"),
+  bookingType: z.enum(bookingTypes).default("edit"),
   notes: z.string().trim().max(2000).nullable().optional(),
 });
-export const insertBookingSchema = bookingFormSchema.refine((value) => value.endsAt > value.startsAt, { message: "End time must be after the start time.", path: ["endsAt"] });
-export const bookingRequestSchema = bookingFormSchema.omit({ organizationId: true }).refine((value) => value.endsAt > value.startsAt, { message: "End time must be after the start time.", path: ["endsAt"] });
+function validateBooking<T extends z.ZodTypeAny>(schema: T) {
+  return schema.superRefine((value: z.infer<T>, context) => {
+    const booking = value as { startsAt?: Date; endsAt?: Date; bookingType?: string; personId?: string | null; roomId?: string | null };
+    if (booking.startsAt && booking.endsAt && booking.endsAt <= booking.startsAt) context.addIssue({ code: z.ZodIssueCode.custom, message: "End time must be after the start time.", path: ["endsAt"] });
+    if (booking.bookingType && personnelAvailabilityTypes.includes(booking.bookingType as typeof personnelAvailabilityTypes[number])) {
+      if (!booking.personId) context.addIssue({ code: z.ZodIssueCode.custom, message: "Choose the person whose availability is affected.", path: ["personId"] });
+      if (booking.roomId) context.addIssue({ code: z.ZodIssueCode.custom, message: "Leave, training, sickness, and unavailability cannot reserve a room.", path: ["roomId"] });
+    }
+  });
+}
+export const insertBookingSchema = validateBooking(bookingFormSchema);
+export const bookingRequestSchema = validateBooking(bookingFormSchema.omit({ organizationId: true }));
 export const updateBookingSchema = bookingFormSchema.omit({ organizationId: true }).partial();
 
 export const createCateringRequestSchema = z.object({

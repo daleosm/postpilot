@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { findBookingConflicts } from "@/lib/booking-conflicts";
+import { getBookingSuggestions } from "@/lib/booking-conflicts";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { isDebugDemoMode } from "@/lib/runtime";
 import { can } from "@/lib/permissions";
 import { missingTenantReferences } from "@/lib/tenant-resources";
 import { bookingRequestSchema } from "@/lib/validations/entities";
 
 export async function POST(request: Request) {
   if (!(await can("manage_bookings"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  if (isDebugDemoMode) return NextResponse.json({ conflicts: [] });
   const body = await request.json();
   const parsed = bookingRequestSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "Enter a valid booking window." }, { status: 400 });
@@ -25,6 +23,6 @@ export async function POST(request: Request) {
     bookingId: excludeResult.data,
   });
   if (missing.length) return NextResponse.json({ error: `Invalid ${missing.join(", ")} for this organization.` }, { status: 404 });
-  const conflicts = parsed.data.status === "cancelled" ? [] : await findBookingConflicts(context.organization.organizationId, { ...parsed.data, excludeId: excludeResult.data });
-  return NextResponse.json({ conflicts });
+  if (parsed.data.status === "cancelled") return NextResponse.json({ conflicts: [], availableRooms: [], availablePeople: [], nearestSlot: null });
+  return NextResponse.json(await getBookingSuggestions(context.organization.organizationId, { ...parsed.data, excludeId: excludeResult.data }));
 }

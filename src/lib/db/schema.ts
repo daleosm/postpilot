@@ -23,7 +23,8 @@ export const organizationRole = pgEnum("organization_role", ["owner", "admin", "
 export const episodeStatus = pgEnum("episode_status", ["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"]);
 export const qcStatus = pgEnum("qc_status", ["not_started", "in_progress", "passed", "needs_attention", "waived"]);
 export const bookingStatus = pgEnum("booking_status", ["tentative", "confirmed", "hold", "cancelled"]);
-export const bookingType = pgEnum("booking_type", ["edit", "color", "mix", "qc", "client_review", "ingest", "conform"]);
+export const bookingTimeApprovalStatus = pgEnum("booking_time_approval_status", ["pending", "approved", "rejected"]);
+export const bookingType = pgEnum("booking_type", ["edit", "color", "mix", "qc", "client_review", "ingest", "conform", "leave", "training", "sick", "unavailable"]);
 export const approvalStatus = pgEnum("approval_status", ["pending", "approved", "changes_requested"]);
 export const billableStatus = pgEnum("billable_status", ["draft", "approved", "invoiced", "paid", "void"]);
 export const costType = pgEnum("cost_type", ["billable", "internal"]);
@@ -206,6 +207,8 @@ export const people = pgTable("people", {
   role: text("role").notNull(),
   company: text("company"),
   isActive: boolean("is_active").default(true).notNull(),
+  /** Marks external talent so schedulers can distinguish freelance availability. */
+  isFreelancer: boolean("is_freelancer").default(false).notNull(),
   availability: availabilityStatus("availability").default("available").notNull(),
   hourlyRate: numeric("hourly_rate", { precision: 10, scale: 2 }),
   dayRate: numeric("day_rate", { precision: 10, scale: 2 }),
@@ -313,6 +316,13 @@ export const bookings = pgTable("bookings", {
   title: text("title").notNull(),
   startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
   endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+  /** Operational buffers sit outside the client-facing booked window and still block resources. */
+  setupMinutes: integer("setup_minutes").default(0).notNull(),
+  handoverMinutes: integer("handover_minutes").default(0).notNull(),
+  strikeMinutes: integer("strike_minutes").default(0).notNull(),
+  actualStartsAt: timestamp("actual_starts_at", { withTimezone: true }),
+  actualEndsAt: timestamp("actual_ends_at", { withTimezone: true }),
+  approvedOvertimeMinutes: integer("approved_overtime_minutes").default(0).notNull(),
   status: bookingStatus("status").default("tentative").notNull(),
   bookingType: bookingType("booking_type").default("edit").notNull(),
   notes: text("notes"),
@@ -321,6 +331,22 @@ export const bookings = pgTable("bookings", {
   index("bookings_room_time_idx").on(table.roomId, table.startsAt),
   index("bookings_episode_time_idx").on(table.episodeId, table.startsAt),
 ]);
+
+/** Artist-submitted actuals are held separately until a producer/finance approver accepts them. */
+export const bookingTimeSubmissions = pgTable("booking_time_submissions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  bookingId: uuid("booking_id").notNull().references(() => bookings.id, { onDelete: "cascade" }),
+  submittedByPersonId: uuid("submitted_by_person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
+  actualStartsAt: timestamp("actual_starts_at", { withTimezone: true }).notNull(),
+  actualEndsAt: timestamp("actual_ends_at", { withTimezone: true }).notNull(),
+  overtimeMinutes: integer("overtime_minutes").default(0).notNull(),
+  note: text("note"),
+  status: bookingTimeApprovalStatus("status").default("pending").notNull(),
+  reviewedByPersonId: uuid("reviewed_by_person_id").references(() => people.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  ...auditColumns,
+}, (table) => [index("booking_time_submissions_booking_idx").on(table.bookingId), index("booking_time_submissions_organization_status_idx").on(table.organizationId, table.status)]);
 
 /** Internal room-service requests. No payment, vendor, or dietary profile is stored. */
 export const cateringRequests = pgTable("catering_requests", {
@@ -476,3 +502,9 @@ export const activityLog = pgTable("activity_log", {
   index("activity_log_organization_created_idx").on(table.organizationId, table.createdAt),
   index("activity_log_entity_idx").on(table.entityType, table.entityId),
 ]);
+
+export const notifications = pgTable("notifications", {
+  id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  personId: uuid("person_id").notNull().references(() => people.id, { onDelete: "cascade" }), activityId: uuid("activity_id").references(() => activityLog.id, { onDelete: "cascade" }),
+  title: text("title").notNull(), body: text("body").notNull(), readAt: timestamp("read_at", { withTimezone: true }), ...auditColumns,
+}, (table) => [index("notifications_person_unread_idx").on(table.personId, table.readAt)]);

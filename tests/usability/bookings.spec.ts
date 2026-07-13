@@ -36,6 +36,25 @@ test.describe("Bookings usability", () => {
     await expect.poll(() => visibleBookingCount(page)).toBe(weeklyCount);
   });
 
+  test("shows a staff-centric day sheet with operational handover and catering context", async ({ page }) => {
+    await openBookings(page);
+
+    await page.getByRole("button", { name: "Staff day", exact: true }).click();
+    await expect(page.getByText("Next booking", { exact: true })).toBeVisible();
+    await expect(page.getByText("Call / start", { exact: true })).toBeVisible();
+    await expect(page.getByText("Handover note", { exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByText("Catering", { exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByText("Maya Ortiz", { exact: true })).toBeVisible();
+  });
+
+  test("opens the episode booking sequence copy template", async ({ page }) => {
+    await openBookings(page);
+    await page.getByRole("button", { name: "Copy episode sequence" }).click();
+    await expect(page.getByRole("heading", { name: "Copy episode booking sequence" })).toBeVisible();
+    await expect(page.getByText("First client booking date", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Copy sequence" })).toBeVisible();
+  });
+
   test("explains a missing booking title before save", async ({ page }) => {
     await openBookings(page);
 

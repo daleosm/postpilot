@@ -70,7 +70,7 @@ const stages = [
 
 type PersonRole = string;
 type MembershipRole = "owner" | "admin" | "member" | "guest";
-type PersonSeed = { name: string; email: string; role: PersonRole; userId?: string; membershipRole?: MembershipRole };
+type PersonSeed = { name: string; email: string; role: PersonRole; userId?: string; membershipRole?: MembershipRole; isFreelancer?: boolean };
 type TenantSeed = {
   number: number;
   id: (typeof seedOrganizationIds)[number];
@@ -95,10 +95,10 @@ const specialistRoleSeeds: Array<{ role: PersonRole; title: string }> = [
 ];
 
 const defaultRolePolicies: Record<string, string[]> = {
-  post_supervisor: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "manage_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "request_catering", "view_assigned"],
-  producer: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "manage_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "request_catering", "view_assigned"],
+  post_supervisor: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "approve_time", "manage_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "request_catering", "view_assigned"],
+  producer: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "approve_time", "manage_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "request_catering", "view_assigned"],
   head_of_production: ["manage_shows", "manage_bookings", "manage_work_orders", "manage_budget", "request_catering", "view_assigned"],
-  finance: ["manage_budget", "view_assigned"],
+  finance: ["manage_budget", "approve_time", "view_assigned"],
   runner: ["request_catering", "manage_catering", "view_assigned"],
   qc: ["update_assigned_work", "manage_qc", "verify_qc", "request_catering", "view_assigned"],
   editor: ["update_assigned_work", "request_catering", "view_assigned"],
@@ -324,7 +324,7 @@ async function seedTenant(tenant: TenantSeed) {
   const bookingId = (position: number) => id(tenant.number, "29", position);
   // Each facility person has a tenant-local Auth.js identity and membership.
   // Maya is intentionally the only shared debug platform administrator.
-  const sourcePeople: PersonSeed[] = [...tenant.people, ...specialistRoleSeeds.map((specialist, index) => ({ name: `${tenant.name} ${specialist.title}`, email: `${specialist.role}.${index + 1}@${tenant.slug}.test`, role: specialist.role }))];
+  const sourcePeople: PersonSeed[] = [...tenant.people, ...specialistRoleSeeds.map((specialist, index) => ({ name: `${tenant.name} ${specialist.title}`, email: `${specialist.role}.${index + 1}@${tenant.slug}.test`, role: specialist.role, isFreelancer: true }))];
   const tenantPeople = sourcePeople.map((person, index) => ({
     ...person,
     userId: person.userId ?? `user_${tenant.slug.replaceAll("-", "_")}_${index + 1}`,
@@ -339,7 +339,7 @@ async function seedTenant(tenant: TenantSeed) {
   await db.insert(organizationMembers).values(tenantPeople.map((person) => ({ organizationId: tenant.id, userId: person.userId, role: person.membershipRole })));
   await db.insert(people).values(tenantPeople.map((person, index) => ({
     id: personId(index + 1), organizationId: tenant.id, name: person.name, email: person.email, role: person.role, userId: person.userId,
-    availability: (index % 5 === 0 ? "limited" : "available") as "limited" | "available", hourlyRate: String(65 + index * 8), dayRate: String(520 + index * 55),
+    availability: (index % 5 === 0 ? "limited" : "available") as "limited" | "available", isFreelancer: person.isFreelancer ?? false, hourlyRate: String(65 + index * 8), dayRate: String(520 + index * 55),
   })));
   await db.insert(organizationRolePolicies).values([...new Set(tenantPeople.map((person) => person.role))].map((role) => ({ organizationId: tenant.id, role, label: roleLabel(role), permissions: defaultRolePolicies[role] ?? [] })));
 
@@ -390,11 +390,14 @@ async function seedTenant(tenant: TenantSeed) {
     { id: roomId(5), organizationId: tenant.id, name: tenant.roomNames[4], type: "qc_room", location: "Delivery floor", capacity: 4 },
   ]);
   await db.insert(bookings).values([
-    { id: bookingId(1), organizationId: tenant.id, roomId: roomId(1), episodeId: episodeId(1), personId: byRole("editor"), title: `${episodeRows[0].productionCode} editorial block`, startsAt: at(0, 9), endsAt: at(1, 18), status: "confirmed", bookingType: "edit", notes: "Two-day editorial booking; client links remain external." },
-    { id: bookingId(2), organizationId: tenant.id, roomId: roomId(3), episodeId: episodeId(4), personId: byRole("colorist"), title: `${episodeRows[3].productionCode} grade pass`, startsAt: at(1, 9), endsAt: at(2, 18), status: "confirmed", bookingType: "color", notes: "Finishing review references are maintained in notes." },
-    { id: bookingId(3), organizationId: tenant.id, roomId: roomId(4), episodeId: episodeId(7), personId: byRole("sound_mixer"), title: `${episodeRows[6].productionCode} final mix`, startsAt: at(2, 10), endsAt: at(3, 19), status: "confirmed", bookingType: "mix" },
-    { id: bookingId(4), organizationId: tenant.id, roomId: roomId(5), episodeId: episodeId(4), personId: byRole("qc"), title: `${episodeRows[3].productionCode} technical QC`, startsAt: at(3, 9), endsAt: at(3, 16), status: "confirmed", bookingType: "qc" },
+    { id: bookingId(1), organizationId: tenant.id, roomId: roomId(1), episodeId: episodeId(1), personId: byRole("editor"), title: `${episodeRows[0].productionCode} editorial block`, startsAt: at(0, 9), endsAt: at(1, 18), setupMinutes: 15, handoverMinutes: 15, strikeMinutes: 0, status: "confirmed", bookingType: "edit", notes: "Two-day editorial booking; client links remain external." },
+    { id: bookingId(2), organizationId: tenant.id, roomId: roomId(3), episodeId: episodeId(4), personId: byRole("colorist"), title: `${episodeRows[3].productionCode} grade pass`, startsAt: at(1, 9), endsAt: at(2, 18), setupMinutes: 45, handoverMinutes: 15, strikeMinutes: 30, status: "confirmed", bookingType: "color", notes: "Finishing review references are maintained in notes." },
+    { id: bookingId(3), organizationId: tenant.id, roomId: roomId(4), episodeId: episodeId(7), personId: byRole("sound_mixer"), title: `${episodeRows[6].productionCode} final mix`, startsAt: at(2, 10), endsAt: at(3, 19), setupMinutes: 30, handoverMinutes: 30, strikeMinutes: 30, status: "confirmed", bookingType: "mix" },
+    { id: bookingId(4), organizationId: tenant.id, roomId: roomId(5), episodeId: episodeId(4), personId: byRole("qc"), title: `${episodeRows[3].productionCode} technical QC`, startsAt: at(3, 9), endsAt: at(3, 16), setupMinutes: 30, handoverMinutes: 0, strikeMinutes: 15, status: "confirmed", bookingType: "qc" },
     { id: bookingId(5), organizationId: tenant.id, roomId: roomId(2), episodeId: episodeId(8), personId: byRole("editor"), title: `${episodeRows[7].productionCode} lock notes`, startsAt: at(4, 9), endsAt: at(4, 18), status: "hold", bookingType: "edit" },
+    { id: bookingId(6), organizationId: tenant.id, personId: byRole("assistant_editor"), title: "Approved leave — assistant editorial", startsAt: at(5, 9), endsAt: at(6, 18), status: "confirmed", bookingType: "leave", notes: "Approved annual leave. No room or episode is reserved." },
+    { id: bookingId(7), organizationId: tenant.id, personId: byRole("colorist"), title: "Colour finishing training", startsAt: at(2, 9), endsAt: at(2, 17), status: "confirmed", bookingType: "training", notes: "Facility training day; unavailable for project bookings." },
+    { id: bookingId(8), organizationId: tenant.id, personId: byRole("sound_mixer"), title: "Unavailable — external commitment", startsAt: at(4, 9), endsAt: at(4, 18), status: "confirmed", bookingType: "unavailable", notes: "External commitment recorded as a personnel booking." },
   ]);
   await db.insert(cateringRequests).values([
     { id: id(tenant.number, "2a", 1), organizationId: tenant.id, bookingId: bookingId(1), roomId: roomId(1), requestedByPersonId: byRole("editor"), fulfilledByPersonId: byRole("runner"), requestType: "lunch", item: tenant.number === 2 ? "Miso aubergine bowl" : tenant.number === 3 ? "Herb focaccia and soup" : "Chicken Caesar salad", quantity: 1, requestedFor: at(0, 13), status: "preparing" },

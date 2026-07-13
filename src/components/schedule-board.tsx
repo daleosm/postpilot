@@ -1,16 +1,24 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { ChevronLeft, ChevronRight, Clock3, Gauge } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock3, Coffee, Gauge, UsersRound } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { BookingFormDialog, type BookingResources } from "@/components/booking-form-dialog";
+import { ActualTimeDialog } from "@/components/actual-time-dialog";
 
 export type ScheduleBooking = {
   id: string;
   title: string;
   startsAt: Date;
   endsAt: Date;
+  actualStartsAt: Date | null;
+  actualEndsAt: Date | null;
+  approvedOvertimeMinutes: number;
+  setupMinutes: number;
+  handoverMinutes: number;
+  strikeMinutes: number;
   status: string;
   bookingType: string;
   roomId: string | null;
@@ -21,8 +29,10 @@ export type ScheduleBooking = {
   roomType: string | null;
   episodeTitle: string | null;
   episodeNumber: number | null;
+  episodeProductionCode: string | null;
   personName: string | null;
 };
+type CateringRequest = { id: string; bookingId: string | null; requestedByPersonId: string | null; requestType: string; item: string; requestedFor: Date | null; status: string };
 
 type GanttBooking = { booking: ScheduleBooking; start: number; end: number; lane: number };
 type GanttRow = { id: string; name: string; type: string; bookings: GanttBooking[]; lanes: number };
@@ -34,16 +44,17 @@ const HOURS_PER_DAY = MINUTES_IN_SUITE_DAY / 60;
 const ROOM_COLUMN_WIDTH = 168;
 const DAY_WIDTH = 260;
 
-export function ScheduleBoard({ bookings, rooms, resources, initialDate }: { bookings: ScheduleBooking[]; rooms: Array<{ id: string; name: string; type: string }>; resources: BookingResources; initialDate: string }) {
+export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, pendingTimes, initialDate, canManage, canApproveTime }: { bookings: ScheduleBooking[]; rooms: Array<{ id: string; name: string; type: string }>; resources: BookingResources; cateringRequests: CateringRequest[]; pendingTimes: Array<{ id: string; bookingTitle: string; personName: string; actualStartsAt: Date; actualEndsAt: Date; overtimeMinutes: number; note: string | null }>; initialDate: string; canManage: boolean; canApproveTime: boolean }) {
   const [view, setView] = useState<"day" | "week">("week");
+  const [mode, setMode] = useState<"rooms" | "staff">("rooms");
   const [cursor, setCursor] = useState(() => startOfDay(new Date(initialDate)));
   const [selectedBooking, setSelectedBooking] = useState<ScheduleBooking | null>(null);
   const days = useMemo(() => Array.from({ length: view === "week" ? 7 : 1 }, (_, index) => addDays(cursor, index)), [cursor, view]);
   const rangeEnd = useMemo(() => addDays(cursor, days.length), [cursor, days.length]);
-  const visible = useMemo(() => bookings.filter((booking) => overlaps(booking.startsAt, booking.endsAt, cursor, rangeEnd)), [bookings, cursor, rangeEnd]);
+  const visible = useMemo(() => bookings.filter((booking) => overlaps(operationalStart(booking), operationalEnd(booking), cursor, rangeEnd)), [bookings, cursor, rangeEnd]);
   const ganttRows = useMemo(() => buildGanttRows(rooms, visible, cursor, days.length), [rooms, visible, cursor, days.length]);
   const utilization = rooms.filter((room) => room.type !== "edit_bay").map((room) => ({ ...room, hours: visible.filter((booking) => booking.roomId === room.id).reduce((sum, booking) => sum + visibleHours(booking, cursor, rangeEnd), 0) })).sort((a, b) => b.hours - a.hours);
-  const move = (direction: number) => setCursor((current) => addDays(current, direction * days.length));
+  const move = (direction: number) => setCursor((current) => addDays(current, direction * (mode === "staff" ? 1 : days.length)));
 
   return <div className="space-y-4">
     <section className="panel flex flex-wrap items-center justify-between gap-3 p-3">
@@ -56,9 +67,13 @@ export function ScheduleBoard({ bookings, rooms, resources, initialDate }: { boo
         <Button variant="tertiary" onClick={() => setView("day")} className={`h-7 min-w-0 rounded px-3 text-xs font-medium ${view === "day" ? "bg-white text-[#34413d] shadow-sm" : "text-[#7b817e]"}`}>Day</Button>
         <Button variant="tertiary" onClick={() => setView("week")} className={`h-7 min-w-0 rounded px-3 text-xs font-medium ${view === "week" ? "bg-white text-[#34413d] shadow-sm" : "text-[#7b817e]"}`}>Week</Button>
       </div>
+      <div className="flex rounded-md border border-[#e0e1dc] bg-[#fafaf8] p-0.5">
+        <Button variant="tertiary" onClick={() => setMode("rooms")} className={`h-7 min-w-0 rounded px-3 text-xs font-medium ${mode === "rooms" ? "bg-white text-[#34413d] shadow-sm" : "text-[#7b817e]"}`}>Rooms</Button>
+        <Button variant="tertiary" onClick={() => { setMode("staff"); setView("day"); }} className={`h-7 min-w-0 rounded px-3 text-xs font-medium ${mode === "staff" ? "bg-white text-[#34413d] shadow-sm" : "text-[#7b817e]"}`}><UsersRound size={13} /> Staff day</Button>
+      </div>
     </section>
 
-    <section>
+    {mode === "rooms" ? <><section>
       <div className="panel overflow-x-auto">
         <div style={{ minWidth: `${ROOM_COLUMN_WIDTH + days.length * DAY_WIDTH}px` }}>
           <GanttHeader days={days} />
@@ -66,9 +81,22 @@ export function ScheduleBoard({ bookings, rooms, resources, initialDate }: { boo
         </div>
       </div>
     </section>
-    <aside className="panel max-w-md p-5"><div className="flex items-center gap-2"><Gauge size={16} className="text-[#71817c]" /><div><h2 className="text-sm font-semibold text-[#343c38]">Specialist room utilization</h2><p className="mt-0.5 text-xs text-[#858a87]">Visible period · edit bays excluded</p></div></div><div className="mt-5 space-y-3.5">{utilization.map((room) => { const percent = Math.min(100, Math.round((room.hours / (view === "week" ? 40 : 9)) * 100)); return <div key={room.id}><div className="mb-1.5 flex justify-between gap-2 text-xs"><span className="truncate font-medium text-[#58615d]">{room.name}</span><span className="shrink-0 text-[#858a87]">{room.hours.toFixed(0)}h · {percent}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#ecebe7]"><div className={`h-full rounded-full ${percent > 85 ? "bg-[#bd7650]" : "bg-[#64847e]"}`} style={{ width: `${percent}%` }} /></div></div>; })}{!utilization.length && <p className="text-xs text-[#858a87]">No specialist rooms have been set up.</p>}</div><div className="mt-5 border-t border-[#ecebe7] pt-4 text-xs text-[#7d837f]"><Clock3 className="mr-1 inline" size={13} /> {visible.length} bookings in view</div></aside>
-    {selectedBooking && <BookingFormDialog key={selectedBooking.id} resources={resources} initialStart={toInput(cursor)} booking={selectedBooking} onClose={() => setSelectedBooking(null)} />}
+    <aside className="panel max-w-md p-5"><div className="flex items-center gap-2"><Gauge size={16} className="text-[#71817c]" /><div><h2 className="text-sm font-semibold text-[#343c38]">Specialist room utilization</h2><p className="mt-0.5 text-xs text-[#858a87]">Visible period · edit bays excluded</p></div></div><div className="mt-5 space-y-3.5">{utilization.map((room) => { const percent = Math.min(100, Math.round((room.hours / (view === "week" ? 40 : 9)) * 100)); return <div key={room.id}><div className="mb-1.5 flex justify-between gap-2 text-xs"><span className="truncate font-medium text-[#58615d]">{room.name}</span><span className="shrink-0 text-[#858a87]">{room.hours.toFixed(0)}h · {percent}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#ecebe7]"><div className={`h-full rounded-full ${percent > 85 ? "bg-[#bd7650]" : "bg-[#64847e]"}`} style={{ width: `${percent}%` }} /></div></div>; })}{!utilization.length && <p className="text-xs text-[#858a87]">No specialist rooms have been set up.</p>}</div><div className="mt-5 border-t border-[#ecebe7] pt-4 text-xs text-[#7d837f]"><Clock3 className="mr-1 inline" size={13} /> {visible.length} bookings in view</div></aside></> : <StaffDayView people={resources.people} bookings={bookings} cateringRequests={cateringRequests} day={cursor} onSelect={setSelectedBooking} />}
+    {canApproveTime && <TimeApprovalQueue items={pendingTimes} />}
+    {selectedBooking && <div className="fixed bottom-5 right-5 z-40 flex gap-2 rounded-lg border border-[#e2e3de] bg-[#fafbf9] p-2 shadow-lg">{canManage && <BookingFormDialog key={selectedBooking.id} resources={resources} initialStart={toInput(cursor)} booking={selectedBooking} onClose={() => setSelectedBooking(null)} />}<ActualTimeDialog booking={selectedBooking} /><Button size="sm" variant="tertiary" onPress={() => setSelectedBooking(null)}>Close</Button></div>}
   </div>;
+}
+
+function TimeApprovalQueue({ items }: { items: Array<{ id: string; bookingTitle: string; personName: string; actualStartsAt: Date; actualEndsAt: Date; overtimeMinutes: number; note: string | null }> }) { const router = useRouter(); const [working, setWorking] = useState<string | null>(null); const approve = async (id: string) => { setWorking(id); const response = await fetch(`/api/booking-time-submissions/${id}/approve`, { method: "POST" }); setWorking(null); if (response.ok) router.refresh(); }; return <section className="panel p-4"><h2 className="text-sm font-semibold text-[#343c38]">Time awaiting approval</h2>{items.length ? <div className="mt-3 divide-y divide-[#ecebe7]">{items.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-2 text-xs"><p><b>{item.personName}</b> · {item.bookingTitle} · {timeLabel(item.actualStartsAt)}–{timeLabel(item.actualEndsAt)}{item.overtimeMinutes ? ` · ${item.overtimeMinutes}m overtime` : ""}{item.note ? ` · ${item.note}` : ""}</p><Button size="sm" variant="primary" isDisabled={working === item.id} onPress={() => approve(item.id)} className="bg-[#557b69] text-white">Approve time</Button></div>)}</div> : <p className="mt-2 text-xs text-[#858a87]">No artist time confirmations awaiting approval.</p>}</section>; }
+
+function StaffDayView({ people, bookings, cateringRequests, day, onSelect }: { people: BookingResources["people"]; bookings: ScheduleBooking[]; cateringRequests: CateringRequest[]; day: Date; onSelect: (booking: ScheduleBooking) => void }) {
+  const dayEnd = addDays(day, 1);
+  const rows = people.map((person) => {
+    const next = bookings.filter((booking) => booking.personId === person.id && overlaps(operationalStart(booking), operationalEnd(booking), day, dayEnd)).sort((a, b) => operationalStart(a).getTime() - operationalStart(b).getTime())[0];
+    const catering = next ? cateringRequests.filter((request) => request.bookingId === next.id || request.requestedByPersonId === person.id).filter((request) => request.requestedFor && overlaps(request.requestedFor, new Date(request.requestedFor.getTime() + 1), day, dayEnd)).sort((a, b) => (a.requestedFor?.getTime() ?? 0) - (b.requestedFor?.getTime() ?? 0))[0] : undefined;
+    return { person, next, catering };
+  });
+  return <section className="panel overflow-x-auto"><div className="min-w-[820px]"><div className="grid grid-cols-[1.2fr_1.5fr_130px_1.1fr_100px_1.4fr_1fr] gap-3 border-b border-[#ebeae6] bg-[#fafaf8] px-5 py-3 text-[10px] font-semibold uppercase tracking-[.08em] text-[#7e837f]"><span>Person</span><span>Next booking</span><span>Call / start</span><span>Room</span><span>Episode</span><span>Handover note</span><span>Catering</span></div><div className="divide-y divide-[#efeeea]">{rows.map(({ person, next, catering }) => <div key={person.id} className="grid grid-cols-[1.2fr_1.5fr_130px_1.1fr_100px_1.4fr_1fr] items-center gap-3 px-5 py-3 text-xs"><div><p className="font-semibold text-[#46514c]">{person.name}{person.isFreelancer ? <span className="ml-1.5 font-normal text-[#7c827f]">Freelance</span> : null}</p><p className="mt-0.5 capitalize text-[#858a87]">{person.role.replaceAll("_", " ")} · {person.availability.replaceAll("_", " ")}</p></div>{next ? <><button type="button" onClick={() => onSelect(next)} className="truncate text-left font-medium text-[#476d63] hover:underline">{next.title}</button><span className="text-[#5e6964]">{timeLabel(operationalStart(next))} call · {timeLabel(next.startsAt)} start</span><span className="truncate text-[#5e6964]">{next.roomName ?? "No room"}</span><span className="font-medium text-[#5e6964]">{next.episodeProductionCode ?? "—"}</span><span className="line-clamp-2 text-[#777f7b]">{next.notes ?? (next.handoverMinutes ? `${next.handoverMinutes} min handover` : "—")}</span><span>{catering ? <span className="inline-flex items-center gap-1 rounded-full bg-[#edf1ee] px-2 py-1 text-[10px] font-semibold text-[#557269]"><Coffee size={11} /> {catering.status.replaceAll("_", " ")}</span> : <span className="text-[#969b98]">None</span>}</span></> : <><span className="col-span-6 text-[#969b98]">No booking scheduled</span></>}</div>)}</div></div></section>;
 }
 
 function GanttHeader({ days }: { days: Date[] }) {
@@ -104,19 +132,22 @@ function TimelineGrid({ days }: { days: number }) {
 
 function GanttBookingBar({ placement, totalMinutes, onSelect }: { placement: GanttBooking; totalMinutes: number; onSelect: (booking: ScheduleBooking) => void }) {
   const { booking } = placement;
-  return <button type="button" onClick={() => onSelect(booking)} aria-label={`Edit ${booking.title}`} style={{ top: `${placement.lane * 48 + 4}px`, left: `calc(${(placement.start / totalMinutes) * 100}% + 3px)`, width: `calc(${Math.max(1.5, ((placement.end - placement.start) / totalMinutes) * 100)}% - 6px)` }} className={`absolute h-10 overflow-hidden rounded-md border-l-[3px] px-2 py-1.5 text-left shadow-sm transition-shadow hover:z-10 hover:shadow-md focus:z-10 focus:outline-none focus:ring-2 focus:ring-[#66877f] ${bookingColors(booking.bookingType)}`}><p className="truncate text-[11px] font-semibold text-[#414945]">{booking.title}</p><p className="mt-0.5 truncate text-[10px] text-[#68716d]">{timeLabel(booking.startsAt)}–{timeLabel(booking.endsAt)} · {booking.personName ?? "Unassigned"}</p></button>;
+  return <button type="button" onClick={() => onSelect(booking)} aria-label={`Edit ${booking.title}`} title={`Client: ${timeLabel(booking.startsAt)}–${timeLabel(booking.endsAt)}. Operational: ${timeLabel(operationalStart(booking))}–${timeLabel(operationalEnd(booking))}.`} style={{ top: `${placement.lane * 48 + 4}px`, left: `calc(${(placement.start / totalMinutes) * 100}% + 3px)`, width: `calc(${Math.max(1.5, ((placement.end - placement.start) / totalMinutes) * 100)}% - 6px)` }} className={`absolute h-10 overflow-hidden rounded-md border-l-[3px] px-2 py-1.5 text-left shadow-sm transition-shadow hover:z-10 hover:shadow-md focus:z-10 focus:outline-none focus:ring-2 focus:ring-[#66877f] ${bookingColors(booking.bookingType)}`}><p className="truncate text-[11px] font-semibold text-[#414945]">{booking.title}</p><p className="mt-0.5 truncate text-[10px] text-[#68716d]">{booking.actualStartsAt ? `Actual ${timeLabel(booking.actualStartsAt)}–${booking.actualEndsAt ? timeLabel(booking.actualEndsAt) : "—"}` : `Client ${timeLabel(booking.startsAt)}–${timeLabel(booking.endsAt)}`} · {booking.personName ?? "Unassigned"}</p></button>;
 }
 
 function buildGanttRows(rooms: Array<{ id: string; name: string; type: string }>, bookings: ScheduleBooking[], rangeStart: Date, days: number): GanttRow[] {
   const roomRows = rooms.map((room) => ({ id: room.id, name: room.name, type: room.type, bookings: [] as ScheduleBooking[] }));
   const roomsById = new Map(roomRows.map((room) => [room.id, room]));
   const unassigned: ScheduleBooking[] = [];
+  const personnelAvailability: ScheduleBooking[] = [];
   for (const booking of bookings) {
     const room = booking.roomId ? roomsById.get(booking.roomId) : undefined;
     if (room) room.bookings.push(booking);
+    else if (isPersonnelAvailabilityBooking(booking.bookingType)) personnelAvailability.push(booking);
     else unassigned.push(booking);
   }
   const rows = roomRows.map((row) => ({ ...row, ...layoutRoomBookings(row.bookings, rangeStart, days) }));
+  if (personnelAvailability.length) rows.push({ id: "personnel-availability", name: "Personnel availability", type: "leave, training & unavailable", ...layoutRoomBookings(personnelAvailability, rangeStart, days) });
   if (unassigned.length) rows.push({ id: "unassigned", name: "Unassigned suite", type: "needs allocation", ...layoutRoomBookings(unassigned, rangeStart, days) });
   return rows;
 }
@@ -125,16 +156,19 @@ function layoutRoomBookings(bookings: ScheduleBooking[], rangeStart: Date, days:
   const rangeEnd = addDays(rangeStart, days);
   const totalMinutes = days * MINUTES_IN_SUITE_DAY;
   const laneEnds: number[] = [];
-  const placements = bookings.map((booking) => ({ booking, start: businessTimelineMinute(booking.startsAt, rangeStart), end: businessTimelineMinute(booking.endsAt, rangeStart) })).map((placement) => ({ ...placement, start: Math.max(0, placement.start), end: Math.min(totalMinutes, Math.max(placement.start + 15, placement.end)) })).filter((placement) => overlaps(placement.booking.startsAt, placement.booking.endsAt, rangeStart, rangeEnd)).sort((a, b) => a.start - b.start).map((placement) => { const existingLane = laneEnds.findIndex((end) => end <= placement.start); const lane = existingLane === -1 ? laneEnds.length : existingLane; laneEnds[lane] = placement.end; return { ...placement, lane }; });
+  const placements = bookings.map((booking) => ({ booking, start: businessTimelineMinute(operationalStart(booking), rangeStart), end: businessTimelineMinute(operationalEnd(booking), rangeStart) })).map((placement) => ({ ...placement, start: Math.max(0, placement.start), end: Math.min(totalMinutes, Math.max(placement.start + 15, placement.end)) })).filter((placement) => overlaps(operationalStart(placement.booking), operationalEnd(placement.booking), rangeStart, rangeEnd)).sort((a, b) => a.start - b.start).map((placement) => { const existingLane = laneEnds.findIndex((end) => end <= placement.start); const lane = existingLane === -1 ? laneEnds.length : existingLane; laneEnds[lane] = placement.end; return { ...placement, lane }; });
   return { bookings: placements, lanes: Math.max(1, laneEnds.length) };
 }
 
 function businessTimelineMinute(value: Date, rangeStart: Date) { const dayIndex = calendarDayDistance(rangeStart, value); const minuteInDay = minutesOfDay(value); return dayIndex * MINUTES_IN_SUITE_DAY + Math.min(MINUTES_IN_SUITE_DAY, Math.max(0, minuteInDay - SUITE_DAY_START)); }
-function bookingColors(type: string) { return { edit: "border-l-[#5f7ee6] bg-[#eff3ff]", color: "border-l-[#9b70e5] bg-[#f5effc]", mix: "border-l-[#4f9a79] bg-[#edf7f2]", qc: "border-l-[#c2764f] bg-[#fcf1eb]", client_review: "border-l-[#c49b4b] bg-[#faf5e8]", ingest: "border-l-[#74899a] bg-[#f0f4f6]", conform: "border-l-[#817eaa] bg-[#f2f1fa]" }[type] ?? "border-l-[#74899a] bg-[#f0f4f6]"; }
+function bookingColors(type: string) { return { edit: "border-l-[#5f7ee6] bg-[#eff3ff]", color: "border-l-[#9b70e5] bg-[#f5effc]", mix: "border-l-[#4f9a79] bg-[#edf7f2]", qc: "border-l-[#c2764f] bg-[#fcf1eb]", client_review: "border-l-[#c49b4b] bg-[#faf5e8]", ingest: "border-l-[#74899a] bg-[#f0f4f6]", conform: "border-l-[#817eaa] bg-[#f2f1fa]", leave: "border-l-[#b75f75] bg-[#fceff2]", training: "border-l-[#4b8da0] bg-[#eef7f9]", sick: "border-l-[#c2764f] bg-[#fcf1eb]", unavailable: "border-l-[#797d87] bg-[#f1f2f4]" }[type] ?? "border-l-[#74899a] bg-[#f0f4f6]"; }
+function isPersonnelAvailabilityBooking(type: string) { return ["leave", "training", "sick", "unavailable"].includes(type); }
 function startOfDay(date: Date) { const value = new Date(date); value.setHours(0, 0, 0, 0); return value; }
 function addDays(date: Date, count: number) { const value = new Date(date); value.setDate(value.getDate() + count); return value; }
 function overlaps(start: Date, end: Date, rangeStart: Date, rangeEnd: Date) { return start < rangeEnd && end > rangeStart; }
-function visibleHours(booking: ScheduleBooking, rangeStart: Date, rangeEnd: Date) { return Math.max(0, (Math.min(booking.endsAt.getTime(), rangeEnd.getTime()) - Math.max(booking.startsAt.getTime(), rangeStart.getTime())) / 3_600_000); }
+function visibleHours(booking: ScheduleBooking, rangeStart: Date, rangeEnd: Date) { return Math.max(0, (Math.min(operationalEnd(booking).getTime(), rangeEnd.getTime()) - Math.max(operationalStart(booking).getTime(), rangeStart.getTime())) / 3_600_000); }
+function operationalStart(booking: ScheduleBooking) { return new Date(booking.startsAt.getTime() - booking.setupMinutes * 60_000); }
+function operationalEnd(booking: ScheduleBooking) { return new Date(booking.endsAt.getTime() + (booking.handoverMinutes + booking.strikeMinutes) * 60_000); }
 function calendarDayDistance(rangeStart: Date, value: Date) { return Math.floor((startOfDay(value).getTime() - rangeStart.getTime()) / 86_400_000); }
 function minutesOfDay(date: Date) { return date.getHours() * 60 + date.getMinutes(); }
 function timeLabel(date: Date) { return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date); }
