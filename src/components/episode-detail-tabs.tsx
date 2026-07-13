@@ -34,12 +34,56 @@ export function EpisodeDetailTabs({ data, canManageWorkOrders, canUpdateWorkOrde
 }
 
 function TabContent({ tab, data, canManageWorkOrders, canUpdateWorkOrders, canManageCommercial }: { tab: TabName; data: WorkspaceData; canManageWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean }) {
-  if (tab === "Overview") return <div className="space-y-4"><div className="grid gap-4 sm:grid-cols-3">{[["Workflow stage", data.episode.workflowStage], ["Editor", data.episode.editorName], ["Producer", data.episode.producerName], ["Lock date", data.episode.lockedCutDate], ["Delivery deadline", formatDate(data.episode.deliveryDeadline)], ["QC status", data.episode.qcStatus.replaceAll("_", " ")]].map(([label, value]) => <div key={String(label)} className="rounded-lg border border-[#ecebe7] p-3"><p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#878c89]">{label}</p><p className="mt-1.5 text-sm font-medium capitalize text-[#3e4642]">{value || "—"}</p></div>)}</div><EpisodeTeam episodeId={data.episode.id ?? ""} assignments={data.episodeTeam} people={data.workflowApprovers} canManage={false} /></div>;
+  if (tab === "Overview") return <EpisodeOverview data={data} />;
   if (tab === "Workflow") return <WorkflowPanel episodeId={data.episode.id} initialStageId={data.episode.workflowStageId} stages={data.workflowStages} rules={data.workflowApprovalRules} approvals={data.workflowApprovals} />;
   if (tab === "Work orders") return <EpisodeWorkOrders episodeId={data.episode.id ?? ""} initialWorkOrders={data.workOrders} people={data.workflowApprovers} stages={data.workflowStages} currentStageId={data.episode.workflowStageId} canManage={canManageWorkOrders} canUpdate={canUpdateWorkOrders} canManageCommercial={canManageCommercial} />;
   if (tab === "Bookings") return <List empty="No scheduled room bookings." items={data.schedule} render={(item) => <><b>{item.title}</b><span>{formatDate(item.startsAt)} · {item.roomName}</span></>} />;
   if (tab === "Budget") return <List empty="No budget lines are linked." items={data.budget} render={(item) => <><b>{item.category}</b><span>${Number(item.actualAmount).toLocaleString()} actual / ${Number(item.budgetedAmount).toLocaleString()} estimate</span></>} />;
   return <List empty="No recent activity." items={data.activity} render={(item) => <><b className="capitalize">{item.action.replaceAll(".", " ").replaceAll("_", " ")}</b><span>{formatDate(item.createdAt)}</span></>} />;
+}
+
+function EpisodeOverview({ data }: { data: WorkspaceData }) {
+  const currentStage = data.workflowStages.find((stage) => stage.id === data.episode.workflowStageId);
+  const stageIndex = currentStage ? data.workflowStages.findIndex((stage) => stage.id === currentStage.id) + 1 : 0;
+  const stageRules = currentStage ? data.workflowApprovalRules.filter((rule) => rule.workflowStageId === currentStage.id) : [];
+  const signedRules = stageRules.filter((rule) => data.workflowApprovals.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"));
+  const openWorkOrders = data.workOrders.filter((order) => !["complete", "cancelled"].includes(order.status));
+  const upcomingBookings = data.schedule.slice(0, 3);
+
+  return <div className="space-y-5">
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,.65fr)]">
+      <section className="rounded-xl border border-[#e5e7e3] bg-[#f8faf8] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><p className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#75817c]">Current workflow</p><h2 className="mt-1 text-lg font-semibold text-[#303936]">{currentStage?.name ?? data.episode.workflowStage ?? "Workflow not set"}</h2><p className="mt-1 text-xs text-[#737c77]">{stageIndex ? `Stage ${stageIndex} of ${data.workflowStages.length}` : "Set the current stage in Workflow."}</p></div>
+          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${stageRules.length && signedRules.length === stageRules.length ? "bg-[#dcebe4] text-[#3d7160]" : "bg-[#ecefea] text-[#617069]"}`}>{stageRules.length ? `${signedRules.length}/${stageRules.length} sign-offs` : "No sign-off gate"}</span>
+        </div>
+        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[#e6e9e5]"><div className="h-full rounded-full bg-[#5f8578]" style={{ width: `${data.workflowStages.length ? Math.max((stageIndex / data.workflowStages.length) * 100, stageIndex ? 8 : 0) : 0}%` }} /></div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <OverviewItem label="Episode status" value={humanize(data.episode.status)} />
+          <OverviewItem label="QC status" value={humanize(data.episode.qcStatus)} tone={data.episode.qcStatus === "needs_attention" ? "warning" : undefined} />
+          <OverviewItem label="Picture lock" value={formatDate(data.episode.lockedCutDate)} />
+          <OverviewItem label="Delivery deadline" value={formatDate(data.episode.deliveryDeadline)} />
+        </div>
+      </section>
+      <EpisodeTeam episodeId={data.episode.id ?? ""} assignments={data.episodeTeam} people={data.workflowApprovers} canManage={false} />
+    </div>
+
+    <div className="grid gap-4 lg:grid-cols-2">
+      <section className="rounded-xl border border-[#e7e8e4] p-4">
+        <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#7b827f]">Schedule</p><h3 className="mt-1 text-sm font-semibold text-[#414b47]">Booked room time</h3></div><span className="text-xs text-[#75807a]">{data.schedule.length} booking{data.schedule.length === 1 ? "" : "s"}</span></div>
+        <div className="mt-3 divide-y divide-[#ecece8]">{upcomingBookings.length ? upcomingBookings.map((booking) => <div key={booking.id} className="flex items-center justify-between gap-3 py-2.5 text-xs"><div className="min-w-0"><p className="truncate font-medium text-[#49534e]">{booking.title}</p><p className="mt-0.5 text-[#858c88]">{booking.roomName ?? "Room to be confirmed"}</p></div><time className="shrink-0 text-[#65736d]">{formatDate(booking.startsAt)}</time></div>) : <p className="py-5 text-center text-xs text-[#858a87]">No room bookings are linked to this episode.</p>}</div>
+      </section>
+      <section className="rounded-xl border border-[#e7e8e4] p-4">
+        <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#7b827f]">Work orders</p><h3 className="mt-1 text-sm font-semibold text-[#414b47]">Episode actions</h3></div><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${openWorkOrders.length ? "bg-[#f4eee5] text-[#94633d]" : "bg-[#e7efe9] text-[#48705e]"}`}>{openWorkOrders.length} open</span></div>
+        <div className="mt-3 divide-y divide-[#ecece8]">{openWorkOrders.length ? openWorkOrders.slice(0, 3).map((order) => <div key={order.id} className="flex items-center justify-between gap-3 py-2.5 text-xs"><div className="min-w-0"><p className="truncate font-medium text-[#49534e]">{order.title}</p><p className="mt-0.5 text-[#858c88]">{order.assigneeName ?? order.department ?? "Unassigned"}</p></div><span className="shrink-0 capitalize text-[#65736d]">{humanize(order.status)}</span></div>) : <p className="py-5 text-center text-xs text-[#858a87]">No open work orders.</p>}</div>
+      </section>
+    </div>
+  </div>;
+}
+
+function OverviewItem({ label, value, tone }: { label: string; value: string; tone?: "warning" | "danger" | "success" }) {
+  const toneClass = tone === "danger" ? "text-[#a35e41]" : tone === "warning" ? "text-[#a06f3a]" : tone === "success" ? "text-[#3f7563]" : "text-[#46504b]";
+  return <div className="rounded-lg border border-[#e7e9e5] bg-white/50 px-3 py-2.5"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#858c88]">{label}</p><p className={`mt-1 text-sm font-medium capitalize ${toneClass}`}>{value}</p></div>;
 }
 
 function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals }: { episodeId?: string; initialStageId: string | null; stages: readonly WorkflowStage[]; rules: WorkflowApprovalRule[]; approvals: WorkflowApproval[] }) {
@@ -154,4 +198,8 @@ function List<T extends Row>({ items, empty, render }: { items: T[]; empty: stri
 
 function formatDate(value: Date | string | null) {
   return value ? new Intl.DateTimeFormat("en-GB", { month: "short", day: "numeric" }).format(new Date(value)) : "—";
+}
+
+function humanize(value: string) {
+  return value.replaceAll("_", " ");
 }
