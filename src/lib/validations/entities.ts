@@ -49,6 +49,15 @@ export const showFormSchema = z.object({
 export const insertShowSchema = showFormSchema.extend({ organizationId: id });
 export const updateShowSchema = showFormSchema.partial();
 
+/** Internal account-management fields. The account identity itself remains controlled at creation. */
+export const updateCrmCompanySchema = z.object({
+  accountStatus: z.enum(["active", "on_hold", "inactive"]),
+  accountOwnerId: nullableId,
+  nextAction: z.string().trim().max(500).nullable().optional(),
+  nextActionDueAt: z.string().date().nullable().optional(),
+  notes: z.string().trim().max(8000).nullable().optional(),
+});
+
 export const insertSeasonSchema = z.object({
   showId: id,
   number: z.coerce.number().int().positive(),
