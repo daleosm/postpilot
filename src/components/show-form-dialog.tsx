@@ -5,23 +5,20 @@ import { Button } from "@heroui/react";
 import { Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { useForm, useWatch } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { showFormSchema } from "@/lib/validations/entities";
 
 type ShowFormValues = z.input<typeof showFormSchema>;
-type TeamMember = { id: string; name: string; role: string; availability: string; isActive: boolean };
-
-export function ShowFormDialog({ show, people = [], assignedTeamIds = [] }: { show?: { id: string; title: string; code: string; network: string | null; productionCompany: string | null; description?: string | null }; people?: TeamMember[]; assignedTeamIds?: string[] }) {
+export function ShowFormDialog({ show }: { show?: { id: string; title: string; code: string; network: string | null; productionCompany: string | null; description?: string | null } }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   const form = useForm<ShowFormValues>({
     resolver: zodResolver(showFormSchema),
-    defaultValues: { title: show?.title ?? "", code: show?.code ?? "", network: show?.network ?? "", productionCompany: show?.productionCompany ?? "", description: show?.description ?? "", teamMemberIds: assignedTeamIds },
+    defaultValues: { title: show?.title ?? "", code: show?.code ?? "", network: show?.network ?? "", productionCompany: show?.productionCompany ?? "", description: show?.description ?? "" },
   });
-  const teamMemberIds = useWatch({ control: form.control, name: "teamMemberIds" }) ?? [];
 
   async function submit(values: ShowFormValues) {
     setError("");
@@ -38,7 +35,6 @@ export function ShowFormDialog({ show, people = [], assignedTeamIds = [] }: { sh
         <div className="grid grid-cols-2 gap-3"><Field label="Show code" error={form.formState.errors.code?.message}><input {...form.register("code")} placeholder="SN" className="uppercase" /></Field><Field label="Network / client" error={form.formState.errors.network?.message}><input {...form.register("network")} placeholder="Northstar Network" /></Field></div>
         <Field label="Production company" error={form.formState.errors.productionCompany?.message}><input {...form.register("productionCompany")} placeholder="Vantage Television" /></Field>
         <Field label="Notes" error={form.formState.errors.description?.message}><textarea {...form.register("description")} rows={3} placeholder="Optional production notes" /></Field>
-        <fieldset><legend className="text-xs font-medium text-[#535b57]">Show team <span className="font-normal text-[#858a87]">(optional)</span></legend><p className="mt-1 text-[11px] leading-4 text-[#858a87]">Assign the core post team now. Episode assignments are made separately when you create an episode.</p>{people.length ? <div className="mt-2 grid max-h-44 gap-1.5 overflow-y-auto rounded-md border border-[#dedfda] p-2 sm:grid-cols-2">{people.filter((person) => person.isActive).map((person) => { const selected = teamMemberIds.includes(person.id); return <label key={person.id} className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs ${selected ? "bg-[#edf3ef] text-[#34554a]" : "hover:bg-[#fafaf8] text-[#505854]"}`}><input type="checkbox" checked={selected} onChange={(event) => { form.setValue("teamMemberIds", event.target.checked ? [...teamMemberIds, person.id] : teamMemberIds.filter((id) => id !== person.id), { shouldDirty: true, shouldValidate: true }); }} /><span className="min-w-0"><span className="block truncate font-medium">{person.name}</span><span className="block capitalize text-[10px] text-[#858a87]">{person.role.replaceAll("_", " ")} · {person.availability.replaceAll("_", " ")}</span></span></label>; })}</div> : <p className="mt-2 rounded-md border border-dashed border-[#dedfda] px-3 py-2 text-xs text-[#858a87]">Add people in Team before assigning a show team.</p>}</fieldset>
         {error && <p className="text-xs text-[#a35e41]">{error}</p>}
         <div className="flex justify-end gap-2 border-t border-[#ecebe7] pt-4"><Button type="button" variant="tertiary" onPress={() => setOpen(false)} className="text-[#59615e]">Cancel</Button><Button type="submit" variant="primary" isDisabled={form.formState.isSubmitting} className="bg-[#263130] text-white">{form.formState.isSubmitting ? "Saving…" : show ? "Save changes" : "Create show"}</Button></div>
       </form>

@@ -215,18 +215,6 @@ export const people = pgTable("people", {
   uniqueIndex("people_organization_user_idx").on(table.organizationId, table.userId),
 ]);
 
-/** The standing post team assigned to a show; episode assignments remain separate. */
-export const showTeamAssignments = pgTable("show_team_assignments", {
-  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-  showId: uuid("show_id").notNull().references(() => shows.id, { onDelete: "cascade" }),
-  personId: uuid("person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
-  ...auditColumns,
-}, (table) => [
-  primaryKey({ columns: [table.showId, table.personId] }),
-  index("show_team_assignments_person_idx").on(table.personId),
-  index("show_team_assignments_organization_id_idx").on(table.organizationId),
-]);
-
 export const rooms = pgTable("rooms", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),

@@ -43,7 +43,6 @@ export const showFormSchema = z.object({
   network: z.string().trim().max(120).nullable().optional(),
   productionCompany: z.string().trim().max(120).nullable().optional(),
   description: z.string().trim().max(4000).nullable().optional(),
-  teamMemberIds: z.array(id).max(100).refine((ids) => new Set(ids).size === ids.length, "Team members must be unique.").default([]),
 });
 export const insertShowSchema = showFormSchema.extend({ organizationId: id });
 export const updateShowSchema = showFormSchema.partial();

@@ -3,10 +3,9 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { episodes, seasons, showTeamAssignments, shows } from "@/lib/db/schema";
+import { episodeTeamAssignments, episodes, people, seasons, shows } from "@/lib/db/schema";
 import { getDashboardData } from "./dashboard";
 import { listEpisodes } from "./episodes";
-import { listTeam } from "./team";
 
 export async function listShows(organizationId: string) {
   const db = getDb();
@@ -43,26 +42,39 @@ export async function getShow(organizationId: string, showId: string) {
   return rows[0] ?? null;
 }
 
-export async function listShowTeam(organizationId: string, showId: string) {
-  const [allTeam, assignments] = await Promise.all([
-    listTeam(organizationId),
-    getDb().select({ personId: showTeamAssignments.personId })
-      .from(showTeamAssignments)
-      .innerJoin(shows, and(eq(showTeamAssignments.showId, shows.id), eq(showTeamAssignments.organizationId, organizationId)))
-      .where(and(eq(showTeamAssignments.showId, showId), eq(showTeamAssignments.organizationId, organizationId), eq(shows.organizationId, organizationId))),
-  ]);
-  const assignedIds = new Set(assignments.map((assignment) => assignment.personId));
-  return allTeam.filter((person) => assignedIds.has(person.id));
+export async function listShowEpisodeTeam(organizationId: string, showId: string) {
+  const rows = await getDb().select({
+    personId: people.id,
+    name: people.name,
+    role: people.role,
+    episodeId: episodes.id,
+    episodeNumber: episodes.number,
+    episodeTitle: episodes.title,
+    seasonNumber: seasons.number,
+  }).from(episodeTeamAssignments)
+    .innerJoin(episodes, eq(episodeTeamAssignments.episodeId, episodes.id))
+    .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+    .innerJoin(shows, eq(seasons.showId, shows.id))
+    .innerJoin(people, eq(episodeTeamAssignments.personId, people.id))
+    .where(and(eq(episodeTeamAssignments.organizationId, organizationId), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.id, showId), eq(shows.organizationId, organizationId), eq(people.organizationId, organizationId)))
+    .orderBy(asc(people.name), asc(seasons.number), asc(episodes.number));
+
+  return [...rows.reduce<Map<string, { id: string; name: string; role: string; episodes: Array<{ id: string; number: number; title: string; seasonNumber: number }> }>>((team, row) => {
+    const person = team.get(row.personId) ?? { id: row.personId, name: row.name, role: row.role, episodes: [] };
+    person.episodes.push({ id: row.episodeId, number: row.episodeNumber, title: row.episodeTitle, seasonNumber: row.seasonNumber });
+    team.set(row.personId, person);
+    return team;
+  }, new Map()).values()];
 }
 
 export async function getShowWorkspace(organizationId: string, showId: string) {
-  const [show, episodeRows, availableTeam, team, dashboard, showRows] = await Promise.all([
+  const [show, episodeRows, team, dashboard, showRows, peopleRows] = await Promise.all([
     getShow(organizationId, showId),
     listEpisodes(organizationId, showId),
-    listTeam(organizationId),
-    listShowTeam(organizationId, showId),
+    listShowEpisodeTeam(organizationId, showId),
     getDashboardData(organizationId),
     listShows(organizationId),
+    getDb().select({ id: people.id, name: people.name, role: people.role }).from(people).where(and(eq(people.organizationId, organizationId), eq(people.isActive, true))).orderBy(asc(people.name)),
   ]);
   if (!show) return null;
 
@@ -71,7 +83,7 @@ export async function getShowWorkspace(organizationId: string, showId: string) {
     seasons: (showRows.find((row) => row.id === showId)?.seasons ?? []).map((season) => ({ ...season, activeCount: season.activeEpisodeCount })),
     episodes: episodeRows,
     team,
-    availableTeam,
+    people: peopleRows,
     activity: dashboard.activity,
   };
 }

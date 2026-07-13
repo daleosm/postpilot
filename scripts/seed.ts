@@ -8,6 +8,7 @@ import {
   bookings,
   budgetLines,
   cateringRequests,
+  episodeTeamAssignments,
   episodes,
   organizationMembers,
   organizations,
@@ -20,7 +21,6 @@ import {
   rooms,
   seasons,
   serviceRates,
-  showTeamAssignments,
   shows,
   users,
   workflowStageApprovalRules,
@@ -354,10 +354,6 @@ async function seedTenant(tenant: TenantSeed) {
 
   await db.insert(shows).values(tenant.shows.map((show, index) => ({ id: showId(index + 1), organizationId: tenant.id, title: show.title, code: show.code, network: tenant.networks[index] ?? primaryNetwork, productionCompany: show.company, timeZone: "Europe/London" })));
   await db.insert(seasons).values(tenant.shows.map((show, index) => ({ id: seasonId(index + 1), organizationId: tenant.id, showId: showId(index + 1), number: 1, title: `${show.title} · Season 1`, startDate: day(-100 + index * 18) })));
-  await db.insert(showTeamAssignments).values(tenant.shows.flatMap((_, showIndex) => tenantPeople
-    .filter((person) => !["finance", "runner", "client"].includes(person.role))
-    .map((_, personIndex) => ({ organizationId: tenant.id, showId: showId(showIndex + 1), personId: personId(personIndex + 1) }))));
-
   const lifecyclePatterns = [
     ["editor_cut", "in_progress", 4],
     ["review", "not_started", 6],
@@ -379,6 +375,12 @@ async function seedTenant(tenant: TenantSeed) {
     };
   }));
   await db.insert(episodes).values(episodeRows);
+  await db.insert(episodeTeamAssignments).values(episodeRows.flatMap((episode, index) => {
+    const roles = ["producer", "editor", "assistant_editor"];
+    if (["locked", "online", "delivered"].includes(episode.status)) roles.push("colorist", "sound_mixer");
+    if (index % 3 === 0) roles.push("qc");
+    return roles.map((role) => ({ organizationId: tenant.id, episodeId: episode.id, personId: byRole(role), responsibility: role }));
+  }));
 
   await db.insert(rooms).values([
     { id: roomId(1), organizationId: tenant.id, name: tenant.roomNames[0], type: "edit_bay", location: "Editorial floor", capacity: 3 },
