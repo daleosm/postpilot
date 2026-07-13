@@ -246,6 +246,20 @@
       "when": 1783987200009,
       "tag": "0034_link_shows_bookings_to_crm",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1783987200010,
+      "tag": "0035_rate_card_inheritance",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1783987200011,
+      "tag": "0036_episode_rate_card_overrides",
+      "breakpoints": true
     }
   ]
 }

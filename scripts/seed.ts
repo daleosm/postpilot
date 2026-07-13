@@ -21,6 +21,8 @@ import {
   postWorkflows,
   qcIssues,
   qcReports,
+  rateCardItems,
+  rateCards,
   rooms,
   seasons,
   showContacts,
@@ -102,7 +104,7 @@ const defaultRolePolicies: Record<string, string[]> = {
   post_supervisor: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "approve_time", "manage_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "request_catering", "view_assigned"],
   producer: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "approve_time", "manage_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "request_catering", "view_assigned"],
   head_of_production: ["manage_shows", "manage_bookings", "manage_work_orders", "manage_budget", "request_catering", "view_assigned"],
-  finance: ["manage_budget", "approve_time", "view_assigned"],
+  finance: ["manage_budget", "approve_time", "manage_rates", "approve_rate_overrides", "view_assigned"],
   runner: ["request_catering", "manage_catering", "view_assigned"],
   qc: ["update_assigned_work", "manage_qc", "verify_qc", "request_catering", "view_assigned"],
   editor: ["update_assigned_work", "request_catering", "view_assigned"],
@@ -439,6 +441,8 @@ async function seedTenant(tenant: TenantSeed) {
     { id: id(tenant.number, "36", 5), organizationId: tenant.id, name: "Technical QC", category: "QC", unit: "episode", rate: (485 * tenant.budgetProfile.multiplier).toFixed(2), currency: tenant.budgetProfile.currency, notes: "External technical QC pass." },
     { id: id(tenant.number, "36", 6), organizationId: tenant.id, name: "VFX turnover", category: "VFX", unit: "fixed", rate: (3200 * tenant.budgetProfile.multiplier).toFixed(2), currency: tenant.budgetProfile.currency, notes: "Per-episode vendor coordination allowance." },
   ]);
+  await db.insert(rateCards).values([{ id: id(tenant.number, "45", 1), organizationId: tenant.id, clientCompanyId: companyId(1), network: primaryNetwork, name: `${primaryNetwork} network rate card`, currency: tenant.budgetProfile.currency, isActive: true }, { id: id(tenant.number, "45", 2), organizationId: tenant.id, showId: showId(1), name: `${tenant.shows[0].title} show override`, currency: tenant.budgetProfile.currency, isActive: true }, { id: id(tenant.number, "45", 3), organizationId: tenant.id, episodeId: episodeId(1), name: `${episodeRows[0].productionCode} episode override`, currency: tenant.budgetProfile.currency, isActive: true }]);
+  await db.insert(rateCardItems).values([{ id: id(tenant.number, "46", 1), organizationId: tenant.id, rateCardId: id(tenant.number, "45", 1), serviceRateId: id(tenant.number, "36", 3), category: "Colour", unit: "day", rate: (930 * tenant.budgetProfile.multiplier).toFixed(2) }, { id: id(tenant.number, "46", 2), organizationId: tenant.id, rateCardId: id(tenant.number, "45", 2), serviceRateId: id(tenant.number, "36", 1), category: "Edit suite", unit: "day", rate: (720 * tenant.budgetProfile.multiplier).toFixed(2) }, { id: id(tenant.number, "46", 3), organizationId: tenant.id, rateCardId: id(tenant.number, "45", 3), serviceRateId: id(tenant.number, "36", 5), category: "QC", unit: "episode", rate: (525 * tenant.budgetProfile.multiplier).toFixed(2) }]);
   await db.insert(billables).values([{ id: id(tenant.number, "31", 1), organizationId: tenant.id, showId: showId(1), episodeId: episodeId(4), vendor: tenant.budgetProfile.vendor, reference: `${tenant.shows[0].code}-PO-021`, description: "Finishing and clearance support", amount: (18400 * tenant.budgetProfile.multiplier).toFixed(2), currency: tenant.budgetProfile.currency, status: "approved", invoiceDate: day(-5), dueDate: day(18) }]);
   await db.insert(activityLog).values([
     { id: id(tenant.number, "32", 1), organizationId: tenant.id, actorUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId, action: "episode.picture_lock_approved", entityType: "episode", entityId: episodeId(3), metadata: { workflow: tenant.workflowName, status: "approved" } },

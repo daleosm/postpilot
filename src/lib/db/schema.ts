@@ -483,6 +483,9 @@ export const serviceRates = pgTable("service_rates", {
   index("service_rates_organization_id_idx").on(table.organizationId),
 ]);
 
+export const rateCards = pgTable("rate_cards", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), clientCompanyId: uuid("client_company_id").references(() => crmCompanies.id, { onDelete: "cascade" }), network: text("network"), showId: uuid("show_id").references(() => shows.id, { onDelete: "cascade" }), episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "cascade" }), name: text("name").notNull(), currency: text("currency").default("USD").notNull(), effectiveFrom: date("effective_from"), effectiveTo: date("effective_to"), isActive: boolean("is_active").default(true).notNull(), ...auditColumns }, (table) => [index("rate_cards_org_client_idx").on(table.organizationId, table.clientCompanyId), index("rate_cards_org_network_idx").on(table.organizationId, table.network), index("rate_cards_org_show_idx").on(table.organizationId, table.showId), index("rate_cards_org_episode_idx").on(table.organizationId, table.episodeId)]);
+export const rateCardItems = pgTable("rate_card_items", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), rateCardId: uuid("rate_card_id").notNull().references(() => rateCards.id, { onDelete: "cascade" }), serviceRateId: uuid("service_rate_id").references(() => serviceRates.id, { onDelete: "set null" }), category: text("category").notNull(), unit: text("unit").notNull(), rate: numeric("rate", { precision: 14, scale: 2 }).notNull(), ...auditColumns }, (table) => [uniqueIndex("rate_card_items_card_category_unit_idx").on(table.rateCardId, table.category, table.unit), index("rate_card_items_org_idx").on(table.organizationId)]);
+
 export const billables = pgTable("billables", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
@@ -496,6 +499,9 @@ export const billables = pgTable("billables", {
   status: billableStatus("status").default("draft").notNull(),
   invoiceDate: date("invoice_date"),
   dueDate: date("due_date"),
+  rateSource: text("rate_source"),
+  rateSnapshot: jsonb("rate_snapshot").$type<Record<string, unknown>>(),
+  overrideReason: text("override_reason"),
   ...auditColumns,
 }, (table) => [index("billables_organization_status_idx").on(table.organizationId, table.status)]);
 

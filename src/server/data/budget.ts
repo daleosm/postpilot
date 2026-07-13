@@ -18,6 +18,7 @@ export async function getBudgetData(organizationId: string) {
       costType: budgetLines.costType,
       showId: shows.id,
       showTitle: shows.title,
+      network: shows.network,
       episodeId: episodes.id,
       episodeTitle: episodes.title,
       episodeNumber: episodes.number,

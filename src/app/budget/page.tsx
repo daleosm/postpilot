@@ -1,9 +1,11 @@
 import { AlertTriangle, CircleDollarSign, ReceiptText, TrendingUp } from "lucide-react";
+import Link from "next/link";
 
 import { BudgetLineForm } from "@/components/budget-line-form";
+import { RateOverrideCard } from "@/components/rate-override-card";
 import { ServiceRateCard } from "@/components/service-rate-card";
 import { WorkOrderChargeQueue } from "@/components/work-order-charge-queue";
-import { getActiveOrganizationContext, getActiveShowName } from "@/lib/organizations";
+import { getActiveOrganizationContext } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { can } from "@/lib/permissions";
 import { getBudgetData, listEpisodes, listServiceRates } from "@/server/data";
@@ -17,9 +19,11 @@ type Line = {
   category: string;
   description: string | null;
   showTitle: string | null;
+  network: string | null;
   budgetedAmount: string | number;
   actualAmount: string | number;
   costType: string;
+  showId: string | null;
 };
 
 type BudgetData = {
@@ -29,17 +33,29 @@ type BudgetData = {
   commitments?: Array<{ id: string; amount: string | number | null; status: string; showTitle: string | null; vendorName: string }>;
 };
 
-export default async function BudgetPage() {
+export default async function BudgetPage({ searchParams }: { searchParams: Promise<{ network?: string; show?: string; episode?: string }> }) {
   if (!(await can("manage_budget"))) redirect("/");
-  const activeShow = await getActiveShowName();
+  const params = await searchParams;
+  const activeShow = params.show;
+  const selectedNetwork = params.network;
   const data = await load();
   const serviceRates = await loadServiceRates();
-  const episodes = activeShow ? data.episodes.filter((episode) => episode.showTitle === activeShow) : data.episodes;
-  const lines = activeShow ? data.lines.filter((line) => line.showTitle === activeShow) : data.lines;
+  const selectedEpisodeId = params.episode;
+  const networks = [...new Set(data.lines.map((line) => line.network ?? "Independent"))];
+  if (!selectedNetwork) return <BudgetNetworkPicker networks={networks} lines={data.lines} rates={serviceRates} />;
+  const showRows = [...new Map(data.lines.filter((line) => (line.network ?? "Independent") === selectedNetwork && line.showId && line.showTitle).map((line) => [line.showId!, { id: line.showId!, title: line.showTitle! }])).values()];
+  const showNames = showRows.map((show) => show.title);
+  if (!activeShow) return <BudgetShowPicker network={selectedNetwork} shows={showRows} lines={data.lines} rates={serviceRates} />;
+  if (!showNames.includes(activeShow)) redirect(`/budget?network=${encodeURIComponent(selectedNetwork)}`);
+  if (!selectedEpisodeId) return <BudgetEpisodePicker network={selectedNetwork} show={activeShow} episodes={data.episodes.filter((episode) => episode.showTitle === activeShow)} lines={data.lines.filter((line) => line.showTitle === activeShow)} rates={serviceRates} showId={showRows.find((show) => show.title === activeShow)?.id} />;
+  const selectedEpisode = data.episodes.find((episode) => episode.id === selectedEpisodeId && episode.showTitle === activeShow);
+  if (!selectedEpisode) redirect(`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`);
+  const episodes = [selectedEpisode];
+  const lines = data.lines.filter((line) => line.episodeId === selectedEpisodeId && line.showTitle === activeShow);
   const totals = lines.reduce((sum, line) => ({ estimate: sum.estimate + Number(line.budgetedAmount), actual: sum.actual + Number(line.actualAmount) }), { estimate: 0, actual: 0 });
   const burn = totals.estimate ? Math.round((totals.actual / totals.estimate) * 100) : 0;
   const variance = totals.actual - totals.estimate;
-  const committed = (data.commitments ?? []).filter((po) => !activeShow || po.showTitle === activeShow).reduce((sum, po) => sum + Number(po.amount ?? 0), 0);
+  const committed = (data.commitments ?? []).filter((po) => po.showTitle === activeShow).reduce((sum, po) => sum + Number(po.amount ?? 0), 0);
   const forecast = totals.actual + committed;
   const episodeTotals = Object.values(lines.reduce<Record<string, { label: string; estimate: number; actual: number }>>((groups, line) => {
     const key = line.episodeId ?? line.id;
@@ -52,11 +68,11 @@ export default async function BudgetPage() {
   return <div className="space-y-5">
     <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
-        <p className="text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">Episode cost control{activeShow ? ` · ${activeShow}` : ""}</p>
+        <p className="text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">Episode cost control · {activeShow}</p>
         <h1 className="mt-2 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Budget</h1>
         <p className="mt-1 text-sm text-[#747977]">Episode-level costs with show roll-ups for post-production control.</p>
       </div>
-      <BudgetLineForm episodes={episodes} />
+      <div className="flex gap-2"><Link href={`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`} className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">All episodes</Link><BudgetLineForm episodes={episodes} /></div>
     </header>
 
     <section className="grid gap-3 sm:grid-cols-4">
@@ -67,7 +83,7 @@ export default async function BudgetPage() {
       <Metric icon={variance > 0 ? <AlertTriangle size={16} /> : <TrendingUp size={16} />} label="Variance" value={`${variance > 0 ? "+" : ""}${money(variance)}`} detail={variance > 0 ? "Over estimate" : "Within estimate"} warning={variance > 0} />
     </section>
 
-    <ServiceRateCard rates={serviceRates} />
+    <RateOverrideCard rates={serviceRates} scope={{ type: "episode", episodeId: selectedEpisodeId }} title="Episode service rate card" />
     <WorkOrderChargeQueue charges={activeShow ? data.workOrderCharges.filter((charge) => charge.showTitle === activeShow) : data.workOrderCharges} />
 
     <section className="panel p-5">
@@ -126,13 +142,17 @@ function money(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
 }
 
+function BudgetNetworkPicker({ networks, lines, rates }: { networks: string[]; lines: Line[]; rates: React.ComponentProps<typeof ServiceRateCard>["rates"] }) { return <div className="space-y-5"><header><p className="text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">Commercial control</p><h1 className="mt-2 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Budget</h1><p className="mt-1 text-sm text-[#747977]">Start with the network or client, then drill into a show and episode.</p></header><section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{networks.map((network) => { const networkLines = lines.filter((line) => (line.network ?? "Independent") === network); const estimate = networkLines.reduce((sum, line) => sum + Number(line.budgetedAmount), 0); const actual = networkLines.reduce((sum, line) => sum + Number(line.actualAmount), 0); return <div key={network} className="panel p-5"><Link href={`/budget?network=${encodeURIComponent(network)}`} className="block hover:text-[#58756b]"><p className="text-base font-semibold text-[#3d4642]">{network}</p><p className="mt-1 text-xs text-[#858a87]">{new Set(networkLines.map((line) => line.showTitle)).size} shows · {money(estimate)} estimate</p><p className="mt-4 text-xs"><b>{money(actual)}</b> actual</p></Link><div className="mt-4"><RateOverrideCard rates={rates} scope={{ type: "network", network }} title={`${network} rate card`} /></div></div>; })}</section></div>; }
+function BudgetShowPicker({ network, shows, lines, rates }: { network: string; shows: Array<{ id: string; title: string }>; lines: Line[]; rates: React.ComponentProps<typeof ServiceRateCard>["rates"] }) { return <div className="space-y-5"><header><Link href="/budget" className="text-xs font-semibold text-[#58756b]">← All networks</Link><p className="mt-4 text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">{network}</p><h1 className="mt-2 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Choose a show</h1></header><section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{shows.map((show) => { const showLines = lines.filter((line) => line.showId === show.id); const estimate = showLines.reduce((sum, line) => sum + Number(line.budgetedAmount), 0); const actual = showLines.reduce((sum, line) => sum + Number(line.actualAmount), 0); return <div key={show.id} className="panel p-5"><Link href={`/budget?network=${encodeURIComponent(network)}&show=${encodeURIComponent(show.title)}`} className="block hover:text-[#58756b]"><p className="text-base font-semibold text-[#3d4642]">{show.title}</p><p className="mt-1 text-xs text-[#858a87]">{money(estimate)} estimate · {money(actual)} actual</p></Link><div className="mt-4"><RateOverrideCard rates={rates} scope={{ type: "show", showId: show.id }} title="Show service rate card" /></div></div>; })}</section></div>; }
+function BudgetEpisodePicker({ network, show, episodes, lines, rates, showId }: { network: string; show: string; episodes: Array<{ id: string; label: string; showTitle: string }>; lines: Line[]; rates: React.ComponentProps<typeof ServiceRateCard>["rates"]; showId?: string }) { return <div className="space-y-5"><header><Link href={`/budget?network=${encodeURIComponent(network)}`} className="text-xs font-semibold text-[#58756b]">← {network}</Link><p className="mt-4 text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">{show}</p><h1 className="mt-2 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Choose an episode</h1></header>{showId && <RateOverrideCard rates={rates} scope={{ type: "show", showId }} title="Show service rate card" />}<section className="panel divide-y divide-[#efeeea]">{episodes.map((episode) => { const episodeLines = lines.filter((line) => line.episodeId === episode.id); const estimate = episodeLines.reduce((sum, line) => sum + Number(line.budgetedAmount), 0); const actual = episodeLines.reduce((sum, line) => sum + Number(line.actualAmount), 0); return <Link key={episode.id} href={`/budget?network=${encodeURIComponent(network)}&show=${encodeURIComponent(show)}&episode=${episode.id}`} className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-[#fbfbf9]"><span><b className="text-sm text-[#3d4642]">{episode.label.replace(`${show} · `, "")}</b></span><span className="text-right text-xs"><b>{money(actual)}</b><small className="mt-1 block text-[#858a87]">of {money(estimate)}</small></span></Link>; })}</section></div>; }
+
 async function load(): Promise<BudgetData> {
   if (isDebugDemoMode) {
     const episodes = [{ id: "demo-e1", label: "Signal North · E01 The Quiet Hour", showTitle: "Signal North" }, { id: "demo-e5", label: "Under Current · E01 The Undertow", showTitle: "Under Current" }];
     return { episodes, workOrderCharges: [], commitments: [], lines: [
-      { id: "b1", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "Edit suite", description: "Avid bays", showTitle: "Signal North", budgetedAmount: 48000, actualAmount: 42150, costType: "internal" },
-      { id: "b2", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "VFX", description: "Cleanup and screens", showTitle: "Signal North", budgetedAmount: 78000, actualAmount: 82350, costType: "billable" },
-      { id: "b3", episodeId: "demo-e5", episodeTitle: "The Undertow", episodeNumber: 1, category: "Sound", description: "Mix and stems", showTitle: "Under Current", budgetedAmount: 52000, actualAmount: 47120, costType: "internal" },
+      { id: "b1", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "Edit suite", description: "Avid bays", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 48000, actualAmount: 42150, costType: "internal" },
+      { id: "b2", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "VFX", description: "Cleanup and screens", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 78000, actualAmount: 82350, costType: "billable" },
+      { id: "b3", episodeId: "demo-e5", episodeTitle: "The Undertow", episodeNumber: 1, category: "Sound", description: "Mix and stems", showId: "demo-s2", showTitle: "Under Current", network: "Eastline", budgetedAmount: 52000, actualAmount: 47120, costType: "internal" },
     ] };
   }
   const context = await getActiveOrganizationContext();
