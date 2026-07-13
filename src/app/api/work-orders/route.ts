@@ -11,8 +11,10 @@ import { createPostWorkOrderSchema } from "@/lib/validations/entities";
 
 export async function POST(request: Request) {
   if (!(await can("manage_work_orders"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  const parsed = createPostWorkOrderSchema.safeParse(await request.json());
+  const payload = await request.json();
+  const parsed = createPostWorkOrderSchema.safeParse(payload);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Check the work-order details." }, { status: 400 });
+  if (!(await can("manage_budget")) && ["estimatedAmount", "currency", "billingNotes"].some((field) => field in payload)) return NextResponse.json({ error: "Only users with the Budget permission can set commercial values." }, { status: 403 });
   if (isDebugDemoMode) return NextResponse.json({ id: "demo-work-order", debug: true }, { status: 201 });
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

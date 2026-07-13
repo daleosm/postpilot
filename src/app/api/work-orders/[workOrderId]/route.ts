@@ -25,12 +25,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
   ]);
   if (!workOrder[0]) return NextResponse.json({ error: "Work order not found." }, { status: 404 });
   const mayManage = await can("manage_work_orders");
+  const mayManageCommercial = await can("manage_budget");
   const mayUpdateAssigned = await can("update_assigned_work");
   const mayVerifyQc = await can("verify_qc");
   const isAssigned = Boolean(person[0] && (workOrder[0].assigneePersonId === person[0].id || workOrder[0].assigneeRole === person[0].role));
   if (!mayManage && !(mayUpdateAssigned && isAssigned)) return NextResponse.json({ error: "You can only update work assigned to you." }, { status: 403 });
   const managerFields = ["title", "description", "department", "assigneePersonId", "assigneeRole", "priority", "isBlocking", "billingScope", "estimatedAmount", "currency", "billingNotes", "externalUrl", "dueAt"];
   if (!mayManage && managerFields.some((field) => field in parsed.data)) return NextResponse.json({ error: "Only post management can change work-order details or assignments." }, { status: 403 });
+  const commercialFields = ["estimatedAmount", "currency", "billingNotes"];
+  if (!mayManageCommercial && commercialFields.some((field) => field in parsed.data)) return NextResponse.json({ error: "Only users with the Budget permission can set commercial values." }, { status: 403 });
   if (workOrder[0].billingStatus === "posted" && ["billingScope", "estimatedAmount", "currency", "billingNotes"].some((field) => field in parsed.data)) return NextResponse.json({ error: "A charge already posted to budget cannot be changed here." }, { status: 409 });
   const missing = mayManage ? await missingTenantReferences(organizationId, { personId: parsed.data.assigneePersonId }) : [];
   if (missing.length) return NextResponse.json({ error: `Invalid ${missing.join(", ")} for this post house.` }, { status: 404 });
