@@ -206,6 +206,13 @@ export const insertQcIssueSchema = z.object({
   timecodeSeconds: z.coerce.number().nonnegative().nullable().optional(),
 });
 
+export const updateQcIssueSchema = z.object({
+  status: z.enum(["open", "resolved", "waived"]),
+  resolution: z.string().trim().max(4000).nullable().optional(),
+}).superRefine((value, context) => {
+  if (value.status === "resolved" && !value.resolution) context.addIssue({ code: z.ZodIssueCode.custom, path: ["resolution"], message: "Add a resolution before closing the issue." });
+});
+
 export const createPostWorkOrderSchema = z.object({
   episodeId: id,
   workflowStageId: nullableId,

@@ -1,11 +1,10 @@
 import "server-only";
 
-import { aliasedTable, and, asc, desc, eq } from "drizzle-orm";
+import { aliasedTable, and, asc, desc, eq, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { episodeTeamAssignments, episodeWorkflowApprovals, episodes, people, postWorkflows, qcReports, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
+import { activityLog, episodeTeamAssignments, episodeWorkflowApprovals, episodes, people, postWorkflows, qcIssues, qcReports, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
 import { getBudgetData } from "./budget";
-import { getDashboardData } from "./dashboard";
 import { listSchedule } from "./schedule";
 import { listEpisodeWorkOrders } from "./work-orders";
 
@@ -38,10 +37,13 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
   const db = getDb();
   const episode = await getEpisode(organizationId, episodeId);
   if (!episode) return null;
-  const [schedule, budget, dashboard, stages, approvalRules, approvals, workflowApprovers, workOrders, episodeTeam, qcHistory] = await Promise.all([
+  const [schedule, budget, activity, stages, approvalRules, approvals, workflowApprovers, workOrders, episodeTeam, qcHistory, qcIssueHistory] = await Promise.all([
     listSchedule(organizationId, new Date(Date.now() - 90 * 86_400_000), new Date(Date.now() + 120 * 86_400_000)),
     getBudgetData(organizationId),
-    getDashboardData(organizationId),
+    db.select({ id: activityLog.id, action: activityLog.action, entityType: activityLog.entityType, entityId: activityLog.entityId, metadata: activityLog.metadata, createdAt: activityLog.createdAt })
+      .from(activityLog)
+      .where(and(eq(activityLog.organizationId, organizationId), or(eq(activityLog.entityId, episodeId), sql`${activityLog.metadata}->>'episodeId' = ${episodeId}`)))
+      .orderBy(desc(activityLog.createdAt)).limit(30),
     db.select({ id: workflowStages.id, name: workflowStages.name, key: workflowStages.key, position: workflowStages.position, canStartEarly: workflowStages.canStartEarly })
       .from(workflowStages).innerJoin(postWorkflows, eq(workflowStages.workflowId, postWorkflows.id))
       .where(and(eq(postWorkflows.organizationId, organizationId), eq(workflowStages.organizationId, organizationId), eq(postWorkflows.isDefault, true))).orderBy(asc(workflowStages.position)),
@@ -54,13 +56,16 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
     listEpisodeWorkOrders(organizationId, episodeId),
     db.select({ id: episodeTeamAssignments.id, personId: people.id, name: people.name, role: people.role, responsibility: episodeTeamAssignments.responsibility, isLead: episodeTeamAssignments.isLead }).from(episodeTeamAssignments).innerJoin(people, eq(episodeTeamAssignments.personId, people.id)).where(and(eq(episodeTeamAssignments.organizationId, organizationId), eq(episodeTeamAssignments.episodeId, episodeId), eq(people.organizationId, organizationId))),
     db.select({ id: qcReports.id, status: qcReports.status, reportUrl: qcReports.reportUrl, summary: qcReports.summary, waiverReason: qcReports.waiverReason, completedAt: qcReports.completedAt, createdAt: qcReports.createdAt }).from(qcReports).where(and(eq(qcReports.organizationId, organizationId), eq(qcReports.episodeId, episodeId))).orderBy(desc(qcReports.createdAt)),
+    db.select({ id: qcIssues.id, qcReportId: qcIssues.qcReportId, code: qcIssues.code, severity: qcIssues.severity, description: qcIssues.description, timecodeSeconds: qcIssues.timecodeSeconds, status: qcIssues.status, resolution: qcIssues.resolution, resolvedAt: qcIssues.resolvedAt, createdAt: qcIssues.createdAt }).from(qcIssues)
+      .innerJoin(qcReports, eq(qcIssues.qcReportId, qcReports.id))
+      .where(and(eq(qcIssues.organizationId, organizationId), eq(qcReports.organizationId, organizationId), eq(qcReports.episodeId, episodeId))).orderBy(desc(qcIssues.createdAt)),
   ]);
 
   return {
     episode,
-    schedule: schedule.filter((booking) => booking.episodeTitle === episode.title && booking.episodeNumber === episode.number),
-    budget: budget.lines.filter((line) => line.showTitle === episode.showTitle),
-    activity: dashboard.activity,
+    schedule: schedule.filter((booking) => booking.episodeId === episode.id),
+    budget: budget.lines.filter((line) => line.episodeId === episode.id),
+    activity,
     workflowStages: stages,
     workflowApprovalRules: approvalRules,
     workflowApprovals: approvals,
@@ -68,5 +73,6 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
     workOrders,
     episodeTeam,
     qcHistory,
+    qcIssueHistory,
   };
 }
