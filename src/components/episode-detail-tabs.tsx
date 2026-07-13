@@ -6,7 +6,7 @@ import { useState } from "react";
 import { EpisodeWorkOrders } from "@/components/episode-work-orders";
 import { EpisodeTeam } from "@/components/episode-team";
 
-const tabs = ["Overview", "Workflow", "Work orders", "Bookings", "Budget", "Activity"] as const;
+const tabs = ["Overview", "Workflow", "QC", "Work orders", "Bookings", "Budget", "Activity"] as const;
 type TabName = (typeof tabs)[number];
 type Row = { id: string; [key: string]: unknown };
 type EpisodeData = { id?: string; title: string; showTitle: string; seasonNumber: number; number: number; status: string; qcStatus: string; workflowStageId: string | null; workflowStage: string | null; editorName: string | null; producerName: string | null; lockedCutDate: string | null; deliveryDeadline: Date | string | null };
@@ -14,9 +14,10 @@ type WorkflowStage = { id: string; name: string; key: string; position: number; 
 type WorkflowApprovalRule = { id: string; workflowStageId: string; approverRole: string; label: string; approvalOrder: number; isRequired: boolean };
 type WorkflowApproval = { id: string; workflowStageId: string; approvalRuleId: string; approverRole: string; requiredPersonId: string | null; status: string; comment: string | null; submittedAt: Date | string; respondedAt: Date | string | null };
 type WorkOrder = { id: string; workflowStageId: string | null; workflowStageName: string | null; kind: string; title: string; description: string | null; department: string | null; assigneePersonId: string | null; assigneeName: string | null; assigneeRole: string | null; priority: string; isBlocking: boolean; status: string; billingScope: string; billingStatus: string; estimatedAmount: string | number | null; actualAmount: string | number | null; currency: string; billingNotes: string | null; budgetLineId: string | null; externalUrl: string | null; dueAt: Date | string | null; completedAt: Date | string | null };
-type WorkspaceData = { episode: EpisodeData; schedule: Array<Row & { title: string; startsAt: Date | string; roomName: string | null }>; budget: Array<Row & { category: string; actualAmount: string | number; budgetedAmount: string | number }>; activity: Array<Row & { action: string; createdAt: Date | string }>; workflowStages: readonly WorkflowStage[]; workflowApprovalRules: WorkflowApprovalRule[]; workflowApprovals: WorkflowApproval[]; workflowApprovers: Array<{ id: string; name: string; role: string }>; episodeTeam: Array<{ id: string; personId: string; name: string; role: string; responsibility: string; isLead: boolean }>; workOrders: WorkOrder[] };
+type QcReport = { id: string; status: string; reportUrl: string | null; summary: string | null; waiverReason: string | null; completedAt: Date | string | null; createdAt: Date | string };
+type WorkspaceData = { episode: EpisodeData; schedule: Array<Row & { title: string; startsAt: Date | string; roomName: string | null }>; budget: Array<Row & { category: string; actualAmount: string | number; budgetedAmount: string | number }>; activity: Array<Row & { action: string; createdAt: Date | string }>; workflowStages: readonly WorkflowStage[]; workflowApprovalRules: WorkflowApprovalRule[]; workflowApprovals: WorkflowApproval[]; workflowApprovers: Array<{ id: string; name: string; role: string }>; episodeTeam: Array<{ id: string; personId: string; name: string; role: string; responsibility: string; isLead: boolean }>; workOrders: WorkOrder[]; qcHistory: QcReport[] };
 
-export function EpisodeDetailTabs({ data, canManageWorkOrders, canUpdateWorkOrders, canManageCommercial }: { data: WorkspaceData; canManageWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean }) {
+export function EpisodeDetailTabs({ data, canManageWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canWaiveQc }: { data: WorkspaceData; canManageWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canWaiveQc: boolean }) {
   const [tab, setTab] = useState<TabName>("Overview");
 
   return (
@@ -28,14 +29,15 @@ export function EpisodeDetailTabs({ data, canManageWorkOrders, canUpdateWorkOrde
           </Button>
         ))}
       </div>
-      <div className="p-5"><TabContent tab={tab} data={data} canManageWorkOrders={canManageWorkOrders} canUpdateWorkOrders={canUpdateWorkOrders} canManageCommercial={canManageCommercial} /></div>
+      <div className="p-5"><TabContent tab={tab} data={data} canManageWorkOrders={canManageWorkOrders} canUpdateWorkOrders={canUpdateWorkOrders} canManageCommercial={canManageCommercial} canManageQc={canManageQc} canWaiveQc={canWaiveQc} /></div>
     </section>
   );
 }
 
-function TabContent({ tab, data, canManageWorkOrders, canUpdateWorkOrders, canManageCommercial }: { tab: TabName; data: WorkspaceData; canManageWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean }) {
+function TabContent({ tab, data, canManageWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canWaiveQc }: { tab: TabName; data: WorkspaceData; canManageWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canWaiveQc: boolean }) {
   if (tab === "Overview") return <EpisodeOverview data={data} />;
   if (tab === "Workflow") return <WorkflowPanel episodeId={data.episode.id} initialStageId={data.episode.workflowStageId} stages={data.workflowStages} rules={data.workflowApprovalRules} approvals={data.workflowApprovals} />;
+  if (tab === "QC") return <QcPanel episodeId={data.episode.id ?? ""} episodeStatus={data.episode.qcStatus} initialHistory={data.qcHistory} canManage={canManageQc} canWaive={canWaiveQc} />;
   if (tab === "Work orders") return <EpisodeWorkOrders episodeId={data.episode.id ?? ""} initialWorkOrders={data.workOrders} people={data.workflowApprovers} stages={data.workflowStages} currentStageId={data.episode.workflowStageId} canManage={canManageWorkOrders} canUpdate={canUpdateWorkOrders} canManageCommercial={canManageCommercial} />;
   if (tab === "Bookings") return <List empty="No scheduled room bookings." items={data.schedule} render={(item) => <><b>{item.title}</b><span>{formatDate(item.startsAt)} · {item.roomName}</span></>} />;
   if (tab === "Budget") return <List empty="No budget lines are linked." items={data.budget} render={(item) => <><b>{item.category}</b><span>${Number(item.actualAmount).toLocaleString()} actual / ${Number(item.budgetedAmount).toLocaleString()} estimate</span></>} />;
@@ -49,6 +51,7 @@ function EpisodeOverview({ data }: { data: WorkspaceData }) {
   const signedRules = stageRules.filter((rule) => data.workflowApprovals.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"));
   const openWorkOrders = data.workOrders.filter((order) => !["complete", "cancelled"].includes(order.status));
   const upcomingBookings = data.schedule.slice(0, 3);
+  const latestQc = data.qcHistory[0];
 
   return <div className="space-y-5">
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,.65fr)]">
@@ -60,7 +63,7 @@ function EpisodeOverview({ data }: { data: WorkspaceData }) {
         <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[#e6e9e5]"><div className="h-full rounded-full bg-[#5f8578]" style={{ width: `${data.workflowStages.length ? Math.max((stageIndex / data.workflowStages.length) * 100, stageIndex ? 8 : 0) : 0}%` }} /></div>
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           <OverviewItem label="Episode status" value={humanize(data.episode.status)} />
-          <OverviewItem label="QC status" value={humanize(data.episode.qcStatus)} tone={data.episode.qcStatus === "needs_attention" ? "warning" : undefined} />
+          <OverviewItem label="QC status" value={latestQc ? `${humanize(latestQc.status)} · ${formatDate(latestQc.completedAt ?? latestQc.createdAt)}` : "No report recorded"} tone={latestQc?.status === "failed" ? "danger" : latestQc?.status === "passed" || latestQc?.status === "waived" ? "success" : undefined} />
           <OverviewItem label="Picture lock" value={formatDate(data.episode.lockedCutDate)} />
           <OverviewItem label="Delivery deadline" value={formatDate(data.episode.deliveryDeadline)} />
         </div>
@@ -78,6 +81,49 @@ function EpisodeOverview({ data }: { data: WorkspaceData }) {
         <div className="mt-3 divide-y divide-[#ecece8]">{openWorkOrders.length ? openWorkOrders.slice(0, 3).map((order) => <div key={order.id} className="flex items-center justify-between gap-3 py-2.5 text-xs"><div className="min-w-0"><p className="truncate font-medium text-[#49534e]">{order.title}</p><p className="mt-0.5 text-[#858c88]">{order.assigneeName ?? order.department ?? "Unassigned"}</p></div><span className="shrink-0 capitalize text-[#65736d]">{humanize(order.status)}</span></div>) : <p className="py-5 text-center text-xs text-[#858a87]">No open work orders.</p>}</div>
       </section>
     </div>
+  </div>;
+}
+
+function QcPanel({ episodeId, episodeStatus, initialHistory, canManage, canWaive }: { episodeId: string; episodeStatus: string; initialHistory: QcReport[]; canManage: boolean; canWaive: boolean }) {
+  const router = useRouter();
+  const [history, setHistory] = useState(initialHistory);
+  const [status, setStatus] = useState("in_progress");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const latest = history[0];
+
+  async function submit(form: FormData) {
+    setSaving(true);
+    setMessage("");
+    const payload = {
+      episodeId,
+      status,
+      reportUrl: String(form.get("reportUrl") ?? "").trim() || null,
+      summary: String(form.get("summary") ?? "").trim() || null,
+      waiverReason: String(form.get("waiverReason") ?? "").trim() || null,
+      checksum: null,
+    };
+    try {
+      const response = await fetch("/api/qc-reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) return setMessage(body?.error ?? "Could not record the QC result.");
+      setHistory((items) => [{ id: body.id, status, reportUrl: payload.reportUrl, summary: payload.summary, waiverReason: payload.waiverReason, completedAt: ["passed", "failed", "waived"].includes(status) ? new Date() : null, createdAt: new Date() }, ...items]);
+      setMessage(status === "failed" ? "QC failure recorded and a blocking correction work order was created." : "QC result recorded.");
+      router.refresh();
+    } catch {
+      setMessage("Could not record the QC result.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,.9fr)]">
+    <section className="rounded-xl border border-[#e5e7e3] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#77817d]">Episode QC</p><h2 className="mt-1 text-lg font-semibold capitalize text-[#313a36]">{humanize(episodeStatus)}</h2></div><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${episodeStatus === "needs_attention" ? "bg-[#f8e7df] text-[#a45f43]" : episodeStatus === "passed" || episodeStatus === "waived" ? "bg-[#e0ede6] text-[#427361]" : "bg-[#edf0ed] text-[#63716b]"}`}>{episodeStatus === "needs_attention" ? "Corrections required" : humanize(episodeStatus)}</span></div>
+      <div className="mt-4 border-t border-[#eceeea] pt-3">{latest ? <><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold capitalize text-[#46504b]">Latest report · {humanize(latest.status)}</p><time className="text-xs text-[#818985]">{formatDate(latest.completedAt ?? latest.createdAt)}</time></div>{latest.summary && <p className="mt-2 text-sm leading-6 text-[#5e6863]">{latest.summary}</p>}{latest.waiverReason && <p className="mt-2 rounded-md bg-[#f3f0e8] px-3 py-2 text-xs text-[#766346]">Waiver: {latest.waiverReason}</p>}{latest.reportUrl && <a href={latest.reportUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex text-xs font-semibold text-[#4c7469] hover:underline">Open external QC report ↗</a>}</> : <p className="py-6 text-center text-sm text-[#858b87]">No QC report has been recorded for this episode yet.</p>}</div>
+      <div className="mt-4 divide-y divide-[#eceeea] border-t border-[#eceeea]">{history.slice(1).map((report) => <div key={report.id} className="flex items-center justify-between gap-3 py-2.5"><div className="min-w-0"><p className="text-xs font-semibold capitalize text-[#4c5651]">{humanize(report.status)}</p><p className="mt-0.5 truncate text-xs text-[#858c88]">{report.summary ?? "No summary"}</p></div><time className="shrink-0 text-xs text-[#818985]">{formatDate(report.completedAt ?? report.createdAt)}</time></div>)}</div>
+    </section>
+    <section className="rounded-xl border border-[#e5e7e3] bg-[#fafbf9] p-4"><p className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#77817d]">Record QC result</p>{canManage ? <form action={submit} className="mt-3 space-y-3"><label className="block text-xs font-medium text-[#56605b]">Result<select value={status} onChange={(event) => setStatus(event.target.value)} className="mt-1.5 h-10 w-full rounded-md border border-[#dfe3df] bg-white px-2 text-sm"><option value="in_progress">QC in progress</option><option value="passed">Passed</option><option value="failed">Failed — corrections required</option>{canWaive && <option value="waived">Waived</option>}</select></label><label className="block text-xs font-medium text-[#56605b]">External report link <span className="font-normal text-[#858c88]">(optional)</span><input name="reportUrl" type="url" placeholder="https://…" className="mt-1.5 h-10 w-full rounded-md border border-[#dfe3df] bg-white px-3 text-sm" /></label><label className="block text-xs font-medium text-[#56605b]">Summary <span className="font-normal text-[#858c88]">(optional)</span><textarea name="summary" rows={4} placeholder="Result, exceptions, and next steps…" className="mt-1.5 w-full rounded-md border border-[#dfe3df] bg-white p-3 text-sm" /></label>{status === "waived" && <label className="block text-xs font-medium text-[#56605b]">Waiver reason<textarea name="waiverReason" rows={3} required className="mt-1.5 w-full rounded-md border border-[#dfe3df] bg-white p-3 text-sm" /></label>}<Button type="submit" variant="primary" isDisabled={saving} className="bg-[#3f7563] text-white">{saving ? "Recording…" : "Record QC result"}</Button>{message && <p role="status" className={`text-xs ${message.includes("Could not") ? "text-[#a35e41]" : "text-[#3f7563]"}`}>{message}</p>}</form> : <p className="mt-3 text-sm leading-6 text-[#727b76]">You can view QC history, but your current role cannot record QC results.</p>}</section>
   </div>;
 }
 

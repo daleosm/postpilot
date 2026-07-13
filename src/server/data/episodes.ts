@@ -1,9 +1,9 @@
 import "server-only";
 
-import { aliasedTable, and, asc, eq } from "drizzle-orm";
+import { aliasedTable, and, asc, desc, eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { episodeTeamAssignments, episodeWorkflowApprovals, episodes, people, postWorkflows, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
+import { episodeTeamAssignments, episodeWorkflowApprovals, episodes, people, postWorkflows, qcReports, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
 import { getBudgetData } from "./budget";
 import { getDashboardData } from "./dashboard";
 import { listSchedule } from "./schedule";
@@ -38,7 +38,7 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
   const db = getDb();
   const episode = await getEpisode(organizationId, episodeId);
   if (!episode) return null;
-  const [schedule, budget, dashboard, stages, approvalRules, approvals, workflowApprovers, workOrders, episodeTeam] = await Promise.all([
+  const [schedule, budget, dashboard, stages, approvalRules, approvals, workflowApprovers, workOrders, episodeTeam, qcHistory] = await Promise.all([
     listSchedule(organizationId, new Date(Date.now() - 90 * 86_400_000), new Date(Date.now() + 120 * 86_400_000)),
     getBudgetData(organizationId),
     getDashboardData(organizationId),
@@ -53,6 +53,7 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
     db.select({ id: people.id, name: people.name, role: people.role }).from(people).where(eq(people.organizationId, organizationId)).orderBy(asc(people.name)),
     listEpisodeWorkOrders(organizationId, episodeId),
     db.select({ id: episodeTeamAssignments.id, personId: people.id, name: people.name, role: people.role, responsibility: episodeTeamAssignments.responsibility, isLead: episodeTeamAssignments.isLead }).from(episodeTeamAssignments).innerJoin(people, eq(episodeTeamAssignments.personId, people.id)).where(and(eq(episodeTeamAssignments.organizationId, organizationId), eq(episodeTeamAssignments.episodeId, episodeId), eq(people.organizationId, organizationId))),
+    db.select({ id: qcReports.id, status: qcReports.status, reportUrl: qcReports.reportUrl, summary: qcReports.summary, waiverReason: qcReports.waiverReason, completedAt: qcReports.completedAt, createdAt: qcReports.createdAt }).from(qcReports).where(and(eq(qcReports.organizationId, organizationId), eq(qcReports.episodeId, episodeId))).orderBy(desc(qcReports.createdAt)),
   ]);
 
   return {
@@ -66,5 +67,6 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
     workflowApprovers,
     workOrders,
     episodeTeam,
+    qcHistory,
   };
 }
