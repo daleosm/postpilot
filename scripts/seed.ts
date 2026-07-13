@@ -417,8 +417,8 @@ async function seedTenant(tenant: TenantSeed) {
     { id: bookingId(8), organizationId: tenant.id, personId: byRole("sound_mixer"), title: "Unavailable — external commitment", startsAt: at(4, 9), endsAt: at(4, 18), status: "confirmed", bookingType: "unavailable", notes: "External commitment recorded as a personnel booking." },
   ]);
   await db.insert(cateringRequests).values([
-    { id: id(tenant.number, "2a", 1), organizationId: tenant.id, bookingId: bookingId(1), roomId: roomId(1), requestedByPersonId: byRole("editor"), fulfilledByPersonId: byRole("runner"), requestType: "lunch", item: tenant.number === 2 ? "Miso aubergine bowl" : tenant.number === 3 ? "Herb focaccia and soup" : "Chicken Caesar salad", quantity: 1, requestedFor: at(0, 13), status: "preparing" },
-    { id: id(tenant.number, "2a", 2), organizationId: tenant.id, bookingId: bookingId(3), roomId: roomId(4), requestedByPersonId: byRole("sound_mixer"), requestType: "tea_coffee", item: "Oat flat white", quantity: 2, notes: "One decaf", requestedFor: at(2, 11), status: "acknowledged" },
+    { id: id(tenant.number, "2a", 1), organizationId: tenant.id, bookingId: bookingId(1), roomId: roomId(1), requestedByPersonId: byRole("editor"), fulfilledByPersonId: byRole("runner"), requestType: "lunch", item: tenant.number === 2 ? "Miso aubergine bowl" : tenant.number === 3 ? "Herb focaccia and soup" : "Chicken Caesar salad", quantity: 1, requestedFor: at(0, 13), status: "preparing", currency: tenant.budgetProfile.currency },
+    { id: id(tenant.number, "2a", 2), organizationId: tenant.id, bookingId: bookingId(3), roomId: roomId(4), requestedByPersonId: byRole("sound_mixer"), requestType: "tea_coffee", item: "Oat flat white", quantity: 2, notes: "One decaf", requestedFor: at(2, 11), status: "acknowledged", currency: tenant.budgetProfile.currency },
   ]);
 
   await db.insert(qcReports).values([{ id: id(tenant.number, "33", 1), organizationId: tenant.id, episodeId: episodeId(4), status: "failed", summary: "Flash-frame and caption timing failures require a corrected post package.", completedAt: at(-1, 16) }]);

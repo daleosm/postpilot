@@ -267,6 +267,20 @@
       "when": 1783987200012,
       "tag": "0037_crm_company_commercial_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1783987200013,
+      "tag": "0038_catering_actual_cost_billing",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1783987200014,
+      "tag": "0039_catering_markup_settings",
+      "breakpoints": true
     }
   ]
 }

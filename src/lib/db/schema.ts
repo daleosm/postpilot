@@ -112,6 +112,8 @@ export const crmAccountStatus = pgEnum("crm_account_status", ["active", "on_hold
 export const crmCompanies = pgTable("crm_companies", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), name: text("name").notNull(), type: crmCompanyType("type").notNull(), address: text("address"), paymentTermsDays: integer("payment_terms_days"), currency: text("currency").default("GBP").notNull(), financeEmail: text("finance_email"), billingEmail: text("billing_email"), accountStatus: crmAccountStatus("account_status").default("active").notNull(), notes: text("notes"), ...auditColumns }, (table) => [uniqueIndex("crm_companies_org_name_idx").on(table.organizationId, table.name), index("crm_companies_org_type_idx").on(table.organizationId, table.type), index("crm_companies_org_status_idx").on(table.organizationId, table.accountStatus)]);
 export const crmContacts = pgTable("crm_contacts", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), companyId: uuid("company_id").notNull().references(() => crmCompanies.id, { onDelete: "cascade" }), name: text("name").notNull(), title: text("title"), email: text("email"), phone: text("phone"), isPrimary: boolean("is_primary").default(false).notNull(), notes: text("notes"), ...auditColumns }, (table) => [index("crm_contacts_company_idx").on(table.companyId), index("crm_contacts_org_idx").on(table.organizationId)]);
 
+export const cateringSettings = pgTable("catering_settings", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), markupPercent: numeric("markup_percent", { precision: 7, scale: 2 }).default("0").notNull(), ...auditColumns }, (table) => [uniqueIndex("catering_settings_org_idx").on(table.organizationId)]);
+
 export const shows = pgTable("shows", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
@@ -374,10 +376,19 @@ export const cateringRequests = pgTable("catering_requests", {
   requestedFor: timestamp("requested_for", { withTimezone: true }),
   status: cateringRequestStatus("status").default("requested").notNull(),
   fulfilledAt: timestamp("fulfilled_at", { withTimezone: true }),
+  actualCost: numeric("actual_cost", { precision: 12, scale: 2 }),
+  billedAmount: numeric("billed_amount", { precision: 12, scale: 2 }),
+  markupPercent: numeric("markup_percent", { precision: 7, scale: 2 }),
+  currency: text("currency").default("GBP").notNull(),
+  receiptReference: text("receipt_reference"),
+  billableId: uuid("billable_id").references(() => billables.id, { onDelete: "set null" }),
+  budgetLineId: uuid("budget_line_id").references(() => budgetLines.id, { onDelete: "set null" }),
   ...auditColumns,
 }, (table) => [
   index("catering_requests_organization_status_idx").on(table.organizationId, table.status),
   index("catering_requests_booking_idx").on(table.bookingId),
+  uniqueIndex("catering_requests_billable_idx").on(table.billableId),
+  uniqueIndex("catering_requests_budget_line_idx").on(table.budgetLineId),
 ]);
 
 export const qcReports = pgTable("qc_reports", {

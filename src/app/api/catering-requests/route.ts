@@ -6,7 +6,6 @@ import { getDb } from "@/lib/db";
 import { bookings, cateringRequests, people, rooms } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
-import { isDebugDemoMode } from "@/lib/runtime";
 import { createCateringRequestSchema } from "@/lib/validations/entities";
 import { missingTenantReferences } from "@/lib/tenant-resources";
 
@@ -14,7 +13,6 @@ export async function POST(request: Request) {
   if (!(await can("request_catering"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const parsed = createCateringRequestSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: "Check the request details and room or booking." }, { status: 400 });
-  if (isDebugDemoMode) return NextResponse.json({ id: `demo-catering-${Date.now()}`, debug: true }, { status: 201 });
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const db = getDb();

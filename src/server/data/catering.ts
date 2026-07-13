@@ -10,7 +10,7 @@ const requester = people;
 export async function listCateringRequests(organizationId: string, requesterPersonId?: string) {
   const db = getDb();
   const rows = await db.select({
-    id: cateringRequests.id, requestType: cateringRequests.requestType, item: cateringRequests.item, quantity: cateringRequests.quantity, notes: cateringRequests.notes, requestedFor: cateringRequests.requestedFor, status: cateringRequests.status, fulfilledAt: cateringRequests.fulfilledAt, createdAt: cateringRequests.createdAt, requestedByPersonId: cateringRequests.requestedByPersonId,
+    id: cateringRequests.id, requestType: cateringRequests.requestType, item: cateringRequests.item, quantity: cateringRequests.quantity, notes: cateringRequests.notes, requestedFor: cateringRequests.requestedFor, status: cateringRequests.status, fulfilledAt: cateringRequests.fulfilledAt, actualCost: cateringRequests.actualCost, billedAmount: cateringRequests.billedAmount, markupPercent: cateringRequests.markupPercent, currency: cateringRequests.currency, receiptReference: cateringRequests.receiptReference, createdAt: cateringRequests.createdAt, requestedByPersonId: cateringRequests.requestedByPersonId,
     roomId: rooms.id, roomName: rooms.name, bookingId: bookings.id, bookingTitle: bookings.title, episodeTitle: episodes.title, requesterName: requester.name,
   }).from(cateringRequests)
     .leftJoin(rooms, and(eq(cateringRequests.roomId, rooms.id), eq(rooms.organizationId, organizationId)))

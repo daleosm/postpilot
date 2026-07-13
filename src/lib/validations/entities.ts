@@ -201,6 +201,9 @@ export const createCateringRequestSchema = z.object({
 export const updateCateringRequestSchema = z.object({
   status: z.enum(["requested", "acknowledged", "preparing", "delivered", "cancelled"]),
   runnerNote: z.string().trim().max(1000).nullable().optional(),
+  actualCost: money.nullable().optional(),
+  currency: z.string().trim().length(3).transform((value) => value.toUpperCase()).optional(),
+  receiptReference: z.string().trim().max(120).nullable().optional(),
 });
 
 export const insertQcReportSchema = z.object({

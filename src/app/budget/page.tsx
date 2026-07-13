@@ -22,6 +22,7 @@ type Line = {
   network: string | null;
   budgetedAmount: string | number;
   actualAmount: string | number;
+  currency: string;
   costType: string;
   showId: string | null;
 };
@@ -52,6 +53,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
   if (!selectedEpisode) redirect(`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`);
   const episodes = [selectedEpisode];
   const lines = data.lines.filter((line) => line.episodeId === selectedEpisodeId && line.showTitle === activeShow);
+  const currency = lines[0]?.currency ?? "USD";
   const totals = lines.reduce((sum, line) => ({ estimate: sum.estimate + Number(line.budgetedAmount), actual: sum.actual + Number(line.actualAmount) }), { estimate: 0, actual: 0 });
   const burn = totals.estimate ? Math.round((totals.actual / totals.estimate) * 100) : 0;
   const variance = totals.actual - totals.estimate;
@@ -76,11 +78,11 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
     </header>
 
     <section className="grid gap-3 sm:grid-cols-4">
-      <Metric icon={<CircleDollarSign size={16} />} label="Estimated" value={money(totals.estimate)} detail={`${lines.length} cost lines`} />
-      <Metric icon={<ReceiptText size={16} />} label="Actual" value={money(totals.actual)} detail={burn ? `${burn}% of estimate` : "No spend recorded"} />
-      <Metric icon={<ReceiptText size={16} />} label="Committed" value={money(committed)} detail="Open vendor POs" />
-      <Metric icon={<TrendingUp size={16} />} label="Forecast" value={money(forecast)} detail="Actual + committed" warning={forecast > totals.estimate} />
-      <Metric icon={variance > 0 ? <AlertTriangle size={16} /> : <TrendingUp size={16} />} label="Variance" value={`${variance > 0 ? "+" : ""}${money(variance)}`} detail={variance > 0 ? "Over estimate" : "Within estimate"} warning={variance > 0} />
+      <Metric icon={<CircleDollarSign size={16} />} label="Estimated" value={money(totals.estimate, currency)} detail={`${lines.length} cost lines`} />
+      <Metric icon={<ReceiptText size={16} />} label="Actual" value={money(totals.actual, currency)} detail={burn ? `${burn}% of estimate` : "No spend recorded"} />
+      <Metric icon={<ReceiptText size={16} />} label="Committed" value={money(committed, currency)} detail="Open vendor POs" />
+      <Metric icon={<TrendingUp size={16} />} label="Forecast" value={money(forecast, currency)} detail="Actual + committed" warning={forecast > totals.estimate} />
+      <Metric icon={variance > 0 ? <AlertTriangle size={16} /> : <TrendingUp size={16} />} label="Variance" value={`${variance > 0 ? "+" : ""}${money(variance, currency)}`} detail={variance > 0 ? "Over estimate" : "Within estimate"} warning={variance > 0} />
     </section>
 
     <RateOverrideCard rates={serviceRates} scope={{ type: "episode", episodeId: selectedEpisodeId }} title="Episode service rate card" />
@@ -92,7 +94,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
         <p className="text-right text-2xl font-semibold tracking-[-.04em] text-[#2e3734]">{burn}% <span className="text-sm font-normal text-[#7d837f]">spent</span></p>
       </div>
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#ecebe7]"><div className={`h-full rounded-full ${burn > 100 ? "bg-[#c17a4f]" : "bg-[#66877f]"}`} style={{ width: `${Math.min(burn, 100)}%` }} /></div>
-      <p className="mt-3 text-sm text-[#68716d]">{money(totals.actual)} actual against {money(totals.estimate)} estimated.</p>
+      <p className="mt-3 text-sm text-[#68716d]">{money(totals.actual, currency)} actual against {money(totals.estimate, currency)} estimated.</p>
     </section>
 
     {episodeTotals.length > 0 && <section className="panel overflow-hidden">
@@ -101,8 +103,8 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
         const episodeBurn = episode.estimate ? Math.round((episode.actual / episode.estimate) * 100) : 0;
         return <div key={episode.label} className="grid gap-3 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_130px_130px_80px] sm:items-center">
           <div className="min-w-0"><p className="truncate text-sm font-medium text-[#3d4642]">{episode.label}</p><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#ecebe7]"><div className={`h-full rounded-full ${episodeBurn > 100 ? "bg-[#c17a4f]" : "bg-[#66877f]"}`} style={{ width: `${Math.min(episodeBurn, 100)}%` }} /></div></div>
-          <p className="text-sm text-[#67706c]"><span className="sm:hidden">Estimate · </span>{money(episode.estimate)}</p>
-          <p className="text-sm text-[#67706c]"><span className="sm:hidden">Actual · </span>{money(episode.actual)}</p>
+          <p className="text-sm text-[#67706c]"><span className="sm:hidden">Estimate · </span>{money(episode.estimate, currency)}</p>
+          <p className="text-sm text-[#67706c]"><span className="sm:hidden">Actual · </span>{money(episode.actual, currency)}</p>
           <p className={`text-sm font-semibold ${episodeBurn > 100 ? "text-[#a65f42]" : "text-[#4f7767]"}`}>{episodeBurn}%</p>
         </div>;
       })}</div>
@@ -116,7 +118,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
           <div className="min-w-0"><p className="font-medium text-[#39423e]">{line.category}</p>{line.description && <p className="mt-0.5 truncate text-xs text-[#858a87]">{line.description}</p>}</div>
           <p className="truncate text-xs text-[#626b67]">{episodeLabel(line)}</p>
           <p className="truncate text-xs text-[#626b67]">{line.showTitle ?? "—"}</p>
-          <p>{money(Number(line.budgetedAmount))}</p><p>{money(Number(line.actualAmount))}</p>
+          <p>{money(Number(line.budgetedAmount), line.currency)}</p><p>{money(Number(line.actualAmount), line.currency)}</p>
           <p className="capitalize text-xs text-[#6d7672]">{line.costType}</p>
         </div>)}</div>
       </div></div>}
@@ -138,8 +140,8 @@ function episodeLabel(line: Line) {
   return line.episodeTitle ? `E${String(line.episodeNumber ?? 0).padStart(2, "0")} ${line.episodeTitle}` : "Unassigned legacy line";
 }
 
-function money(value: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+function money(value: number, currency = "USD") {
+  try { return new Intl.NumberFormat("en-GB", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value); } catch { return `${currency} ${value.toFixed(2)}`; }
 }
 
 function BudgetNetworkPicker({ networks, lines, rates }: { networks: string[]; lines: Line[]; rates: React.ComponentProps<typeof ServiceRateCard>["rates"] }) { return <div className="space-y-5"><header><p className="text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">Commercial control</p><h1 className="mt-2 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Budget</h1><p className="mt-1 text-sm text-[#747977]">Start with the network or client, then drill into a show and episode.</p></header><section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{networks.map((network) => { const networkLines = lines.filter((line) => (line.network ?? "Independent") === network); const estimate = networkLines.reduce((sum, line) => sum + Number(line.budgetedAmount), 0); const actual = networkLines.reduce((sum, line) => sum + Number(line.actualAmount), 0); return <div key={network} className="panel p-5"><Link href={`/budget?network=${encodeURIComponent(network)}`} className="block hover:text-[#58756b]"><p className="text-base font-semibold text-[#3d4642]">{network}</p><p className="mt-1 text-xs text-[#858a87]">{new Set(networkLines.map((line) => line.showTitle)).size} shows · {money(estimate)} estimate</p><p className="mt-4 text-xs"><b>{money(actual)}</b> actual</p></Link><div className="mt-4"><RateOverrideCard rates={rates} scope={{ type: "network", network }} title={`${network} rate card`} /></div></div>; })}</section></div>; }
@@ -150,9 +152,9 @@ async function load(): Promise<BudgetData> {
   if (isDebugDemoMode) {
     const episodes = [{ id: "demo-e1", label: "Signal North · E01 The Quiet Hour", showTitle: "Signal North" }, { id: "demo-e5", label: "Under Current · E01 The Undertow", showTitle: "Under Current" }];
     return { episodes, workOrderCharges: [], commitments: [], lines: [
-      { id: "b1", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "Edit suite", description: "Avid bays", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 48000, actualAmount: 42150, costType: "internal" },
-      { id: "b2", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "VFX", description: "Cleanup and screens", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 78000, actualAmount: 82350, costType: "billable" },
-      { id: "b3", episodeId: "demo-e5", episodeTitle: "The Undertow", episodeNumber: 1, category: "Sound", description: "Mix and stems", showId: "demo-s2", showTitle: "Under Current", network: "Eastline", budgetedAmount: 52000, actualAmount: 47120, costType: "internal" },
+      { id: "b1", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "Edit suite", description: "Avid bays", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 48000, actualAmount: 42150, currency: "GBP", costType: "internal" },
+      { id: "b2", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "VFX", description: "Cleanup and screens", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 78000, actualAmount: 82350, currency: "GBP", costType: "billable" },
+      { id: "b3", episodeId: "demo-e5", episodeTitle: "The Undertow", episodeNumber: 1, category: "Sound", description: "Mix and stems", showId: "demo-s2", showTitle: "Under Current", network: "Eastline", budgetedAmount: 52000, actualAmount: 47120, currency: "GBP", costType: "internal" },
     ] };
   }
   const context = await getActiveOrganizationContext();

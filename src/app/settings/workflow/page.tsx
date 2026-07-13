@@ -23,7 +23,7 @@ export default async function WorkflowSettingsPage() {
         <h1 className="mt-2 text-[27px] font-semibold tracking-[-0.045em] text-[#202524]">Post workflow</h1>
         <p className="mt-1 text-sm text-[#747977]">This is the single workflow used by your post house across its shows and episodes.</p>
         </div>
-        <div className="flex flex-wrap gap-2"><Link href="/settings/rooms" className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#45685e] hover:bg-[#f3f7f4]">Rooms & suites</Link><Link href="/settings/roles" className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#45685e] hover:bg-[#f3f7f4]">Roles & permissions</Link></div>
+        <div className="flex flex-wrap gap-2"><Link href="/settings/rooms" className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#45685e] hover:bg-[#f3f7f4]">Rooms & suites</Link><Link href="/settings/roles" className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#45685e] hover:bg-[#f3f7f4]">Roles & permissions</Link><Link href="/settings/catering" className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#45685e] hover:bg-[#f3f7f4]">Catering billing</Link></div>
       </header>
       <WorkflowTemplateEditor workflow={workflow} roles={roles} />
     </div>
