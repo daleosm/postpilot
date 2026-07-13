@@ -361,9 +361,9 @@ async function seedTenant(tenant: TenantSeed) {
   ]);
 
   await db.insert(crmCompanies).values([
-    { id: companyId(1), organizationId: tenant.id, name: primaryNetwork, type: "network", paymentTermsDays: 30, billingEmail: `accounts@${tenant.slug}.client.test` },
-    { id: companyId(2), organizationId: tenant.id, name: tenant.shows[0]?.company ?? `${tenant.name} Productions`, type: "production_company", paymentTermsDays: 30 },
-    { id: companyId(3), organizationId: tenant.id, name: `${tenant.name} Facilities Vendor`, type: "vendor", paymentTermsDays: 14 },
+    { id: companyId(1), organizationId: tenant.id, name: primaryNetwork, type: "network", address: "1 Broadcast Square, London", paymentTermsDays: 30, currency: tenant.budgetProfile.currency, financeEmail: `finance@${tenant.slug}.client.test`, billingEmail: `accounts@${tenant.slug}.client.test`, accountStatus: "active" },
+    { id: companyId(2), organizationId: tenant.id, name: tenant.shows[0]?.company ?? `${tenant.name} Productions`, type: "production_company", address: "42 Production Way, London", paymentTermsDays: 30, currency: tenant.budgetProfile.currency, financeEmail: `finance@${tenant.slug}.production.test`, accountStatus: "active" },
+    { id: companyId(3), organizationId: tenant.id, name: `${tenant.name} Facilities Vendor`, type: "vendor", address: "18 Vendor Park, London", paymentTermsDays: 14, currency: tenant.budgetProfile.currency, financeEmail: `accounts@${tenant.slug}.vendor.test`, accountStatus: "active" },
   ]);
   await db.insert(crmContacts).values([{ id: contactId(1), organizationId: tenant.id, companyId: companyId(1), name: `${primaryNetwork} Post Executive`, title: "Post Executive", email: `post@${tenant.slug}.client.test`, isPrimary: true }]);
 
