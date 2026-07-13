@@ -190,6 +190,13 @@
       "when": 1783934227372,
       "tag": "0026_military_the_twelve",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1783936739533,
+      "tag": "0027_cultured_mephisto",
+      "breakpoints": true
     }
   ]
 }

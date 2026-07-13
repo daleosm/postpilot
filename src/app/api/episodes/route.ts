@@ -2,7 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { getDb } from "@/lib/db";
-import { episodes, people, seasons, shows } from "@/lib/db/schema";
+import { episodeTeamAssignments, episodes, people, seasons, shows } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { isDebugDemoMode } from "@/lib/runtime";
@@ -18,6 +18,7 @@ export async function POST(request: Request) {
 
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const organizationId = context.organization.organizationId;
 
   const db = getDb();
   const [season] = await db.select({ id: seasons.id }).from(seasons).innerJoin(shows, eq(seasons.showId, shows.id))
@@ -32,12 +33,14 @@ export async function POST(request: Request) {
   if (missing.length || validAssignees.length !== assigneeIds.length) return NextResponse.json({ error: "A workflow stage or assigned person is not in this organization." }, { status: 404 });
 
   try {
+    const { team, ...episodeData } = parsed.data;
     const [episode] = await db.insert(episodes).values({
-      ...parsed.data,
+      ...episodeData,
       organizationId: context.organization.organizationId,
       airDate: parsed.data.airDate ? parsed.data.airDate.toISOString().slice(0, 10) : null,
       lockedCutDate: parsed.data.lockedCutDate ? parsed.data.lockedCutDate.toISOString().slice(0, 10) : null,
     }).returning({ id: episodes.id });
+    if (team.length) { const teamPeople = await db.select({ id: people.id, role: people.role }).from(people).where(and(eq(people.organizationId, organizationId), inArray(people.id, team))); await db.insert(episodeTeamAssignments).values(teamPeople.map((person) => ({ organizationId, episodeId: episode.id, personId: person.id, responsibility: person.role }))); }
     if (parsed.data.workflowStageId) await createStageWorkOrders({ organizationId: context.organization.organizationId, episodeId: episode.id, workflowStageId: parsed.data.workflowStageId, createdByUserId: context.userId });
     return NextResponse.json(episode, { status: 201 });
   } catch {

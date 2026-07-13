@@ -2,67 +2,30 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@heroui/react";
-import { Plus, X } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useEffect, useMemo, useState } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
-const episodeFormSchema = z.object({
-  seasonId: z.string().min(1, "Select a season."),
-  number: z.coerce.number().int().positive("Episode number must be at least 1."),
-  title: z.string().trim().min(1, "Enter an episode title.").max(160),
-  productionCode: z.string().trim().max(40).optional(),
-  status: z.enum(["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"]),
-  airDate: z.string().optional(),
-  deliveryDeadline: z.string().optional(),
-});
-type Values = z.infer<typeof episodeFormSchema>;
+const schema = z.object({ seasonId: z.string().min(1, "Select a season."), number: z.coerce.number().int().positive(), title: z.string().trim().min(1, "Enter an episode title.").max(160), productionCode: z.string().trim().max(40).optional(), status: z.enum(["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"]), airDate: z.string().optional(), deliveryDeadline: z.string().optional(), team: z.array(z.string()).default([]) });
+type Values = z.infer<typeof schema>;
 export type EpisodeSeason = { id: string; label: string };
+export type EpisodePerson = { id: string; name: string; role: string };
 
-export function EpisodeFormDialog({ seasons, defaultSeasonId }: { seasons: EpisodeSeason[]; defaultSeasonId?: string }) {
-  const [open, setOpen] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const router = useRouter();
-  const form = useForm<z.input<typeof episodeFormSchema>, unknown, Values>({ resolver: zodResolver(episodeFormSchema), defaultValues: defaults(defaultSeasonId) });
-
+export function EpisodeFormDialog({ seasons, people = [], defaultSeasonId }: { seasons: EpisodeSeason[]; people?: EpisodePerson[]; defaultSeasonId?: string }) {
+  const router = useRouter(); const [open, setOpen] = useState(false); const [search, setSearch] = useState(""); const [error, setError] = useState("");
+  const form = useForm<z.input<typeof schema>, unknown, Values>({ resolver: zodResolver(schema), defaultValues: defaults(defaultSeasonId) });
+  const selected = useWatch({ control: form.control, name: "team" }) ?? [];
+  const selectedSeason = useWatch({ control: form.control, name: "seasonId" });
+  const [lastTeam, setLastTeam] = useState<string[]>([]);
+  const matches = useMemo(() => people.filter((person) => !selected.includes(person.id) && `${person.name} ${person.role}`.toLowerCase().includes(search.toLowerCase())).slice(0, 8), [people, search, selected]);
   useEffect(() => { form.reset(defaults(defaultSeasonId)); }, [defaultSeasonId, form]);
-
-  async function submit(values: Values) {
-    setSubmitError(null);
-    try {
-      const response = await fetch("/api/episodes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-        seasonId: values.seasonId,
-        number: values.number,
-        title: values.title,
-        productionCode: values.productionCode || null,
-        status: values.status,
-        workflowStageId: null,
-        assignedProducerId: null,
-        editorId: null,
-        coloristId: null,
-        soundMixerId: null,
-        synopsis: null,
-        qcStatus: "not_started",
-        airDate: values.airDate ? `${values.airDate}T12:00:00.000Z` : null,
-        lockedCutDate: null,
-        deliveryDeadline: values.deliveryDeadline ? new Date(values.deliveryDeadline).toISOString() : null,
-      }) });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        setSubmitError(body?.error ?? "Unable to create the episode.");
-        return;
-      }
-      setOpen(false);
-      form.reset(defaults(defaultSeasonId));
-      router.refresh();
-    } catch {
-      setSubmitError("Unable to create the episode. Check your connection and try again.");
-    }
-  }
-
-  return <><Button variant="primary" onClick={() => setOpen(true)} isDisabled={!seasons.length} className="bg-[#263130] text-white"><Plus size={16} /> New episode</Button>{open && <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-0 sm:items-center sm:p-4"><form onSubmit={form.handleSubmit(submit)} className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-[#fafbf9] p-5 shadow-xl sm:rounded-xl sm:p-6"><div className="flex items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-[#29322f]">New episode</h2><p className="mt-1 text-sm text-[#747977]">Create an episode in the selected show season.</p></div><button type="button" onClick={() => setOpen(false)} className="rounded p-1 text-[#727b76] hover:bg-[#f2f2ef]" aria-label="Close"><X size={18} /></button></div><div className="mt-5 space-y-4"><Field label="Season" error={form.formState.errors.seasonId?.message}><select {...form.register("seasonId")} className="control"><option value="">Select season</option>{seasons.map((season) => <option key={season.id} value={season.id}>{season.label}</option>)}</select></Field><div className="grid gap-4 sm:grid-cols-[120px_1fr]"><Field label="Episode number" error={form.formState.errors.number?.message}><input type="number" min="1" {...form.register("number")} className="control" /></Field><Field label="Title" error={form.formState.errors.title?.message}><input {...form.register("title")} placeholder="e.g. The Final Cut" className="control" /></Field></div><div className="grid gap-4 sm:grid-cols-2"><Field label="Production code" error={form.formState.errors.productionCode?.message}><input {...form.register("productionCode")} placeholder="e.g. SN109" className="control" /></Field><Field label="Initial workflow status" error={form.formState.errors.status?.message}><select {...form.register("status")} className="control">{["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"].map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}</select></Field></div><div className="grid gap-4 sm:grid-cols-2"><Field label="Air date" error={form.formState.errors.airDate?.message}><input type="date" {...form.register("airDate")} className="control" /></Field><Field label="Delivery deadline" error={form.formState.errors.deliveryDeadline?.message}><input type="datetime-local" {...form.register("deliveryDeadline")} className="control" /></Field></div></div>{submitError && <p role="alert" className="mt-4 rounded-lg bg-[#f9e7df] px-3 py-2 text-sm text-[#9f563c]">{submitError}</p>}<div className="mt-6 flex justify-end gap-2"><Button type="button" variant="tertiary" onPress={() => setOpen(false)}>Cancel</Button><Button type="submit" variant="primary" isDisabled={form.formState.isSubmitting} className="bg-[#263130] text-white">{form.formState.isSubmitting ? "Creating…" : "Create episode"}</Button></div></form></div>}</>;
+  useEffect(() => { if (!selectedSeason) return setLastTeam([]); fetch(`/api/seasons/${selectedSeason}/last-episode-team`).then((response) => response.ok ? response.json() : null).then((data) => setLastTeam((data?.team ?? []).map((item: { personId: string }) => item.personId))).catch(() => setLastTeam([])); }, [selectedSeason]);
+  const toggle = (id: string) => form.setValue("team", selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id], { shouldDirty: true });
+  const copyPreviousTeam = () => form.setValue("team", lastTeam, { shouldDirty: true });
+  async function submit(values: Values) { setError(""); const response = await fetch("/api/episodes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seasonId: values.seasonId, number: values.number, title: values.title, productionCode: values.productionCode || null, status: values.status, workflowStageId: null, assignedProducerId: null, editorId: null, coloristId: null, soundMixerId: null, synopsis: null, qcStatus: "not_started", airDate: values.airDate ? `${values.airDate}T12:00:00.000Z` : null, lockedCutDate: null, deliveryDeadline: values.deliveryDeadline ? new Date(values.deliveryDeadline).toISOString() : null, team: values.team }) }); if (!response.ok) return setError((await response.json().catch(() => null))?.error ?? "Unable to create the episode."); setOpen(false); form.reset(defaults(defaultSeasonId)); router.refresh(); }
+  return <><Button variant="primary" onPress={() => setOpen(true)} isDisabled={!seasons.length} className="bg-[#263130] text-white"><Plus size={16} /> New episode</Button>{open && <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 sm:items-center sm:p-4"><form onSubmit={form.handleSubmit(submit)} className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-[#fafbf9] p-5 shadow-xl sm:rounded-xl sm:p-6"><div className="flex justify-between gap-4"><div><h2 className="text-lg font-semibold text-[#29322f]">New episode</h2><p className="mt-1 text-sm text-[#747977]">Assign the people actually working this episode.</p></div><Button isIconOnly variant="tertiary" onPress={() => setOpen(false)} aria-label="Close"><X size={18} /></Button></div><div className="mt-5 space-y-4"><Field label="Season"><select {...form.register("seasonId")}><option value="">Select season</option>{seasons.map((season) => <option key={season.id} value={season.id}>{season.label}</option>)}</select></Field><div className="grid gap-4 sm:grid-cols-[120px_1fr]"><Field label="Episode number"><input type="number" min="1" {...form.register("number")} /></Field><Field label="Title"><input {...form.register("title")} /></Field></div><div className="grid gap-4 sm:grid-cols-2"><Field label="Production code"><input {...form.register("productionCode")} /></Field><Field label="Initial status"><select {...form.register("status")}>{["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"].map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}</select></Field></div><div className="grid gap-4 sm:grid-cols-2"><Field label="Air date"><input type="date" {...form.register("airDate")} /></Field><Field label="Delivery deadline"><input type="datetime-local" {...form.register("deliveryDeadline")} /></Field></div><div><div className="flex items-center justify-between gap-2"><p className="text-sm font-medium text-[#48514d]">Episode team <span className="font-normal text-[#858a87]">(optional)</span></p><Button type="button" size="sm" variant="tertiary" isDisabled={!lastTeam.length} onPress={copyPreviousTeam} className="min-w-0 border border-[#dfe3df] text-xs">Copy last episode team</Button></div><div className="relative mt-1.5"><Search size={14} className="absolute left-3 top-3 text-[#8b918d]" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search people by name or responsibility" className="pl-9" /></div>{search && <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-[#dedfda] bg-white">{matches.map((person) => <button key={person.id} type="button" onClick={() => { toggle(person.id); setSearch(""); }} className="flex w-full justify-between px-3 py-2 text-left text-xs hover:bg-[#f3f6f3]"><span>{person.name}</span><span className="capitalize text-[#858a87]">{person.role.replaceAll("_", " ")}</span></button>)}{!matches.length && <p className="px-3 py-2 text-xs text-[#858a87]">No matching people.</p>}</div>}<div className="mt-2 flex flex-wrap gap-1.5">{selected.map((id) => { const person = people.find((item) => item.id === id); return person && <button key={id} type="button" onClick={() => toggle(id)} className="rounded-full bg-[#e7efea] px-2 py-1 text-xs text-[#45685e]">{person.name} <span aria-hidden>×</span></button>; })}</div></div></div>{error && <p role="alert" className="mt-4 text-sm text-[#a65f42]">{error}</p>}<div className="mt-6 flex justify-end gap-2"><Button type="button" variant="tertiary" onPress={() => setOpen(false)}>Cancel</Button><Button type="submit" variant="primary" isDisabled={form.formState.isSubmitting} className="bg-[#263130] text-white">{form.formState.isSubmitting ? "Creating…" : "Create episode"}</Button></div></form></div>}</>;
 }
-
-function defaults(seasonId?: string) { return { seasonId: seasonId ?? "", number: 1, title: "", productionCode: "", status: "development" as const, airDate: "", deliveryDeadline: "" }; }
-function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) { return <label className="block text-sm font-medium text-[#48514d]"><span>{label}</span><div className="mt-1.5">{children}</div>{error && <span className="mt-1 block text-xs font-normal text-[#a65f42]">{error}</span>}</label>; }
+function defaults(seasonId?: string): Values { return { seasonId: seasonId ?? "", number: 1, title: "", productionCode: "", status: "development", airDate: "", deliveryDeadline: "", team: [] }; }
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block text-sm font-medium text-[#48514d]"><span>{label}</span><span className="mt-1.5 block [&_input]:h-10 [&_input]:w-full [&_input]:rounded-md [&_input]:border [&_input]:border-[#dedfda] [&_input]:bg-white [&_input]:px-3 [&_select]:h-10 [&_select]:w-full [&_select]:rounded-md [&_select]:border [&_select]:border-[#dedfda] [&_select]:bg-white [&_select]:px-2">{children}</span></label>; }

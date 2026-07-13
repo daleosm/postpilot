@@ -1,0 +1,14 @@
+"use client";
+import { Button } from "@heroui/react";
+import { Plus, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+
+type Assignment = { id: string; personId: string; name: string; role: string; responsibility: string; isLead: boolean };
+type Person = { id: string; name: string; role: string };
+export function EpisodeTeam({ episodeId, assignments, people, canManage }: { episodeId: string; assignments: Assignment[]; people: Person[]; canManage: boolean }) {
+  const router = useRouter(); const [personId, setPersonId] = useState(""); const [responsibility, setResponsibility] = useState(""); const [error, setError] = useState("");
+  async function add() { const response = await fetch(`/api/episodes/${episodeId}/team`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personId, responsibility }) }); if (!response.ok) return setError((await response.json()).error ?? "Could not assign person."); setPersonId(""); setResponsibility(""); router.refresh(); }
+  async function remove(id: string) { await fetch(`/api/episodes/${episodeId}/team?assignmentId=${id}`, { method: "DELETE" }); router.refresh(); }
+  return <div className="rounded-lg border border-[#ecebe7] p-3"><div className="flex items-center justify-between gap-2"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7d837f]">Episode team</p><span className="text-[10px] text-[#858a87]">{assignments.length} assigned</span></div><div className="mt-2 space-y-1.5">{assignments.map((item) => <div key={item.id} className="flex items-center justify-between gap-2 rounded bg-[#fafaf8] px-2 py-1.5 text-xs"><span className="min-w-0 truncate font-medium text-[#46504b]">{item.name} · {item.responsibility}</span>{canManage && <Button isIconOnly size="sm" variant="tertiary" onPress={() => remove(item.id)} aria-label={`Remove ${item.name}`} className="min-w-0 text-[#9b5c42]"><X size={13} /></Button>}</div>)}{!assignments.length && <p className="text-xs text-[#858a87]">No people assigned to this episode.</p>}</div>{canManage && <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]"><select value={personId} onChange={(event) => setPersonId(event.target.value)}><option value="">Choose person</option>{people.map((person) => <option key={person.id} value={person.id}>{person.name} · {person.role.replaceAll("_", " ")}</option>)}</select><input value={responsibility} onChange={(event) => setResponsibility(event.target.value)} placeholder="Responsibility" /><Button isIconOnly variant="tertiary" onPress={add} isDisabled={!personId || responsibility.trim().length < 2} aria-label="Add episode team member" className="min-w-0 border border-[#dfe3df]"><Plus size={15} /></Button></div>}{error && <p className="mt-2 text-xs text-[#a35e41]">{error}</p>}</div>;
+}

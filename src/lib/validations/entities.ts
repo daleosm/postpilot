@@ -151,8 +151,10 @@ export const insertEpisodeSchema = z.object({
   airDate: optionalDate.nullable(),
   lockedCutDate: optionalDate.nullable(),
   deliveryDeadline: optionalTimestamp.nullable(),
+  team: z.array(id).max(100).default([]),
 });
 export const updateEpisodeSchema = insertEpisodeSchema.omit({ seasonId: true }).partial();
+export const episodeTeamAssignmentSchema = z.object({ personId: id, responsibility: z.string().trim().min(2, "Enter a responsibility.").max(80), isLead: z.boolean().default(false) });
 
 const bookingFormSchema = z.object({
   organizationId: id,
