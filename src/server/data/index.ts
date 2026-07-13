@@ -4,6 +4,7 @@ export { getDashboardData } from "./dashboard";
 export { getDemoCommandCenterData } from "./demo-dashboard";
 export { getEpisode, getEpisodeWorkspace, listEpisodes } from "./episodes";
 export { listWorkflowSignOffInbox } from "./workflow-approvals";
+export { listEpisodeWorkOrders, listWorkOrderInbox } from "./work-orders";
 export { getScheduleResources, listRooms, listSchedule } from "./schedule";
 export { getShow, getShowWorkspace, listShowTeam, listShows } from "./shows";
 export { listTeam } from "./team";

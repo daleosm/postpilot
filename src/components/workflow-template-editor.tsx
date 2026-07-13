@@ -7,12 +7,14 @@ import { useState } from "react";
 
 type Stage = { id: string; name: string; key: string; position: number; color: string; isTerminal: boolean; canStartEarly: boolean };
 type Rule = { id: string; workflowStageId: string; approverRole: string; label: string; approvalOrder: number; isRequired: boolean };
-type Workflow = { id: string; name: string; description: string | null; stages: Stage[]; rules: Rule[] };
+type WorkOrderTemplate = { id: string; workflowStageId: string; title: string; description: string | null; department: string | null; assigneeRole: string | null; priority: "blocker" | "high" | "normal" | "low"; isBlocking: boolean; position: number };
+type Workflow = { id: string; name: string; description: string | null; stages: Stage[]; rules: Rule[]; workOrderTemplates: WorkOrderTemplate[] };
 
 export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow; roles: Array<{ role: string; label: string }> }) {
   const router = useRouter();
   const [stages, setStages] = useState(workflow.stages);
   const [rules, setRules] = useState(workflow.rules);
+  const [workOrderTemplates, setWorkOrderTemplates] = useState(workflow.workOrderTemplates);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [draggedStageId, setDraggedStageId] = useState<string | null>(null);
@@ -26,10 +28,31 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
     setRules((items) => items.map((rule) => rule.id === id ? { ...rule, ...patch } : rule));
   }
 
+  function updateWorkOrderTemplate(id: string, patch: Partial<WorkOrderTemplate>) {
+    setWorkOrderTemplates((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
+  }
+
+  function addWorkOrderTemplate(workflowStageId: string) {
+    const position = Math.max(0, ...workOrderTemplates.filter((item) => item.workflowStageId === workflowStageId).map((item) => item.position)) + 1;
+    setWorkOrderTemplates((items) => [...items, { id: crypto.randomUUID(), workflowStageId, title: "New checklist item", description: null, department: null, assigneeRole: null, priority: "normal", isBlocking: false, position }]);
+  }
+
+  function removeWorkOrderTemplate(id: string, workflowStageId: string) {
+    setWorkOrderTemplates((items) => {
+      const remaining = items.filter((item) => item.id !== id);
+      const ordered = remaining.filter((item) => item.workflowStageId === workflowStageId).sort((a, b) => a.position - b.position).map((item) => item.id);
+      return remaining.map((item) => item.workflowStageId === workflowStageId ? { ...item, position: ordered.indexOf(item.id) + 1 } : item);
+    });
+  }
+
   function addApprovalRule(workflowStageId: string) {
     const stageRules = rules.filter((rule) => rule.workflowStageId === workflowStageId);
     const approvalOrder = Math.max(0, ...stageRules.map((rule) => rule.approvalOrder)) + 1;
-    const defaultRole = roles[0] ?? { role: "post_supervisor", label: "Post supervisor" };
+    const defaultRole = roles[0];
+    if (!defaultRole) {
+      setMessage("Create a tenant role before adding a sign-off.");
+      return;
+    }
     setRules((items) => [...items, { id: crypto.randomUUID(), workflowStageId, approverRole: defaultRole.role, label: `${defaultRole.label} sign-off`, approvalOrder, isRequired: true }]);
   }
 
@@ -61,7 +84,7 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
       const response = await fetch(`/api/workflows/${workflow.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: workflow.name, description: workflow.description, stages, rules }),
+        body: JSON.stringify({ name: workflow.name, description: workflow.description, stages, rules, workOrderTemplates }),
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) return setMessage(body?.error ?? "Could not save the workflow.");
@@ -86,6 +109,7 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
         <div className="divide-y divide-[#efeeea]">
           {[...stages].sort((a, b) => a.position - b.position).map((stage) => {
             const stageRules = rules.filter((rule) => rule.workflowStageId === stage.id).sort((a, b) => a.approvalOrder - b.approvalOrder);
+            const stageWorkOrders = workOrderTemplates.filter((item) => item.workflowStageId === stage.id).sort((a, b) => a.position - b.position);
             return (
               <div key={stage.id} onDragOver={(event) => { event.preventDefault(); if (draggedStageId !== stage.id) setDropTargetId(stage.id); }} onDrop={() => { reorderStages(stage.id); setDraggedStageId(null); setDropTargetId(null); }} className={`p-5 transition-colors ${dropTargetId === stage.id ? "bg-[#edf3ef]" : ""}`}>
                 <div className="grid gap-3 md:grid-cols-[32px_minmax(220px,1fr)_auto]">
@@ -105,6 +129,19 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
                     </div>
                   ))}
                   {!stageRules.length && <p className="mt-2 text-xs text-[#858a87]">No sign-off roles configured for this stage.</p>}
+                </div>
+                <div className="mt-3 rounded-lg border border-[#e5e7e3] bg-[#f7f8f6] p-3">
+                  <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7d837f]">Default work orders</p><p className="mt-1 text-xs text-[#858a87]">Created for an episode when this stage becomes active. Blockers must be complete before sign-off.</p></div><Button size="sm" variant="tertiary" onClick={() => addWorkOrderTemplate(stage.id)} className="h-7 border border-[#dfe5e1] bg-white px-2 text-xs text-[#45685e]"><Plus size={13} /> Add item</Button></div>
+                  {stageWorkOrders.map((item, index) => (
+                    <div key={item.id} className="mt-3 grid gap-2 rounded-md border border-[#e6e7e3] bg-[#fafbf9] p-2 sm:grid-cols-[minmax(160px,1fr)_150px_98px_auto_28px] sm:items-end">
+                      <label className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7d837f]">Work order<input aria-label={`Work order ${index + 1} title`} value={item.title} onChange={(event) => updateWorkOrderTemplate(item.id, { title: event.target.value })} className="mt-1 h-8 w-full rounded-md border border-[#dedfda] px-2 text-xs normal-case tracking-normal" /></label>
+                      <label className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7d837f]">Assigned role<select aria-label={`Work order ${index + 1} role`} value={item.assigneeRole ?? ""} onChange={(event) => updateWorkOrderTemplate(item.id, { assigneeRole: event.target.value || null })} className="mt-1 h-8 w-full rounded-md border border-[#dedfda] px-2 text-xs normal-case tracking-normal"><option value="">Unassigned</option>{roles.map((role) => <option key={role.role} value={role.role}>{role.label}</option>)}</select></label>
+                      <label className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7d837f]">Priority<select aria-label={`Work order ${index + 1} priority`} value={item.priority} onChange={(event) => updateWorkOrderTemplate(item.id, { priority: event.target.value as WorkOrderTemplate["priority"] })} className="mt-1 h-8 w-full rounded-md border border-[#dedfda] px-2 text-xs normal-case tracking-normal"><option value="blocker">Blocker</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select></label>
+                      <label className="flex h-8 items-center gap-2 text-xs font-medium text-[#59615e]"><input type="checkbox" checked={item.isBlocking} onChange={(event) => updateWorkOrderTemplate(item.id, { isBlocking: event.target.checked })} /> Block sign-off</label>
+                      <button type="button" onClick={() => removeWorkOrderTemplate(item.id, stage.id)} className="h-8 rounded p-1 text-[#8b918e] hover:bg-[#f3e9e4] hover:text-[#a35e41]" aria-label={`Remove work order ${index + 1}`}><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                  {!stageWorkOrders.length && <p className="mt-3 text-xs text-[#858a87]">No default work orders for this stage.</p>}
                 </div>
               </div>
             );

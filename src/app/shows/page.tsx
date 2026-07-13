@@ -3,13 +3,13 @@ import { ArrowRight, Clapperboard, DollarSign } from "lucide-react";
 
 import { ShowFormDialog } from "@/components/show-form-dialog";
 import { getActiveOrganizationContext, getActiveShowName } from "@/lib/organizations";
-import { can, getCurrentPerson, roleHome } from "@/lib/permissions";
+import { can, roleHome } from "@/lib/permissions";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { getBudgetData, getDemoCommandCenterData, listEpisodes, listShows, listTeam } from "@/server/data";
 import { redirect } from "next/navigation";
 
 export default async function ShowsPage() {
-  if (!(await can("manage_shows"))) redirect(roleHome((await getCurrentPerson())?.role));
+  if (!(await can("manage_shows"))) redirect(await roleHome());
   const activeShow = await getActiveShowName(); const raw = await getShowsData(); const data = raw ? { ...raw, shows: raw.shows.filter((show) => !activeShow || show.title === activeShow) } : null;
   if (!data) return <EmptyWorkspace />;
 

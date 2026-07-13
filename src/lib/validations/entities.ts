@@ -9,7 +9,10 @@ const metadata = z.record(z.string(), z.unknown()).default({});
 
 const episodeStatuses = ["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"] as const;
 const qcStatuses = ["not_started", "in_progress", "passed", "needs_attention", "waived"] as const;
-const personRoles = ["producer", "post_supervisor", "head_of_production", "finance", "editor", "assistant_editor", "online_editor", "colorist", "sound_mixer", "supervising_sound_editor", "rerecording_mixer", "vfx_coordinator", "vfx_supervisor", "qc", "director", "network", "network_client_executive", "network_client_representative", "client", "runner", "freelancer"] as const;
+const workOrderPriorities = ["blocker", "high", "normal", "low"] as const;
+const workOrderStatuses = ["open", "in_progress", "ready_for_review", "complete", "cancelled"] as const;
+const workOrderBillingScopes = ["included", "billable_change", "internal"] as const;
+const roleKey = z.string().trim().min(2).max(80).regex(/^[a-z0-9_]+$/, "Use lowercase letters, numbers, and underscores.");
 
 export const insertUserSchema = z.object({
   id: z.string().min(1),
@@ -95,6 +98,17 @@ export const updateWorkflowTemplateSchema = z.object({
     approvalOrder: z.coerce.number().int().positive(),
     isRequired: z.boolean(),
   })),
+  workOrderTemplates: z.array(z.object({
+    id: id.optional(),
+    workflowStageId: id,
+    title: z.string().trim().min(2).max(160),
+    description: z.string().trim().max(4000).nullable().optional(),
+    department: z.string().trim().max(120).nullable().optional(),
+    assigneeRole: z.string().trim().max(80).nullable().optional(),
+    priority: z.enum(workOrderPriorities),
+    isBlocking: z.boolean(),
+    position: z.coerce.number().int().positive(),
+  })).default([]),
 });
 
 export const insertPersonSchema = z.object({
@@ -102,7 +116,7 @@ export const insertPersonSchema = z.object({
   userId: z.string().min(1).nullable().optional(),
   name: z.string().trim().min(1).max(120),
   email: z.string().email().max(320).nullable().optional(),
-  role: z.enum(personRoles),
+  role: roleKey,
   company: z.string().trim().max(120).nullable().optional(),
   isActive: z.boolean().default(true),
   availability: z.enum(["available", "limited", "booked_out", "away"]).default("available"),
@@ -188,6 +202,52 @@ export const insertQcIssueSchema = z.object({
   severity: z.enum(["minor", "major", "critical"]),
   description: z.string().trim().min(1).max(4000),
   timecodeSeconds: z.coerce.number().nonnegative().nullable().optional(),
+});
+
+export const createPostWorkOrderSchema = z.object({
+  episodeId: id,
+  workflowStageId: nullableId,
+  bookingId: nullableId,
+  kind: z.enum(["work_order", "qc_exception"]).default("work_order"),
+  title: z.string().trim().min(2, "A work-order title is required.").max(160),
+  description: z.string().trim().max(4000).nullable().optional(),
+  department: z.string().trim().max(120).nullable().optional(),
+  assigneePersonId: nullableId,
+  assigneeRole: z.string().trim().max(80).nullable().optional(),
+  priority: z.enum(workOrderPriorities).default("normal"),
+  isBlocking: z.boolean().default(false),
+  billingScope: z.enum(workOrderBillingScopes).default("included"),
+  estimatedAmount: money.nullable().optional(),
+  currency: z.string().trim().length(3).toUpperCase().default("USD"),
+  billingNotes: z.string().trim().max(2000).nullable().optional(),
+  externalUrl: z.string().url().max(2000).nullable().optional(),
+  dueAt: optionalTimestamp.nullable(),
+}).refine((value) => !value.isBlocking || Boolean(value.workflowStageId), {
+  message: "A blocking work order must be linked to a workflow stage.",
+  path: ["workflowStageId"],
+});
+
+export const updatePostWorkOrderSchema = z.object({
+  status: z.enum(workOrderStatuses).optional(),
+  title: z.string().trim().min(2).max(160).optional(),
+  description: z.string().trim().max(4000).nullable().optional(),
+  department: z.string().trim().max(120).nullable().optional(),
+  assigneePersonId: nullableId,
+  assigneeRole: z.string().trim().max(80).nullable().optional(),
+  priority: z.enum(workOrderPriorities).optional(),
+  isBlocking: z.boolean().optional(),
+  billingScope: z.enum(workOrderBillingScopes).optional(),
+  estimatedAmount: money.nullable().optional(),
+  currency: z.string().trim().length(3).toUpperCase().optional(),
+  billingNotes: z.string().trim().max(2000).nullable().optional(),
+  externalUrl: z.string().url().max(2000).nullable().optional(),
+  dueAt: optionalTimestamp.nullable(),
+}).refine((value) => Object.keys(value).length > 0, "Provide at least one change.");
+
+export const postWorkOrderChargeSchema = z.object({
+  actualAmount: money.positive("Enter the approved client charge."),
+  category: z.string().trim().min(2).max(120).optional(),
+  reference: z.string().trim().max(120).nullable().optional(),
 });
 
 export const insertBudgetLineSchema = z.object({

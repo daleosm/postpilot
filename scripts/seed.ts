@@ -1,7 +1,6 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { workflowSignOffLabel } from "../src/lib/workflow";
 
 import {
   activityLog,
@@ -12,7 +11,9 @@ import {
   episodes,
   organizationMembers,
   organizations,
+  organizationRolePolicies,
   people,
+  postWorkOrders,
   postWorkflows,
   qcIssues,
   qcReports,
@@ -23,6 +24,7 @@ import {
   shows,
   users,
   workflowStageApprovalRules,
+  workflowStageWorkOrderTemplates,
   workflowStages,
 } from "../src/lib/db/schema";
 
@@ -66,7 +68,7 @@ const stages = [
   ["Archive and closeout", "archive_closeout", "#6d7671", "post_supervisor"],
 ] as const;
 
-type PersonRole = "producer" | "post_supervisor" | "finance" | "editor" | "assistant_editor" | "online_editor" | "colorist" | "sound_mixer" | "supervising_sound_editor" | "rerecording_mixer" | "vfx_coordinator" | "vfx_supervisor" | "qc" | "director" | "network_client_executive" | "network_client_representative" | "client" | "runner";
+type PersonRole = string;
 type MembershipRole = "owner" | "admin" | "member" | "guest";
 type PersonSeed = { name: string; email: string; role: PersonRole; userId?: string; membershipRole?: MembershipRole };
 type TenantSeed = {
@@ -91,6 +93,30 @@ const specialistRoleSeeds: Array<{ role: PersonRole; title: string }> = [
   { role: "network_client_executive", title: "Network Client Executive" },
   { role: "network_client_representative", title: "Network Client Representative" },
 ];
+
+const defaultRolePolicies: Record<string, string[]> = {
+  post_supervisor: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "manage_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "request_catering", "view_assigned"],
+  producer: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "manage_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "request_catering", "view_assigned"],
+  head_of_production: ["manage_shows", "manage_bookings", "manage_work_orders", "manage_budget", "request_catering", "view_assigned"],
+  finance: ["manage_budget", "view_assigned"],
+  runner: ["request_catering", "manage_catering", "view_assigned"],
+  qc: ["update_assigned_work", "manage_qc", "verify_qc", "request_catering", "view_assigned"],
+  editor: ["update_assigned_work", "request_catering", "view_assigned"],
+  assistant_editor: ["update_assigned_work", "request_catering", "view_assigned"],
+  online_editor: ["update_assigned_work", "request_catering", "view_assigned"],
+  colorist: ["update_assigned_work", "request_catering", "view_assigned"],
+  sound_mixer: ["update_assigned_work", "request_catering", "view_assigned"],
+  supervising_sound_editor: ["update_assigned_work", "request_catering", "view_assigned"],
+  rerecording_mixer: ["update_assigned_work", "request_catering", "view_assigned"],
+  vfx_coordinator: ["update_assigned_work", "request_catering", "view_assigned"],
+  vfx_supervisor: ["update_assigned_work", "request_catering", "view_assigned"],
+  director: ["approve_reviews", "view_assigned"],
+  network_client_executive: ["approve_reviews", "view_assigned"],
+  network_client_representative: ["approve_reviews", "view_assigned"],
+  client: ["approve_reviews", "view_assigned"],
+};
+
+function roleLabel(role: string) { return role.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 
 const tenants: TenantSeed[] = [
   {
@@ -315,10 +341,16 @@ async function seedTenant(tenant: TenantSeed) {
     id: personId(index + 1), organizationId: tenant.id, name: person.name, email: person.email, role: person.role, userId: person.userId,
     availability: (index % 5 === 0 ? "limited" : "available") as "limited" | "available", hourlyRate: String(65 + index * 8), dayRate: String(520 + index * 55),
   })));
+  await db.insert(organizationRolePolicies).values([...new Set(tenantPeople.map((person) => person.role))].map((role) => ({ organizationId: tenant.id, role, label: roleLabel(role), permissions: defaultRolePolicies[role] ?? [] })));
 
   await db.insert(postWorkflows).values({ id: workflowId, organizationId: tenant.id, name: tenant.workflowName, description: tenant.workflowDescription, isDefault: true });
   await db.insert(workflowStages).values(stages.map(([name, key, color], index) => ({ id: stageId(index + 1), organizationId: tenant.id, workflowId, name, key, color, position: index + 1, isTerminal: key === "archive_closeout" })));
-  await db.insert(workflowStageApprovalRules).values(stages.map(([, , , approverRole], index) => ({ id: ruleId(index + 1), organizationId: tenant.id, workflowStageId: stageId(index + 1), approverRole, label: workflowSignOffLabel(approverRole), approvalOrder: 1, isRequired: true })));
+  await db.insert(workflowStageApprovalRules).values(stages.map(([, , , approverRole], index) => ({ id: ruleId(index + 1), organizationId: tenant.id, workflowStageId: stageId(index + 1), approverRole, label: `${approverRole.replaceAll("_", " ")} sign-off`, approvalOrder: 1, isRequired: true })));
+  await db.insert(workflowStageWorkOrderTemplates).values([
+    { id: id(tenant.number, "37", 1), organizationId: tenant.id, workflowStageId: stageId(12), title: "Confirm VFX, graphics and titles turnover", department: "VFX", assigneeRole: "vfx_coordinator", priority: "normal", isBlocking: false, position: 1 },
+    { id: id(tenant.number, "37", 2), organizationId: tenant.id, workflowStageId: stageId(16), title: "Print final 5.1, stereo and M&E mixes", department: "Sound", assigneeRole: "sound_mixer", priority: "blocker", isBlocking: true, position: 1 },
+    { id: id(tenant.number, "37", 3), organizationId: tenant.id, workflowStageId: stageId(19), title: "Run technical QC and log exceptions", department: "QC", assigneeRole: "qc", priority: "blocker", isBlocking: true, position: 1 },
+  ]);
 
   await db.insert(shows).values(tenant.shows.map((show, index) => ({ id: showId(index + 1), organizationId: tenant.id, title: show.title, code: show.code, network: tenant.networks[index] ?? primaryNetwork, productionCompany: show.company, timeZone: "Europe/London" })));
   await db.insert(seasons).values(tenant.shows.map((show, index) => ({ id: seasonId(index + 1), organizationId: tenant.id, showId: showId(index + 1), number: 1, title: `${show.title} · Season 1`, startDate: day(-100 + index * 18) })));
@@ -369,6 +401,10 @@ async function seedTenant(tenant: TenantSeed) {
 
   await db.insert(qcReports).values([{ id: id(tenant.number, "33", 1), organizationId: tenant.id, episodeId: episodeId(4), status: "failed", summary: "Flash-frame and caption timing failures require a corrected post package.", completedAt: at(-1, 16) }]);
   await db.insert(qcIssues).values([{ id: id(tenant.number, "34", 1), organizationId: tenant.id, qcReportId: id(tenant.number, "33", 1), code: "PHOTOSENS-01", severity: "high", description: "Photosensitivity warning at transition; regrade and rerun external QC.", timecodeSeconds: "1817.700", status: "open" }]);
+  await db.insert(postWorkOrders).values([
+    { id: id(tenant.number, "38", 1), organizationId: tenant.id, episodeId: episodeId(1), workflowStageId: stageId(4), title: "Prepare director review change list", description: "Consolidate editorial notes and confirm the external review reference.", department: "Editorial", assigneePersonId: byRole("editor"), assigneeRole: "editor", priority: "high", isBlocking: false, status: "in_progress", externalUrl: "https://example.com/review-reference" },
+    { id: id(tenant.number, "38", 2), organizationId: tenant.id, episodeId: episodeId(4), workflowStageId: stageId(13), qcIssueId: id(tenant.number, "34", 1), kind: "qc_exception", title: "QC exception — correct photosensitivity transition", description: "Photosensitivity warning at 00:30:17.700. Regrade, document the correction, then return to QC.", department: "Online", assigneePersonId: byRole("online_editor"), assigneeRole: "online_editor", priority: "blocker", isBlocking: true, status: "open", externalUrl: "https://example.com/qc-report" },
+  ]);
 
   const budgetCategories = ["Edit suite", "Editorial artists", "VFX", "Colour", "Sound", "QC", "Finalisation"];
   await db.insert(budgetLines).values(budgetCategories.map((category, index) => {
@@ -404,7 +440,7 @@ async function seed() {
   for (const tenant of tenants) await seedTenant(tenant);
   const showCount = tenants.reduce((total, tenant) => total + tenant.shows.length, 0);
   const episodeCount = tenants.reduce((total, tenant) => total + tenant.shows.reduce((showsTotal, show) => showsTotal + show.episodes.length, 0), 0);
-  console.log(`Seeded ${tenants.length} isolated PostPilot post houses with ${showCount} shows, ${episodeCount} episodes, tenant-specific workflows, bookings, reviews, delivery, budgets, catering, QC, and activity.`);
+  console.log(`Seeded ${tenants.length} isolated PostPilot post houses with ${showCount} shows, ${episodeCount} episodes, tenant-specific workflows, bookings, work orders, budgets, catering, QC, and activity.`);
 }
 
 seed()

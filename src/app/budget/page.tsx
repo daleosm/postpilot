@@ -2,6 +2,7 @@ import { AlertTriangle, CircleDollarSign, ReceiptText, TrendingUp } from "lucide
 
 import { BudgetLineForm } from "@/components/budget-line-form";
 import { ServiceRateCard } from "@/components/service-rate-card";
+import { WorkOrderChargeQueue } from "@/components/work-order-charge-queue";
 import { getActiveOrganizationContext, getActiveShowName } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { can } from "@/lib/permissions";
@@ -24,6 +25,7 @@ type Line = {
 type BudgetData = {
   lines: Line[];
   episodes: Array<{ id: string; label: string; showTitle: string }>;
+  workOrderCharges: Array<{ id: string; title: string; department: string | null; status: string; billingStatus: string; estimatedAmount: string | number | null; currency: string; billingNotes: string | null; episodeTitle: string; episodeNumber: number; showTitle: string }>;
 };
 
 export default async function BudgetPage() {
@@ -61,6 +63,7 @@ export default async function BudgetPage() {
     </section>
 
     <ServiceRateCard rates={serviceRates} />
+    <WorkOrderChargeQueue charges={activeShow ? data.workOrderCharges.filter((charge) => charge.showTitle === activeShow) : data.workOrderCharges} />
 
     <section className="panel p-5">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
@@ -121,14 +124,14 @@ function money(value: number) {
 async function load(): Promise<BudgetData> {
   if (isDebugDemoMode) {
     const episodes = [{ id: "demo-e1", label: "Signal North · E01 The Quiet Hour", showTitle: "Signal North" }, { id: "demo-e5", label: "Under Current · E01 The Undertow", showTitle: "Under Current" }];
-    return { episodes, lines: [
+    return { episodes, workOrderCharges: [], lines: [
       { id: "b1", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "Edit suite", description: "Avid bays", showTitle: "Signal North", budgetedAmount: 48000, actualAmount: 42150, costType: "internal" },
       { id: "b2", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "VFX", description: "Cleanup and screens", showTitle: "Signal North", budgetedAmount: 78000, actualAmount: 82350, costType: "billable" },
       { id: "b3", episodeId: "demo-e5", episodeTitle: "The Undertow", episodeNumber: 1, category: "Sound", description: "Mix and stems", showTitle: "Under Current", budgetedAmount: 52000, actualAmount: 47120, costType: "internal" },
     ] };
   }
   const context = await getActiveOrganizationContext();
-  if (!context?.organization) return { lines: [], episodes: [] };
+  if (!context?.organization) return { lines: [], episodes: [], workOrderCharges: [] };
   const [budget, rows] = await Promise.all([getBudgetData(context.organization.organizationId), listEpisodes(context.organization.organizationId)]);
-  return { lines: budget.lines, episodes: rows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}`, showTitle: episode.showTitle })) };
+  return { lines: budget.lines, workOrderCharges: budget.workOrderCharges, episodes: rows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}`, showTitle: episode.showTitle })) };
 }

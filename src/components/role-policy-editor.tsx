@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { Save } from "lucide-react";
+import { Plus, Save, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -12,6 +12,10 @@ const permissionLabels: Record<string, string> = {
   manage_bookings: "Bookings",
   manage_reviews: "Approval administration",
   approve_reviews: "Approve workflow gates",
+  manage_work_orders: "Manage work orders",
+  update_assigned_work: "Update assigned work",
+  manage_qc: "Record QC reports",
+  verify_qc: "Verify and close QC exceptions",
   manage_budget: "Budget",
   request_catering: "Request catering",
   manage_catering: "Runner desk",
@@ -34,6 +38,15 @@ export function RolePolicyEditor({ initialPolicies, permissions }: { initialPoli
     update(role, { permissions: policy.permissions.includes(permission) ? policy.permissions.filter((item) => item !== permission) : [...policy.permissions, permission] });
   }
 
+  function addRole() {
+    const suffix = crypto.randomUUID().slice(0, 8).replaceAll("-", "");
+    setPolicies((items) => [...items, { role: `new_role_${suffix}`, label: "New role", permissions: [] }]);
+  }
+
+  function removeRole(role: string) {
+    setPolicies((items) => items.filter((item) => item.role !== role));
+  }
+
   async function save() {
     setSaving(true);
     setMessage("");
@@ -50,5 +63,5 @@ export function RolePolicyEditor({ initialPolicies, permissions }: { initialPoli
     }
   }
 
-  return <div className="space-y-4">{policies.map((policy) => <section key={policy.role} className="panel p-5"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><label className="block max-w-sm text-xs font-medium text-[#535b57]">Role label<input value={policy.label} onChange={(event) => update(policy.role, { label: event.target.value })} className="mt-1.5 h-9 w-full rounded-md border border-[#dedfda] px-3 text-sm" /></label><p className="rounded bg-[#f1f2ef] px-2 py-1 text-[10px] font-semibold uppercase tracking-[.08em] text-[#6d7671]">{policy.role.replaceAll("_", " ")}</p></div><div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{permissions.map((permission) => <label key={permission} className="flex min-h-9 items-center gap-2 rounded-md border border-[#ecebe7] px-3 text-xs text-[#525b57]"><input type="checkbox" checked={policy.permissions.includes(permission)} onChange={() => toggle(policy.role, permission)} /><span>{permissionLabels[permission] ?? permission}</span></label>)}</div></section>)}<div className="flex flex-wrap items-center justify-between gap-3"><p role="status" className={`text-xs ${message.includes("saved") ? "text-[#4d8068]" : "text-[#a35e41]"}`}>{message}</p><Button variant="primary" onClick={save} isDisabled={saving} className="bg-[#263130] text-white"><Save size={15} /> {saving ? "Saving…" : "Save roles & permissions"}</Button></div></div>;
+  return <div className="space-y-4"><div className="flex justify-end"><Button variant="tertiary" onPress={addRole} className="border border-[#dfe3df] bg-white text-[#45685e]"><Plus size={15} /> Add role</Button></div>{policies.map((policy) => <section key={policy.role} className="panel p-5"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div className="grid w-full max-w-xl gap-3 sm:grid-cols-2"><label className="block text-xs font-medium text-[#535b57]">Role label<input value={policy.label} onChange={(event) => update(policy.role, { label: event.target.value })} className="mt-1.5 h-9 w-full rounded-md border border-[#dedfda] px-3 text-sm" /></label><label className="block text-xs font-medium text-[#535b57]">Role key<input value={policy.role} disabled={!policy.role.startsWith("new_role_")} onChange={(event) => { const next = event.target.value; if (!next || policies.some((item) => item.role === next)) return; setPolicies((items) => items.map((item) => item.role === policy.role ? { ...item, role: next } : item)); }} className="mt-1.5 h-9 w-full rounded-md border border-[#dedfda] px-3 text-sm disabled:bg-[#f1f2ef]" /></label></div><Button isIconOnly variant="tertiary" onPress={() => removeRole(policy.role)} aria-label={`Remove ${policy.label}`} className="min-w-0 text-[#8b918e] hover:bg-[#f3e9e4] hover:text-[#a35e41]"><Trash2 size={15} /></Button></div><div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{permissions.map((permission) => <label key={permission} className="flex min-h-9 items-center gap-2 rounded-md border border-[#ecebe7] px-3 text-xs text-[#525b57]"><input type="checkbox" checked={policy.permissions.includes(permission)} onChange={() => toggle(policy.role, permission)} /><span>{permissionLabels[permission] ?? permission}</span></label>)}</div></section>)}<div className="flex flex-wrap items-center justify-between gap-3"><p role="status" className={`text-xs ${message.includes("saved") ? "text-[#4d8068]" : "text-[#a35e41]"}`}>{message}</p><Button variant="primary" onClick={save} isDisabled={saving} className="bg-[#263130] text-white"><Save size={15} /> {saving ? "Saving…" : "Save roles & permissions"}</Button></div></div>;
 }

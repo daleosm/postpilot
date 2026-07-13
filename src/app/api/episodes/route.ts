@@ -8,6 +8,7 @@ import { can } from "@/lib/permissions";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { insertEpisodeSchema } from "@/lib/validations/entities";
 import { missingTenantReferences } from "@/lib/tenant-resources";
+import { createStageWorkOrders } from "@/lib/work-orders";
 
 export async function POST(request: Request) {
   if (!(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
       airDate: parsed.data.airDate ? parsed.data.airDate.toISOString().slice(0, 10) : null,
       lockedCutDate: parsed.data.lockedCutDate ? parsed.data.lockedCutDate.toISOString().slice(0, 10) : null,
     }).returning({ id: episodes.id });
+    if (parsed.data.workflowStageId) await createStageWorkOrders({ organizationId: context.organization.organizationId, episodeId: episode.id, workflowStageId: parsed.data.workflowStageId, createdByUserId: context.userId });
     return NextResponse.json(episode, { status: 201 });
   } catch {
     return NextResponse.json({ error: "An episode with that number already exists in this season." }, { status: 409 });

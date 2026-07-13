@@ -22,7 +22,6 @@ const auditColumns = {
 export const organizationRole = pgEnum("organization_role", ["owner", "admin", "member", "guest"]);
 export const episodeStatus = pgEnum("episode_status", ["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"]);
 export const qcStatus = pgEnum("qc_status", ["not_started", "in_progress", "passed", "needs_attention", "waived"]);
-export const personRole = pgEnum("person_role", ["producer", "post_supervisor", "head_of_production", "finance", "editor", "assistant_editor", "online_editor", "colorist", "sound_mixer", "supervising_sound_editor", "rerecording_mixer", "vfx_coordinator", "vfx_supervisor", "qc", "director", "network", "network_client_executive", "network_client_representative", "client", "runner", "freelancer"]);
 export const bookingStatus = pgEnum("booking_status", ["tentative", "confirmed", "hold", "cancelled"]);
 export const bookingType = pgEnum("booking_type", ["edit", "color", "mix", "qc", "client_review", "ingest", "conform"]);
 export const approvalStatus = pgEnum("approval_status", ["pending", "approved", "changes_requested"]);
@@ -32,6 +31,11 @@ export const availabilityStatus = pgEnum("availability_status", ["available", "l
 export const workflowTrackStatus = pgEnum("workflow_track_status", ["not_started", "in_progress", "submitted", "approved", "changes_requested", "blocked"]);
 export const qcReportStatus = pgEnum("qc_report_status", ["draft", "in_progress", "passed", "failed", "waived"]);
 export const qcIssueStatus = pgEnum("qc_issue_status", ["open", "resolved", "waived"]);
+export const workOrderStatus = pgEnum("work_order_status", ["open", "in_progress", "ready_for_review", "complete", "cancelled"]);
+export const workOrderPriority = pgEnum("work_order_priority", ["blocker", "high", "normal", "low"]);
+export const workOrderKind = pgEnum("work_order_kind", ["work_order", "qc_exception"]);
+export const workOrderBillingScope = pgEnum("work_order_billing_scope", ["included", "billable_change", "internal"]);
+export const workOrderBillingStatus = pgEnum("work_order_billing_status", ["not_billable", "draft", "awaiting_finance", "posted", "declined"]);
 export const cateringRequestType = pgEnum("catering_request_type", ["lunch", "tea_coffee", "snack"]);
 export const cateringRequestStatus = pgEnum("catering_request_status", ["requested", "acknowledged", "preparing", "delivered", "cancelled"]);
 
@@ -174,13 +178,32 @@ export const workflowStageApprovalRules = pgTable("workflow_stage_approval_rules
   index("workflow_stage_approval_rules_organization_id_idx").on(table.organizationId),
 ]);
 
+/** Tenant-configured checklist defaults which create episode work orders when a stage becomes active. */
+export const workflowStageWorkOrderTemplates = pgTable("workflow_stage_work_order_templates", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  workflowStageId: uuid("workflow_stage_id").notNull().references(() => workflowStages.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  department: text("department"),
+  assigneeRole: text("assignee_role"),
+  priority: workOrderPriority("priority").default("normal").notNull(),
+  isBlocking: boolean("is_blocking").default(false).notNull(),
+  position: integer("position").default(1).notNull(),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("workflow_stage_work_order_templates_stage_position_idx").on(table.workflowStageId, table.position),
+  index("workflow_stage_work_order_templates_organization_idx").on(table.organizationId),
+]);
+
 export const people = pgTable("people", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
   name: text("name").notNull(),
   email: text("email"),
-  role: personRole("role").notNull(),
+  /** Tenant-defined role key. Permissions and labels live in organization_role_policies. */
+  role: text("role").notNull(),
   company: text("company"),
   isActive: boolean("is_active").default(true).notNull(),
   availability: availabilityStatus("availability").default("available").notNull(),
@@ -347,12 +370,49 @@ export const qcIssues = pgTable("qc_issues", {
   index("qc_issues_organization_id_idx").on(table.organizationId),
 ]);
 
+/** Episode-specific operational work. This intentionally replaces the removed generic task model. */
+export const postWorkOrders = pgTable("post_work_orders", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
+  workflowStageId: uuid("workflow_stage_id").references(() => workflowStages.id, { onDelete: "set null" }),
+  bookingId: uuid("booking_id").references(() => bookings.id, { onDelete: "set null" }),
+  qcIssueId: uuid("qc_issue_id").references(() => qcIssues.id, { onDelete: "set null" }),
+  kind: workOrderKind("kind").default("work_order").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  department: text("department"),
+  assigneePersonId: uuid("assignee_person_id").references(() => people.id, { onDelete: "set null" }),
+  assigneeRole: text("assignee_role"),
+  priority: workOrderPriority("priority").default("normal").notNull(),
+  isBlocking: boolean("is_blocking").default(false).notNull(),
+  status: workOrderStatus("status").default("open").notNull(),
+  billingScope: workOrderBillingScope("billing_scope").default("included").notNull(),
+  billingStatus: workOrderBillingStatus("billing_status").default("not_billable").notNull(),
+  estimatedAmount: numeric("estimated_amount", { precision: 14, scale: 2 }),
+  actualAmount: numeric("actual_amount", { precision: 14, scale: 2 }),
+  currency: text("currency").default("USD").notNull(),
+  billingNotes: text("billing_notes"),
+  externalUrl: text("external_url"),
+  dueAt: timestamp("due_at", { withTimezone: true }),
+  createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  completedByPersonId: uuid("completed_by_person_id").references(() => people.id, { onDelete: "set null" }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("post_work_orders_qc_issue_idx").on(table.qcIssueId),
+  index("post_work_orders_org_assignee_status_idx").on(table.organizationId, table.assigneePersonId, table.status),
+  index("post_work_orders_episode_status_idx").on(table.episodeId, table.status),
+  index("post_work_orders_organization_stage_idx").on(table.organizationId, table.workflowStageId),
+]);
+
 export const budgetLines = pgTable("budget_lines", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   showId: uuid("show_id").references(() => shows.id, { onDelete: "cascade" }),
   seasonId: uuid("season_id").references(() => seasons.id, { onDelete: "cascade" }),
   episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "cascade" }),
+  workOrderId: uuid("work_order_id").references(() => postWorkOrders.id, { onDelete: "set null" }),
   code: text("code"),
   category: text("category").notNull(),
   description: text("description"),
@@ -361,7 +421,10 @@ export const budgetLines = pgTable("budget_lines", {
   currency: text("currency").default("USD").notNull(),
   costType: costType("cost_type").default("internal").notNull(),
   ...auditColumns,
-}, (table) => [index("budget_lines_organization_id_idx").on(table.organizationId)]);
+}, (table) => [
+  index("budget_lines_organization_id_idx").on(table.organizationId),
+  uniqueIndex("budget_lines_work_order_id_idx").on(table.workOrderId),
+]);
 
 /** Tenant-owned finance rate card used as the standard price list for post services. */
 export const serviceRates = pgTable("service_rates", {

@@ -17,6 +17,7 @@
     "test:review": "playwright test tests/usability/review.spec.ts",
     "test:review-isolation": "playwright test tests/isolation/review-tenancy.spec.ts",
     "test:workflow": "playwright test tests/functionality/workflow.spec.ts",
+    "test:work-orders": "playwright test tests/functionality/work-orders.spec.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx scripts/seed.ts"

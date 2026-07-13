@@ -1,15 +1,14 @@
 import { EpisodesTable, type EpisodeTableRow } from "@/components/episodes-table";
 import { EpisodeFormDialog, type EpisodeSeason } from "@/components/episode-form-dialog";
 import { getActiveOrganizationContext, getActiveShowName } from "@/lib/organizations";
-import { can, getCurrentPerson, isAssignedToEpisode, isExternalReviewerRole, roleHome } from "@/lib/permissions";
+import { can, isAssignedToEpisode, roleHome } from "@/lib/permissions";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { getDemoCommandCenterData, listEpisodes, listShows } from "@/server/data";
 import { redirect } from "next/navigation";
 
 export default async function EpisodesPage() {
-  const [currentPerson, mayManageShows, mayViewAssigned] = await Promise.all([getCurrentPerson(), can("manage_shows"), can("view_assigned")]);
-  const isRestrictedExternalReviewer = isExternalReviewerRole(currentPerson?.role) && !(currentPerson?.role === "director" && mayManageShows);
-  if (isRestrictedExternalReviewer || !(mayManageShows || mayViewAssigned)) redirect(roleHome(currentPerson?.role));
+  const [mayManageShows, mayViewAssigned] = await Promise.all([can("manage_shows"), can("view_assigned")]);
+  if (!(mayManageShows || mayViewAssigned)) redirect(await roleHome());
   const activeShow = await getActiveShowName();
   const data = await getEpisodesData(); const visibleEpisodes = mayManageShows ? data.episodes : (await Promise.all(data.episodes.map(async (episode) => (await isAssignedToEpisode(episode.id)) ? episode : null))).filter((episode): episode is EpisodeTableRow => Boolean(episode)); const episodes = visibleEpisodes.filter((episode) => !activeShow || episode.showTitle === activeShow); const seasons = activeShow ? data.seasons.filter((season) => season.label.startsWith(`${activeShow} ·`)) : data.seasons;
   return <div className="space-y-5"><header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-xs font-medium uppercase tracking-[0.12em] text-[#7c827f]">Editorial pipeline</p><h1 className="mt-2 text-[27px] font-semibold tracking-[-0.045em] text-[#202524]">Episodes</h1><p className="mt-1 text-sm text-[#747977]">Track assignment, workflow, lock, delivery, and QC at episode level.</p></div>{mayManageShows && <EpisodeFormDialog seasons={seasons} />}</header><EpisodesTable episodes={episodes} /></div>;

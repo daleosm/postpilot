@@ -16,7 +16,7 @@ import {
 
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
-import { can, getCurrentPerson, isExternalReviewerRole } from "@/lib/permissions";
+import { can } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import {
   getBudgetData,
@@ -37,7 +37,7 @@ function formatMoney(value: number) {
 }
 
 export default async function DashboardPage() {
-  const [currentPerson, organizationContext, mayManageShows] = await Promise.all([getCurrentPerson(), getActiveOrganizationContext(), can("manage_shows")]);
+  const [organizationContext, mayManageShows, mayApproveReviews, mayUpdateAssigned, mayManageBudget, mayManageCatering] = await Promise.all([getActiveOrganizationContext(), can("manage_shows"), can("approve_reviews"), can("update_assigned_work"), can("manage_budget"), can("manage_catering")]);
   if (!organizationContext?.organization && !isDebugDemoMode) {
     return (
       <div className="panel mx-auto mt-20 max-w-lg p-8 text-center">
@@ -47,13 +47,9 @@ export default async function DashboardPage() {
       </div>
     );
   }
-  const isRestrictedExternalReviewer = isExternalReviewerRole(currentPerson?.role) && !(currentPerson?.role === "director" && mayManageShows);
-  if (isRestrictedExternalReviewer) redirect("/review");
-  // Keep the focused default landing pages for non-manager facility roles,
-  // but do not override a tenant policy that grants wider management access.
-  if (!mayManageShows && currentPerson?.role === "runner") redirect("/runner");
-  if (!mayManageShows && currentPerson?.role === "finance") redirect("/budget");
-  if (!mayManageShows && ["editor", "assistant_editor", "colorist", "sound_mixer", "qc", "vfx_coordinator"].includes(currentPerson?.role ?? "")) redirect("/episodes");
+  if (!mayManageShows && mayManageCatering) redirect("/runner");
+  if (!mayManageShows && mayManageBudget) redirect("/budget");
+  if (!mayManageShows && (mayApproveReviews || mayUpdateAssigned)) redirect("/review");
   const screen = await getCommandCenterData();
 
   if (!screen) {

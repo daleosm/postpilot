@@ -1,13 +1,13 @@
 import "server-only";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { billables, budgetLines, episodes, seasons, serviceRates, shows } from "@/lib/db/schema";
+import { billables, budgetLines, episodes, postWorkOrders, seasons, serviceRates, shows } from "@/lib/db/schema";
 
 export async function getBudgetData(organizationId: string) {
   const db = getDb();
-  const [lines, invoices] = await Promise.all([
+  const [lines, invoices, workOrderCharges] = await Promise.all([
     db.select({
       id: budgetLines.id,
       category: budgetLines.category,
@@ -28,10 +28,22 @@ export async function getBudgetData(organizationId: string) {
       .leftJoin(shows, eq(seasons.showId, shows.id))
       .where(and(eq(budgetLines.organizationId, organizationId), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId))),
     db.select().from(billables).where(eq(billables.organizationId, organizationId)).orderBy(desc(billables.invoiceDate)),
+    db.select({
+      id: postWorkOrders.id, title: postWorkOrders.title, department: postWorkOrders.department, status: postWorkOrders.status,
+      billingStatus: postWorkOrders.billingStatus, estimatedAmount: postWorkOrders.estimatedAmount, actualAmount: postWorkOrders.actualAmount,
+      currency: postWorkOrders.currency, billingNotes: postWorkOrders.billingNotes, episodeId: episodes.id, episodeTitle: episodes.title,
+      episodeNumber: episodes.number, showTitle: shows.title,
+    }).from(postWorkOrders)
+      .innerJoin(episodes, eq(postWorkOrders.episodeId, episodes.id))
+      .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+      .innerJoin(shows, eq(seasons.showId, shows.id))
+      .where(and(eq(postWorkOrders.organizationId, organizationId), eq(postWorkOrders.billingScope, "billable_change"), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId)))
+      .orderBy(asc(postWorkOrders.createdAt)),
   ]);
   return {
     lines,
     billables: invoices,
+    workOrderCharges,
     totals: lines.reduce((total, line) => ({ budgeted: total.budgeted + Number(line.budgetedAmount), actual: total.actual + Number(line.actualAmount) }), { budgeted: 0, actual: 0 }),
   };
 }

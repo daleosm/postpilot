@@ -50,7 +50,7 @@ export async function listWorkflowSignOffInbox(organizationId: string, userId: s
     const key = `${approval.episodeId}:${approval.workflowStageId}`;
     approvalsByStage.set(key, new Set([...(approvalsByStage.get(key) ?? []), approval.approvalRuleId]));
   }
-  const roleMatches = (role: string) => role === person.role || (role === "director" && person.role === "client") || (role === "network" && ["network", "client"].includes(person.role));
+  const roleMatches = (role: string) => role === person.role;
   const byStage = new Map<string, typeof stageRules>();
   for (const rule of stageRules) {
     const key = `${rule.episodeId}:${rule.workflowStageId}`;

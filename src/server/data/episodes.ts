@@ -7,6 +7,7 @@ import { episodeWorkflowApprovals, episodes, people, postWorkflows, seasons, sho
 import { getBudgetData } from "./budget";
 import { getDashboardData } from "./dashboard";
 import { listSchedule } from "./schedule";
+import { listEpisodeWorkOrders } from "./work-orders";
 
 const editors = aliasedTable(people, "episode_editors");
 const producers = aliasedTable(people, "episode_producers");
@@ -37,7 +38,7 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
   const db = getDb();
   const episode = await getEpisode(organizationId, episodeId);
   if (!episode) return null;
-  const [schedule, budget, dashboard, stages, approvalRules, approvals, workflowApprovers] = await Promise.all([
+  const [schedule, budget, dashboard, stages, approvalRules, approvals, workflowApprovers, workOrders] = await Promise.all([
     listSchedule(organizationId, new Date(Date.now() - 90 * 86_400_000), new Date(Date.now() + 120 * 86_400_000)),
     getBudgetData(organizationId),
     getDashboardData(organizationId),
@@ -50,6 +51,7 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
     db.select({ id: episodeWorkflowApprovals.id, workflowStageId: episodeWorkflowApprovals.workflowStageId, approvalRuleId: episodeWorkflowApprovals.approvalRuleId, approverRole: episodeWorkflowApprovals.approverRole, requiredPersonId: episodeWorkflowApprovals.requiredPersonId, status: episodeWorkflowApprovals.status, comment: episodeWorkflowApprovals.comment, submittedAt: episodeWorkflowApprovals.submittedAt, respondedAt: episodeWorkflowApprovals.respondedAt })
       .from(episodeWorkflowApprovals).where(and(eq(episodeWorkflowApprovals.organizationId, organizationId), eq(episodeWorkflowApprovals.episodeId, episodeId))),
     db.select({ id: people.id, name: people.name, role: people.role }).from(people).where(eq(people.organizationId, organizationId)).orderBy(asc(people.name)),
+    listEpisodeWorkOrders(organizationId, episodeId),
   ]);
 
   return {
@@ -61,5 +63,6 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
     workflowApprovalRules: approvalRules,
     workflowApprovals: approvals,
     workflowApprovers,
+    workOrders,
   };
 }
