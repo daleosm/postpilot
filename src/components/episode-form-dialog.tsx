@@ -12,16 +12,17 @@ const schema = z.object({ seasonId: z.string().min(1, "Select a season."), numbe
 type Values = z.infer<typeof schema>;
 export type EpisodeSeason = { id: string; label: string };
 export type EpisodePerson = { id: string; name: string; role: string };
+const EMPTY_TEAM: string[] = [];
 
 export function EpisodeFormDialog({ seasons, people = [], defaultSeasonId }: { seasons: EpisodeSeason[]; people?: EpisodePerson[]; defaultSeasonId?: string }) {
   const router = useRouter(); const [open, setOpen] = useState(false); const [search, setSearch] = useState(""); const [error, setError] = useState("");
   const form = useForm<z.input<typeof schema>, unknown, Values>({ resolver: zodResolver(schema), defaultValues: defaults(defaultSeasonId) });
-  const selected = useWatch({ control: form.control, name: "team" }) ?? [];
+  const selected = useWatch({ control: form.control, name: "team" }) ?? EMPTY_TEAM;
   const selectedSeason = useWatch({ control: form.control, name: "seasonId" });
   const [lastTeam, setLastTeam] = useState<string[]>([]);
   const matches = useMemo(() => people.filter((person) => !selected.includes(person.id) && `${person.name} ${person.role}`.toLowerCase().includes(search.toLowerCase())).slice(0, 8), [people, search, selected]);
   useEffect(() => { form.reset(defaults(defaultSeasonId)); }, [defaultSeasonId, form]);
-  useEffect(() => { if (!selectedSeason) return setLastTeam([]); fetch(`/api/seasons/${selectedSeason}/last-episode-team`).then((response) => response.ok ? response.json() : null).then((data) => setLastTeam((data?.team ?? []).map((item: { personId: string }) => item.personId))).catch(() => setLastTeam([])); }, [selectedSeason]);
+  useEffect(() => { if (!selectedSeason) return; let active = true; fetch(`/api/seasons/${selectedSeason}/last-episode-team`).then((response) => response.ok ? response.json() : null).then((data) => { if (active) setLastTeam((data?.team ?? []).map((item: { personId: string }) => item.personId)); }).catch(() => { if (active) setLastTeam([]); }); return () => { active = false; }; }, [selectedSeason]);
   const toggle = (id: string) => form.setValue("team", selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id], { shouldDirty: true });
   const copyPreviousTeam = () => form.setValue("team", lastTeam, { shouldDirty: true });
   async function submit(values: Values) { setError(""); const response = await fetch("/api/episodes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seasonId: values.seasonId, number: values.number, title: values.title, productionCode: values.productionCode || null, status: values.status, workflowStageId: null, assignedProducerId: null, editorId: null, coloristId: null, soundMixerId: null, synopsis: null, qcStatus: "not_started", airDate: values.airDate ? `${values.airDate}T12:00:00.000Z` : null, lockedCutDate: null, deliveryDeadline: values.deliveryDeadline ? new Date(values.deliveryDeadline).toISOString() : null, team: values.team }) }); if (!response.ok) return setError((await response.json().catch(() => null))?.error ?? "Unable to create the episode."); setOpen(false); form.reset(defaults(defaultSeasonId)); router.refresh(); }
