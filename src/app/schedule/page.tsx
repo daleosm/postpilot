@@ -16,7 +16,7 @@ export default async function SchedulePage() {
 
 async function getScheduleData(personId?: string) {
   const context = await getActiveOrganizationContext();
-  if (!context?.organization) return { organizationName: "No workspace", bookings: [], resources: { rooms: [], people: [], episodes: [] }, cateringRequests: [], pendingTimes: [] };
+  if (!context?.organization) return { organizationName: "No workspace", bookings: [], resources: { rooms: [], people: [], contacts: [], episodes: [] }, cateringRequests: [], pendingTimes: [] };
   const from = new Date(Date.now() - 60 * 86_400_000); const to = new Date(Date.now() + 90 * 86_400_000);
   const [bookings, resources, cateringRequests, pendingTimes] = await Promise.all([listSchedule(context.organization.organizationId, from, to, personId), getScheduleResources(context.organization.organizationId), listCateringRequests(context.organization.organizationId), listPendingBookingTimeSubmissions(context.organization.organizationId)]);
   return { organizationName: context.organization.organizationName, bookings, resources: personId ? { ...resources, people: resources.people.filter((person) => person.id === personId) } : resources, cateringRequests: personId ? cateringRequests.filter((request) => request.requestedByPersonId === personId) : cateringRequests, pendingTimes };

@@ -3,7 +3,7 @@ import "server-only";
 import { and, asc, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { bookingTimeSubmissions, bookings, episodes, people, rooms } from "@/lib/db/schema";
+import { bookingTimeSubmissions, bookings, crmContacts, episodes, people, rooms } from "@/lib/db/schema";
 import { listEpisodes } from "./episodes";
 
 export async function listSchedule(organizationId: string, from: Date, to: Date, personId?: string) {
@@ -22,12 +22,13 @@ export async function listSchedule(organizationId: string, from: Date, to: Date,
 
 export async function getScheduleResources(organizationId: string) {
   const db = getDb();
-  const [roomRows, peopleRows, episodeRows] = await Promise.all([
+  const [roomRows, peopleRows, episodeRows, contacts] = await Promise.all([
     db.select({ id: rooms.id, name: rooms.name, type: rooms.type }).from(rooms).where(eq(rooms.organizationId, organizationId)).orderBy(asc(rooms.name)),
     db.select({ id: people.id, name: people.name, role: people.role, availability: people.availability, isFreelancer: people.isFreelancer }).from(people).where(eq(people.organizationId, organizationId)).orderBy(asc(people.name)),
     listEpisodes(organizationId),
+    db.select({ id: crmContacts.id, name: crmContacts.name }).from(crmContacts).where(eq(crmContacts.organizationId, organizationId)).orderBy(asc(crmContacts.name)),
   ]);
-  return { rooms: roomRows, people: peopleRows, episodes: episodeRows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}` })) };
+  return { rooms: roomRows, people: peopleRows, contacts, episodes: episodeRows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}` })) };
 }
 
 export async function listPendingBookingTimeSubmissions(organizationId: string) {

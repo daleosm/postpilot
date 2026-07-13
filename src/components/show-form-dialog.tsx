@@ -11,13 +11,13 @@ import { z } from "zod";
 import { showFormSchema } from "@/lib/validations/entities";
 
 type ShowFormValues = z.input<typeof showFormSchema>;
-export function ShowFormDialog({ show }: { show?: { id: string; title: string; code: string; network: string | null; productionCompany: string | null; description?: string | null } }) {
+export function ShowFormDialog({ show, companies = [] }: { show?: { id: string; title: string; code: string; network: string | null; productionCompany: string | null; clientCompanyId?: string | null; productionCompanyId?: string | null; description?: string | null }; companies?: Array<{ id: string; name: string; type: string }> }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   const form = useForm<ShowFormValues>({
     resolver: zodResolver(showFormSchema),
-    defaultValues: { title: show?.title ?? "", code: show?.code ?? "", network: show?.network ?? "", productionCompany: show?.productionCompany ?? "", description: show?.description ?? "" },
+    defaultValues: { title: show?.title ?? "", code: show?.code ?? "", network: show?.network ?? "", productionCompany: show?.productionCompany ?? "", clientCompanyId: show?.clientCompanyId ?? "", productionCompanyId: show?.productionCompanyId ?? "", description: show?.description ?? "" },
   });
 
   async function submit(values: ShowFormValues) {
@@ -32,8 +32,8 @@ export function ShowFormDialog({ show }: { show?: { id: string; title: string; c
     {open && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#202725]/25 p-4"><div className="w-full max-w-lg rounded-xl border border-[#e2e3de] bg-[#fafbf9] p-6 shadow-2xl"><div className="flex items-start justify-between"><div><h2 className="text-lg font-semibold tracking-[-0.03em] text-[#2d3431]">{show ? "Edit show" : "Create show"}</h2><p className="mt-1 text-sm text-[#767c78]">Set the production and client context for this workspace.</p></div><button onClick={() => setOpen(false)} className="rounded-md p-1 text-[#7d827e] hover:bg-[#f0f1ed]"><X size={18} /></button></div>
       <form className="mt-6 space-y-4" onSubmit={form.handleSubmit(submit)}>
         <Field label="Show title" error={form.formState.errors.title?.message}><input {...form.register("title")} placeholder="Signal North" /></Field>
-        <div className="grid grid-cols-2 gap-3"><Field label="Show code" error={form.formState.errors.code?.message}><input {...form.register("code")} placeholder="SN" className="uppercase" /></Field><Field label="Network / client" error={form.formState.errors.network?.message}><input {...form.register("network")} placeholder="Northstar Network" /></Field></div>
-        <Field label="Production company" error={form.formState.errors.productionCompany?.message}><input {...form.register("productionCompany")} placeholder="Vantage Television" /></Field>
+        <div className="grid grid-cols-2 gap-3"><Field label="Show code" error={form.formState.errors.code?.message}><input {...form.register("code")} placeholder="SN" className="uppercase" /></Field><Field label="Client / network"><select {...form.register("clientCompanyId")}><option value="">Choose CRM company</option>{companies.filter((company) => ["client", "network", "studio"].includes(company.type)).map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></Field></div>
+        <Field label="Production company"><select {...form.register("productionCompanyId")}><option value="">Choose CRM company</option>{companies.filter((company) => company.type === "production_company").map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></Field>
         <Field label="Notes" error={form.formState.errors.description?.message}><textarea {...form.register("description")} rows={3} placeholder="Optional production notes" /></Field>
         {error && <p className="text-xs text-[#a35e41]">{error}</p>}
         <div className="flex justify-end gap-2 border-t border-[#ecebe7] pt-4"><Button type="button" variant="tertiary" onPress={() => setOpen(false)} className="text-[#59615e]">Cancel</Button><Button type="submit" variant="primary" isDisabled={form.formState.isSubmitting} className="bg-[#263130] text-white">{form.formState.isSubmitting ? "Saving…" : show ? "Save changes" : "Create show"}</Button></div>
@@ -43,5 +43,5 @@ export function ShowFormDialog({ show }: { show?: { id: string; title: string; c
 }
 
 function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
-  return <label className="block text-xs font-medium text-[#535b57]">{label}<span className="mt-1.5 block [&_input]:h-10 [&_input]:w-full [&_input]:rounded-md [&_input]:border [&_input]:border-[#dedfda] [&_input]:px-3 [&_input]:text-sm [&_input]:outline-none [&_input:focus]:border-[#66877f] [&_textarea]:w-full [&_textarea]:rounded-md [&_textarea]:border [&_textarea]:border-[#dedfda] [&_textarea]:p-3 [&_textarea]:text-sm [&_textarea]:outline-none [&_textarea:focus]:border-[#66877f]">{children}</span>{error && <span className="mt-1 block text-[11px] font-normal text-[#a35e41]">{error}</span>}</label>;
+  return <label className="block text-xs font-medium text-[#535b57]">{label}<span className="mt-1.5 block [&_input]:h-10 [&_input]:w-full [&_input]:rounded-md [&_input]:border [&_input]:border-[#dedfda] [&_input]:px-3 [&_input]:text-sm [&_input]:outline-none [&_input:focus]:border-[#66877f] [&_select]:h-10 [&_select]:w-full [&_select]:rounded-md [&_select]:border [&_select]:border-[#dedfda] [&_select]:bg-[#fafbf9] [&_select]:px-2 [&_textarea]:w-full [&_textarea]:rounded-md [&_textarea]:border [&_textarea]:border-[#dedfda] [&_textarea]:p-3 [&_textarea]:text-sm [&_textarea]:outline-none [&_textarea:focus]:border-[#66877f]">{children}</span>{error && <span className="mt-1 block text-[11px] font-normal text-[#a35e41]">{error}</span>}</label>;
 }

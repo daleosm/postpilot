@@ -8,6 +8,8 @@ import {
   bookings,
   budgetLines,
   cateringRequests,
+  crmCompanies,
+  crmContacts,
   episodeTeamAssignments,
   episodes,
   organizationMembers,
@@ -20,6 +22,7 @@ import {
   qcReports,
   rooms,
   seasons,
+  showContacts,
   serviceRates,
   shows,
   users,
@@ -322,6 +325,8 @@ async function seedTenant(tenant: TenantSeed) {
   const episodeId = (position: number) => id(tenant.number, "27", position);
   const roomId = (position: number) => id(tenant.number, "28", position);
   const bookingId = (position: number) => id(tenant.number, "29", position);
+  const companyId = (position: number) => id(tenant.number, "42", position);
+  const contactId = (position: number) => id(tenant.number, "43", position);
   // Each facility person has a tenant-local Auth.js identity and membership.
   // Maya is intentionally the only shared debug platform administrator.
   const sourcePeople: PersonSeed[] = [...tenant.people, ...specialistRoleSeeds.map((specialist, index) => ({ name: `${tenant.name} ${specialist.title}`, email: `${specialist.role}.${index + 1}@${tenant.slug}.test`, role: specialist.role, isFreelancer: true }))];
@@ -352,7 +357,15 @@ async function seedTenant(tenant: TenantSeed) {
     { id: id(tenant.number, "37", 3), organizationId: tenant.id, workflowStageId: stageId(19), title: "Run technical QC and log exceptions", department: "QC", assigneeRole: "qc", priority: "blocker", isBlocking: true, position: 1 },
   ]);
 
-  await db.insert(shows).values(tenant.shows.map((show, index) => ({ id: showId(index + 1), organizationId: tenant.id, title: show.title, code: show.code, network: tenant.networks[index] ?? primaryNetwork, productionCompany: show.company, timeZone: "Europe/London" })));
+  await db.insert(crmCompanies).values([
+    { id: companyId(1), organizationId: tenant.id, name: primaryNetwork, type: "network", paymentTermsDays: 30, billingEmail: `accounts@${tenant.slug}.client.test` },
+    { id: companyId(2), organizationId: tenant.id, name: tenant.shows[0]?.company ?? `${tenant.name} Productions`, type: "production_company", paymentTermsDays: 30 },
+    { id: companyId(3), organizationId: tenant.id, name: `${tenant.name} Facilities Vendor`, type: "vendor", paymentTermsDays: 14 },
+  ]);
+  await db.insert(crmContacts).values([{ id: contactId(1), organizationId: tenant.id, companyId: companyId(1), name: `${primaryNetwork} Post Executive`, title: "Post Executive", email: `post@${tenant.slug}.client.test`, isPrimary: true }]);
+
+  await db.insert(shows).values(tenant.shows.map((show, index) => ({ id: showId(index + 1), organizationId: tenant.id, title: show.title, code: show.code, network: tenant.networks[index] ?? primaryNetwork, productionCompany: show.company, clientCompanyId: companyId(1), productionCompanyId: companyId(2), timeZone: "Europe/London" })));
+  await db.insert(showContacts).values(tenant.shows.map((_, index) => ({ organizationId: tenant.id, showId: showId(index + 1), contactId: contactId(1), relationship: "network post executive", isApprovalContact: true })));
   await db.insert(seasons).values(tenant.shows.map((show, index) => ({ id: seasonId(index + 1), organizationId: tenant.id, showId: showId(index + 1), number: 1, title: `${show.title} · Season 1`, startDate: day(-100 + index * 18) })));
   const lifecyclePatterns = [
     ["editor_cut", "in_progress", 4],

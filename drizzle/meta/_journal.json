@@ -232,6 +232,20 @@
       "when": 1783987200007,
       "tag": "0032_targeted_booking_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1783987200008,
+      "tag": "0033_client_vendor_crm",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1783987200009,
+      "tag": "0034_link_shows_bookings_to_crm",
+      "breakpoints": true
     }
   ]
 }

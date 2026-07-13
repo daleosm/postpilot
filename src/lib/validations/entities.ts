@@ -42,6 +42,8 @@ export const showFormSchema = z.object({
   code: z.string().trim().min(2, "Show code must be at least 2 characters.").max(32).toUpperCase(),
   network: z.string().trim().max(120).nullable().optional(),
   productionCompany: z.string().trim().max(120).nullable().optional(),
+  clientCompanyId: nullableId,
+  productionCompanyId: nullableId,
   description: z.string().trim().max(4000).nullable().optional(),
 });
 export const insertShowSchema = showFormSchema.extend({ organizationId: id });

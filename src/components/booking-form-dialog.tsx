@@ -24,7 +24,7 @@ const bookingClientSchema = z.object({
   }
 });
 type BookingValues = z.infer<typeof bookingClientSchema>;
-export type BookingResources = { episodes: Array<{ id: string; label: string }>; rooms: Array<{ id: string; name: string; type: string }>; people: Array<{ id: string; name: string; role: string; availability: string; isFreelancer: boolean }> };
+export type BookingResources = { episodes: Array<{ id: string; label: string }>; rooms: Array<{ id: string; name: string; type: string }>; people: Array<{ id: string; name: string; role: string; availability: string; isFreelancer: boolean }>; contacts: Array<{ id: string; name: string }> };
 export type EditableBooking = { id: string; title: string; startsAt: Date; endsAt: Date; setupMinutes: number; handoverMinutes: number; strikeMinutes: number; status: string; bookingType: string; roomId: string | null; episodeId: string | null; personId: string | null; notes: string | null };
 type Conflict = { id: string; title: string; startsAt: Date | string; endsAt: Date | string; setupMinutes: number; handoverMinutes: number; strikeMinutes: number; bookingType: string; roomName: string | null; personName: string | null; personAvailability: string | null; personIsFreelancer: boolean | null; overlaps: Array<"room" | "person"> };
 type Suggestions = { availableRooms: Array<{ id: string; name: string; type: string }>; availablePeople: Array<{ id: string; name: string; role: string; availability: string; isFreelancer: boolean }>; nearestSlot: { startsAt: Date | string; endsAt: Date | string } | null };

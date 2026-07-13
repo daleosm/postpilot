@@ -1,4 +1,5 @@
 export { getBudgetData, listServiceRates } from "./budget";
+export { getCrmData, listCrmCompanyOptions } from "./crm";
 export { getCateringResources, listCateringRequests } from "./catering";
 export { getDashboardData } from "./dashboard";
 export { getDemoCommandCenterData } from "./demo-dashboard";

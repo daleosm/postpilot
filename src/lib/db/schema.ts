@@ -107,6 +107,10 @@ export const organizationRolePolicies = pgTable("organization_role_policies", {
   index("organization_role_policies_organization_id_idx").on(table.organizationId),
 ]);
 
+export const crmCompanyType = pgEnum("crm_company_type", ["client", "vendor", "network", "studio", "production_company"]);
+export const crmCompanies = pgTable("crm_companies", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), name: text("name").notNull(), type: crmCompanyType("type").notNull(), paymentTermsDays: integer("payment_terms_days"), billingEmail: text("billing_email"), address: text("address"), notes: text("notes"), ...auditColumns }, (table) => [uniqueIndex("crm_companies_org_name_idx").on(table.organizationId, table.name), index("crm_companies_org_type_idx").on(table.organizationId, table.type)]);
+export const crmContacts = pgTable("crm_contacts", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), companyId: uuid("company_id").notNull().references(() => crmCompanies.id, { onDelete: "cascade" }), name: text("name").notNull(), title: text("title"), email: text("email"), phone: text("phone"), isPrimary: boolean("is_primary").default(false).notNull(), notes: text("notes"), ...auditColumns }, (table) => [index("crm_contacts_company_idx").on(table.companyId), index("crm_contacts_org_idx").on(table.organizationId)]);
+
 export const shows = pgTable("shows", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
@@ -114,6 +118,8 @@ export const shows = pgTable("shows", {
   code: text("code").notNull(),
   network: text("network"),
   productionCompany: text("production_company"),
+  clientCompanyId: uuid("client_company_id").references(() => crmCompanies.id, { onDelete: "set null" }),
+  productionCompanyId: uuid("production_company_id").references(() => crmCompanies.id, { onDelete: "set null" }),
   description: text("description"),
   /** IANA zone used for facility bookings and delivery deadlines. */
   timeZone: text("time_zone").default("Europe/London").notNull(),
@@ -122,6 +128,9 @@ export const shows = pgTable("shows", {
   uniqueIndex("shows_organization_code_idx").on(table.organizationId, table.code),
   index("shows_organization_id_idx").on(table.organizationId),
 ]);
+
+export const showContacts = pgTable("show_contacts", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), showId: uuid("show_id").notNull().references(() => shows.id, { onDelete: "cascade" }), contactId: uuid("contact_id").notNull().references(() => crmContacts.id, { onDelete: "cascade" }), relationship: text("relationship").notNull(), isApprovalContact: boolean("is_approval_contact").default(false).notNull(), ...auditColumns }, (table) => [uniqueIndex("show_contacts_show_contact_idx").on(table.showId, table.contactId), index("show_contacts_org_idx").on(table.organizationId)]);
+export const purchaseOrders = pgTable("purchase_orders", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), companyId: uuid("company_id").notNull().references(() => crmCompanies.id, { onDelete: "restrict" }), showId: uuid("show_id").references(() => shows.id, { onDelete: "set null" }), poNumber: text("po_number").notNull(), amount: numeric("amount", { precision: 12, scale: 2 }), currency: text("currency").default("GBP").notNull(), status: text("status").default("open").notNull(), notes: text("notes"), ...auditColumns }, (table) => [uniqueIndex("purchase_orders_org_number_idx").on(table.organizationId, table.poNumber), index("purchase_orders_org_company_idx").on(table.organizationId, table.companyId)]);
 
 export const seasons = pgTable("seasons", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -313,6 +322,7 @@ export const bookings = pgTable("bookings", {
   roomId: uuid("room_id").references(() => rooms.id, { onDelete: "set null" }),
   episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "set null" }),
   personId: uuid("person_id").references(() => people.id, { onDelete: "set null" }),
+  clientContactId: uuid("client_contact_id").references(() => crmContacts.id, { onDelete: "set null" }),
   title: text("title").notNull(),
   startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
   endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
