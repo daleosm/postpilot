@@ -26,6 +26,7 @@ type BudgetData = {
   lines: Line[];
   episodes: Array<{ id: string; label: string; showTitle: string }>;
   workOrderCharges: Array<{ id: string; title: string; department: string | null; status: string; billingStatus: string; estimatedAmount: string | number | null; currency: string; billingNotes: string | null; episodeTitle: string; episodeNumber: number; showTitle: string }>;
+  commitments?: Array<{ id: string; amount: string | number | null; status: string; showTitle: string | null; vendorName: string }>;
 };
 
 export default async function BudgetPage() {
@@ -38,6 +39,8 @@ export default async function BudgetPage() {
   const totals = lines.reduce((sum, line) => ({ estimate: sum.estimate + Number(line.budgetedAmount), actual: sum.actual + Number(line.actualAmount) }), { estimate: 0, actual: 0 });
   const burn = totals.estimate ? Math.round((totals.actual / totals.estimate) * 100) : 0;
   const variance = totals.actual - totals.estimate;
+  const committed = (data.commitments ?? []).filter((po) => !activeShow || po.showTitle === activeShow).reduce((sum, po) => sum + Number(po.amount ?? 0), 0);
+  const forecast = totals.actual + committed;
   const episodeTotals = Object.values(lines.reduce<Record<string, { label: string; estimate: number; actual: number }>>((groups, line) => {
     const key = line.episodeId ?? line.id;
     groups[key] ??= { label: episodeLabel(line), estimate: 0, actual: 0 };
@@ -56,9 +59,11 @@ export default async function BudgetPage() {
       <BudgetLineForm episodes={episodes} />
     </header>
 
-    <section className="grid gap-3 sm:grid-cols-3">
+    <section className="grid gap-3 sm:grid-cols-4">
       <Metric icon={<CircleDollarSign size={16} />} label="Estimated" value={money(totals.estimate)} detail={`${lines.length} cost lines`} />
       <Metric icon={<ReceiptText size={16} />} label="Actual" value={money(totals.actual)} detail={burn ? `${burn}% of estimate` : "No spend recorded"} />
+      <Metric icon={<ReceiptText size={16} />} label="Committed" value={money(committed)} detail="Open vendor POs" />
+      <Metric icon={<TrendingUp size={16} />} label="Forecast" value={money(forecast)} detail="Actual + committed" warning={forecast > totals.estimate} />
       <Metric icon={variance > 0 ? <AlertTriangle size={16} /> : <TrendingUp size={16} />} label="Variance" value={`${variance > 0 ? "+" : ""}${money(variance)}`} detail={variance > 0 ? "Over estimate" : "Within estimate"} warning={variance > 0} />
     </section>
 
@@ -124,14 +129,14 @@ function money(value: number) {
 async function load(): Promise<BudgetData> {
   if (isDebugDemoMode) {
     const episodes = [{ id: "demo-e1", label: "Signal North · E01 The Quiet Hour", showTitle: "Signal North" }, { id: "demo-e5", label: "Under Current · E01 The Undertow", showTitle: "Under Current" }];
-    return { episodes, workOrderCharges: [], lines: [
+    return { episodes, workOrderCharges: [], commitments: [], lines: [
       { id: "b1", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "Edit suite", description: "Avid bays", showTitle: "Signal North", budgetedAmount: 48000, actualAmount: 42150, costType: "internal" },
       { id: "b2", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "VFX", description: "Cleanup and screens", showTitle: "Signal North", budgetedAmount: 78000, actualAmount: 82350, costType: "billable" },
       { id: "b3", episodeId: "demo-e5", episodeTitle: "The Undertow", episodeNumber: 1, category: "Sound", description: "Mix and stems", showTitle: "Under Current", budgetedAmount: 52000, actualAmount: 47120, costType: "internal" },
     ] };
   }
   const context = await getActiveOrganizationContext();
-  if (!context?.organization) return { lines: [], episodes: [], workOrderCharges: [] };
+  if (!context?.organization) return { lines: [], episodes: [], workOrderCharges: [], commitments: [] };
   const [budget, rows] = await Promise.all([getBudgetData(context.organization.organizationId), listEpisodes(context.organization.organizationId)]);
-  return { lines: budget.lines, workOrderCharges: budget.workOrderCharges, episodes: rows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}`, showTitle: episode.showTitle })) };
+  return { lines: budget.lines, workOrderCharges: budget.workOrderCharges, commitments: budget.commitments, episodes: rows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}`, showTitle: episode.showTitle })) };
 }

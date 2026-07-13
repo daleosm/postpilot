@@ -16,6 +16,7 @@ import {
   organizations,
   organizationRolePolicies,
   people,
+  purchaseOrders,
   postWorkOrders,
   postWorkflows,
   qcIssues,
@@ -366,6 +367,7 @@ async function seedTenant(tenant: TenantSeed) {
 
   await db.insert(shows).values(tenant.shows.map((show, index) => ({ id: showId(index + 1), organizationId: tenant.id, title: show.title, code: show.code, network: tenant.networks[index] ?? primaryNetwork, productionCompany: show.company, clientCompanyId: companyId(1), productionCompanyId: companyId(2), timeZone: "Europe/London" })));
   await db.insert(showContacts).values(tenant.shows.map((_, index) => ({ organizationId: tenant.id, showId: showId(index + 1), contactId: contactId(1), relationship: "network post executive", isApprovalContact: true })));
+  await db.insert(purchaseOrders).values([{ id: id(tenant.number, "44", 1), organizationId: tenant.id, companyId: companyId(3), showId: showId(1), poNumber: `${tenant.slug.toUpperCase().replaceAll("-", "")}-PO-001`, amount: String(8500 * tenant.budgetProfile.multiplier), currency: tenant.budgetProfile.currency, status: "open", notes: "Approved external finishing and QC contingency." }]);
   await db.insert(seasons).values(tenant.shows.map((show, index) => ({ id: seasonId(index + 1), organizationId: tenant.id, showId: showId(index + 1), number: 1, title: `${show.title} · Season 1`, startDate: day(-100 + index * 18) })));
   const lifecyclePatterns = [
     ["editor_cut", "in_progress", 4],

@@ -3,11 +3,11 @@ import "server-only";
 import { and, asc, desc, eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { billables, budgetLines, episodes, postWorkOrders, seasons, serviceRates, shows } from "@/lib/db/schema";
+import { billables, budgetLines, crmCompanies, episodes, postWorkOrders, purchaseOrders, seasons, serviceRates, shows } from "@/lib/db/schema";
 
 export async function getBudgetData(organizationId: string) {
   const db = getDb();
-  const [lines, invoices, workOrderCharges] = await Promise.all([
+  const [lines, invoices, workOrderCharges, commitments] = await Promise.all([
     db.select({
       id: budgetLines.id,
       category: budgetLines.category,
@@ -39,11 +39,13 @@ export async function getBudgetData(organizationId: string) {
       .innerJoin(shows, eq(seasons.showId, shows.id))
       .where(and(eq(postWorkOrders.organizationId, organizationId), eq(postWorkOrders.billingScope, "billable_change"), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId)))
       .orderBy(asc(postWorkOrders.createdAt)),
+    db.select({ id: purchaseOrders.id, amount: purchaseOrders.amount, status: purchaseOrders.status, showTitle: shows.title, vendorName: crmCompanies.name }).from(purchaseOrders).innerJoin(crmCompanies, eq(purchaseOrders.companyId, crmCompanies.id)).leftJoin(shows, eq(purchaseOrders.showId, shows.id)).where(and(eq(purchaseOrders.organizationId, organizationId), eq(purchaseOrders.status, "open"))),
   ]);
   return {
     lines,
     billables: invoices,
     workOrderCharges,
+    commitments,
     totals: lines.reduce((total, line) => ({ budgeted: total.budgeted + Number(line.budgetedAmount), actual: total.actual + Number(line.actualAmount) }), { budgeted: 0, actual: 0 }),
   };
 }
