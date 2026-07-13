@@ -52,10 +52,34 @@ export const updateShowSchema = showFormSchema.partial();
 /** Internal account-management fields. The account identity itself remains controlled at creation. */
 export const updateCrmCompanySchema = z.object({
   accountStatus: z.enum(["active", "on_hold", "inactive"]),
+  bookingClearance: z.enum(["clear", "po_required", "finance_approval", "on_hold"]),
   accountOwnerId: nullableId,
   nextAction: z.string().trim().max(500).nullable().optional(),
   nextActionDueAt: z.string().date().nullable().optional(),
   notes: z.string().trim().max(8000).nullable().optional(),
+});
+
+export const insertCrmCompanySchema = z.object({
+  name: z.string().trim().min(2, "Account name is required.").max(160),
+  type: z.enum(["client", "vendor", "network", "studio", "production_company"]),
+  address: z.string().trim().max(1000).nullable().optional(),
+  serviceCategory: z.string().trim().max(160).nullable().optional(),
+  paymentTermsDays: z.coerce.number().int().min(0).max(365).nullable().optional(),
+  currency: z.string().trim().length(3).transform((value) => value.toUpperCase()),
+  financeEmail: z.string().email().max(320).nullable().optional(),
+  accountStatus: z.enum(["active", "on_hold", "inactive"]).default("active"),
+  bookingClearance: z.enum(["clear", "po_required", "finance_approval", "on_hold"]).default("clear"),
+});
+
+export const insertCrmContactSchema = z.object({
+  companyId: id,
+  name: z.string().trim().min(2, "Contact name is required.").max(120),
+  title: z.string().trim().max(160).nullable().optional(),
+  email: z.string().email().max(320).nullable().optional(),
+  phone: z.string().trim().max(80).nullable().optional(),
+  contactType: z.enum(["general", "creative_approval", "technical_delivery", "finance", "legal", "client_review"]),
+  isPrimary: z.boolean().default(false),
+  notes: z.string().trim().max(4000).nullable().optional(),
 });
 
 export const insertSeasonSchema = z.object({

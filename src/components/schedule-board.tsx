@@ -24,6 +24,7 @@ export type ScheduleBooking = {
   roomId: string | null;
   episodeId: string | null;
   personId: string | null;
+  clientContactId: string | null;
   notes: string | null;
   roomName: string | null;
   roomType: string | null;

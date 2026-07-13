@@ -30,6 +30,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ bo
     roomId: parsed.data.roomId,
     episodeId: parsed.data.episodeId,
     personId: parsed.data.personId,
+    contactId: parsed.data.clientContactId,
   });
   if (missing.length) return NextResponse.json({ error: `Invalid ${missing.join(", ")} for this organization.` }, { status: 404 });
 
