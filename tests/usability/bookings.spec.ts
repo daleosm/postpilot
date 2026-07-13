@@ -21,7 +21,7 @@ test.describe("Bookings usability", () => {
     await expect(page.getByRole("heading", { name: "Bookings" })).toBeVisible();
     await expect(page.getByText("Post floor calendar · Copperline Editorial")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Room utilization" })).toBeVisible();
-    await expect(page.getByText("Copper Cut 01", { exact: true })).toBeVisible();
+    await expect(page.getByText("Copper Cut 1", { exact: true }).first()).toBeVisible();
     await expect(bookingCount(page)).toBeVisible();
   });
 

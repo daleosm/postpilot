@@ -34,7 +34,7 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
 
   function addWorkOrderTemplate(workflowStageId: string) {
     const position = Math.max(0, ...workOrderTemplates.filter((item) => item.workflowStageId === workflowStageId).map((item) => item.position)) + 1;
-    setWorkOrderTemplates((items) => [...items, { id: crypto.randomUUID(), workflowStageId, title: "New checklist item", description: null, department: null, assigneeRole: null, priority: "normal", isBlocking: false, position }]);
+    setWorkOrderTemplates((items) => [...items, { id: crypto.randomUUID(), workflowStageId, title: "New checklist item", description: null, department: null, assigneeRole: null, priority: "normal", isBlocking: true, position }]);
   }
 
   function removeWorkOrderTemplate(id: string, workflowStageId: string) {

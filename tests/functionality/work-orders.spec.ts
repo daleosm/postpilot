@@ -48,11 +48,13 @@ test.describe("Post work orders", () => {
     await sql.end();
   });
 
-  test("blocks workflow sign-off until a blocking work order is complete", async ({ page }) => {
+  test("makes stage-linked work orders blocking by default", async ({ page }) => {
     await activateLab(page);
-    const create = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Resolve legal burn-in", priority: "blocker", isBlocking: true } });
+    const create = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Resolve legal burn-in", priority: "blocker" } });
     expect(create.status()).toBe(201);
     const workOrderId = (await create.json()).id as string;
+    const [workOrder] = await sql`select is_blocking from post_work_orders where id = ${workOrderId}`;
+    expect(workOrder.is_blocking).toBe(true);
 
     const signOff = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: stageId, action: "sign_off" } });
     expect(signOff.status()).toBe(409);

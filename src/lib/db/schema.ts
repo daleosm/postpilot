@@ -188,7 +188,7 @@ export const workflowStageWorkOrderTemplates = pgTable("workflow_stage_work_orde
   department: text("department"),
   assigneeRole: text("assignee_role"),
   priority: workOrderPriority("priority").default("normal").notNull(),
-  isBlocking: boolean("is_blocking").default(false).notNull(),
+  isBlocking: boolean("is_blocking").default(true).notNull(),
   position: integer("position").default(1).notNull(),
   ...auditColumns,
 }, (table) => [
@@ -385,7 +385,7 @@ export const postWorkOrders = pgTable("post_work_orders", {
   assigneePersonId: uuid("assignee_person_id").references(() => people.id, { onDelete: "set null" }),
   assigneeRole: text("assignee_role"),
   priority: workOrderPriority("priority").default("normal").notNull(),
-  isBlocking: boolean("is_blocking").default(false).notNull(),
+  isBlocking: boolean("is_blocking").default(true).notNull(),
   status: workOrderStatus("status").default("open").notNull(),
   billingScope: workOrderBillingScope("billing_scope").default("included").notNull(),
   billingStatus: workOrderBillingStatus("billing_status").default("not_billable").notNull(),

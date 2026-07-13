@@ -183,6 +183,13 @@
       "when": 1783987200002,
       "tag": "0025_gray_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1783934227372,
+      "tag": "0026_military_the_twelve",
+      "breakpoints": true
     }
   ]
 }

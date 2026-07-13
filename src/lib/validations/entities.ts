@@ -215,14 +215,14 @@ export const createPostWorkOrderSchema = z.object({
   assigneePersonId: nullableId,
   assigneeRole: z.string().trim().max(80).nullable().optional(),
   priority: z.enum(workOrderPriorities).default("normal"),
-  isBlocking: z.boolean().default(false),
+  isBlocking: z.boolean().optional(),
   billingScope: z.enum(workOrderBillingScopes).default("included"),
   estimatedAmount: money.nullable().optional(),
   currency: z.string().trim().length(3).toUpperCase().default("USD"),
   billingNotes: z.string().trim().max(2000).nullable().optional(),
   externalUrl: z.string().url().max(2000).nullable().optional(),
   dueAt: optionalTimestamp.nullable(),
-}).refine((value) => !value.isBlocking || Boolean(value.workflowStageId), {
+}).transform((value) => ({ ...value, isBlocking: value.isBlocking ?? Boolean(value.workflowStageId) })).refine((value) => !value.isBlocking || Boolean(value.workflowStageId), {
   message: "A blocking work order must be linked to a workflow stage.",
   path: ["workflowStageId"],
 });
