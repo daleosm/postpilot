@@ -9,4 +9,5 @@ export { listEpisodeWorkOrders, listWorkOrderInbox } from "./work-orders";
 export { getScheduleResources, listMyTimeBookings, listPendingBookingTimeSubmissions, listRooms, listSchedule } from "./schedule";
 export { getShow, getShowWorkspace, listShowEpisodeTeam, listShows } from "./shows";
 export { listTeam } from "./team";
+export { listOrganizationUsers } from "./organization-users";
 export { getDefaultWorkflowConfig } from "./workflows";

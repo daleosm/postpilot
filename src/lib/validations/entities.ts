@@ -37,6 +37,14 @@ export const insertOrganizationMemberSchema = z.object({
 });
 export const updateOrganizationMemberSchema = insertOrganizationMemberSchema.pick({ role: true });
 
+export const createOrganizationUserSchema = z.object({
+  name: z.string().trim().min(2, "Enter the user's name.").max(120),
+  email: z.string().email("Enter a valid work email.").max(320),
+  personRole: roleKey,
+  membershipRole: z.enum(["admin", "member", "guest"]).default("member"),
+});
+export const updateOrganizationUserSchema = createOrganizationUserSchema.pick({ personRole: true, membershipRole: true });
+
 export const showFormSchema = z.object({
   title: z.string().trim().min(1, "Show title is required.").max(160),
   code: z.string().trim().min(2, "Show code must be at least 2 characters.").max(32).toUpperCase(),

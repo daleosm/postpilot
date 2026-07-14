@@ -20,6 +20,7 @@ const permissionLabels: Record<string, string> = {
   manage_qc: "Record QC reports",
   verify_qc: "Verify and close QC exceptions",
   manage_budget: "Budget",
+  manage_users: "Manage user access",
   request_catering: "Request catering",
   manage_catering: "Runner desk",
   view_assigned: "Assigned work",
