@@ -60,7 +60,7 @@ export const updateShowSchema = showFormSchema.partial();
 /** Internal account-management fields. The account identity itself remains controlled at creation. */
 export const updateCrmCompanySchema = z.object({
   accountStatus: z.enum(["active", "on_hold", "inactive"]),
-  bookingClearance: z.enum(["clear", "po_required", "finance_approval", "on_hold"]),
+  bookingClearance: z.enum(["clear", "authorisation_required", "finance_approval", "on_hold"]),
   accountOwnerId: nullableId,
   nextAction: z.string().trim().max(500).nullable().optional(),
   nextActionDueAt: z.string().date().nullable().optional(),
@@ -76,7 +76,7 @@ export const insertCrmCompanySchema = z.object({
   currency: z.string().trim().length(3).transform((value) => value.toUpperCase()),
   financeEmail: z.string().email().max(320).nullable().optional(),
   accountStatus: z.enum(["active", "on_hold", "inactive"]).default("active"),
-  bookingClearance: z.enum(["clear", "po_required", "finance_approval", "on_hold"]).default("clear"),
+  bookingClearance: z.enum(["clear", "authorisation_required", "finance_approval", "on_hold"]).default("clear"),
 });
 
 export const insertCrmContactSchema = z.object({
@@ -331,7 +331,6 @@ export const insertBudgetLineSchema = z.object({
   showId: nullableId,
   seasonId: nullableId,
   episodeId: nullableId,
-  purchaseOrderId: nullableId,
   code: z.string().trim().max(40).nullable().optional(),
   category: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000).nullable().optional(),
@@ -344,7 +343,7 @@ export const updateBudgetLineSchema = insertBudgetLineSchema.omit({ organization
 
 // Costs are tracked at episode level. The broader insert schema remains useful for
 // importing historical data, while the product-facing create route uses this one.
-export const createEpisodeBudgetLineSchema = insertBudgetLineSchema.omit({ organizationId: true, purchaseOrderId: true }).extend({
+export const createEpisodeBudgetLineSchema = insertBudgetLineSchema.omit({ organizationId: true }).extend({
   episodeId: id,
 });
 
@@ -372,7 +371,6 @@ export const insertBillableSchema = z.object({
   organizationId: id,
   showId: nullableId,
   episodeId: nullableId,
-  purchaseOrderId: nullableId,
   vendor: z.string().trim().min(1).max(160),
   reference: z.string().trim().max(120).nullable().optional(),
   description: z.string().trim().max(2000).nullable().optional(),

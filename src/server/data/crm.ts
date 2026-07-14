@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { activityLog, billables, budgetLines, crmCompanies, crmContacts, episodes, people, postWorkOrders, purchaseOrderEvents, purchaseOrders, rateCardItems, rateCards as rateCardRecords, seasons, shows, vendorInvoices } from "@/lib/db/schema";
+import { activityLog, billables, budgetLines, crmCompanies, crmContacts, episodes, people, postWorkOrders, rateCardItems, rateCards as rateCardRecords, seasons, shows, vendorInvoices } from "@/lib/db/schema";
 
 export async function getCrmData(organizationId: string) {
   const db = getDb();
@@ -18,19 +18,6 @@ export async function getCrmData(organizationId: string) {
   ]);
   const rateCards = Object.values(cards.reduce<Record<string, { id: string; name: string; currency: string; showTitle: string | null; companyName: string | null; itemCount: number }>>((result, card) => { result[card.id] ??= { id: card.id, name: card.name, currency: card.currency, showTitle: card.showTitle, companyName: card.companyName, itemCount: 0 }; if (card.itemId) result[card.id].itemCount += 1; return result; }, {}));
   return { companies, contacts, rateCards, vendorInvoices: invoiceRows, workOrders, showOptions, episodeOptions, showLinks, owners };
-}
-
-export async function getPurchaseOrderDetail(organizationId: string, purchaseOrderId: string) {
-  const db = getDb();
-  const [purchaseOrder] = await db.select({ id: purchaseOrders.id, poNumber: purchaseOrders.poNumber, kind: purchaseOrders.kind, approvedAmount: purchaseOrders.amount, consumedAmount: purchaseOrders.consumedAmount, currency: purchaseOrders.currency, expiresAt: purchaseOrders.expiresAt, status: purchaseOrders.status, notes: purchaseOrders.notes, companyName: crmCompanies.name, companyId: crmCompanies.id, showTitle: shows.title, episodeId: episodes.id, episodeNumber: episodes.number, episodeTitle: episodes.title }).from(purchaseOrders).innerJoin(crmCompanies, eq(purchaseOrders.companyId, crmCompanies.id)).leftJoin(shows, eq(purchaseOrders.showId, shows.id)).leftJoin(episodes, eq(purchaseOrders.episodeId, episodes.id)).where(and(eq(purchaseOrders.organizationId, organizationId), eq(purchaseOrders.id, purchaseOrderId))).limit(1);
-  if (!purchaseOrder) return null;
-  const [events, costs, clientBillables, invoices] = await Promise.all([
-    db.select().from(purchaseOrderEvents).where(and(eq(purchaseOrderEvents.organizationId, organizationId), eq(purchaseOrderEvents.purchaseOrderId, purchaseOrderId))).orderBy(desc(purchaseOrderEvents.createdAt)),
-    db.select({ id: budgetLines.id, description: budgetLines.description, amount: budgetLines.actualAmount, currency: budgetLines.currency, episodeNumber: episodes.number, episodeTitle: episodes.title, createdAt: budgetLines.createdAt }).from(budgetLines).leftJoin(episodes, eq(budgetLines.episodeId, episodes.id)).where(and(eq(budgetLines.organizationId, organizationId), eq(budgetLines.purchaseOrderId, purchaseOrderId))).orderBy(desc(budgetLines.createdAt)),
-    db.select({ id: billables.id, description: billables.description, amount: billables.amount, currency: billables.currency, status: billables.status, reference: billables.reference, createdAt: billables.createdAt }).from(billables).where(and(eq(billables.organizationId, organizationId), eq(billables.purchaseOrderId, purchaseOrderId))).orderBy(desc(billables.createdAt)),
-    db.select({ id: vendorInvoices.id, invoiceNumber: vendorInvoices.invoiceNumber, amount: vendorInvoices.amount, currency: vendorInvoices.currency, status: vendorInvoices.status, dueDate: vendorInvoices.dueDate, description: vendorInvoices.description }).from(vendorInvoices).where(and(eq(vendorInvoices.organizationId, organizationId), eq(vendorInvoices.purchaseOrderId, purchaseOrderId))).orderBy(desc(vendorInvoices.createdAt)),
-  ]);
-  return { purchaseOrder, events, costs, clientBillables, invoices };
 }
 
 export async function getCrmAccount(organizationId: string, companyId: string) {

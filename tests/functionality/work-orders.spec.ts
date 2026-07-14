@@ -95,8 +95,6 @@ test.describe("Post work orders", () => {
     const switchUser = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
     expect(switchUser.status()).toBe(200);
     await activateLab(page);
-    const retiredPurchaseOrder = await page.request.post("/api/purchase-orders", { data: {} });
-    expect(retiredPurchaseOrder.status()).toBe(410);
     const create = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Client-requested alternate title card", billingScope: "billable_change", clientQuoteAmount: 750, clientQuoteCurrency: "USD" } });
     expect(create.status()).toBe(201);
     const workOrderId = (await create.json()).id as string;

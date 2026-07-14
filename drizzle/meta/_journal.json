@@ -379,6 +379,20 @@
       "when": 1783987200028,
       "tag": "0053_separate_work_order_vendor_and_client_quotes",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1783987200029,
+      "tag": "0054_remove_purchase_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1783987200030,
+      "tag": "0055_remove_purchase_order_clearance",
+      "breakpoints": true
     }
   ]
 }

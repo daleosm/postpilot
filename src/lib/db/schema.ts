@@ -39,7 +39,6 @@ export const workOrderBillingScope = pgEnum("work_order_billing_scope", ["includ
 export const workOrderBillingStatus = pgEnum("work_order_billing_status", ["not_billable", "draft", "awaiting_finance", "posted", "declined"]);
 export const cateringRequestType = pgEnum("catering_request_type", ["lunch", "tea_coffee", "snack"]);
 export const cateringRequestStatus = pgEnum("catering_request_status", ["requested", "acknowledged", "preparing", "delivered", "cancelled"]);
-export const purchaseOrderKind = pgEnum("purchase_order_kind", ["vendor_commitment", "client_authorisation"]);
 export const vendorInvoiceStatus = pgEnum("vendor_invoice_status", ["received", "approved", "paid", "disputed", "void"]);
 
 /** Auth.js adapter tables */
@@ -111,7 +110,7 @@ export const organizationRolePolicies = pgTable("organization_role_policies", {
 
 export const crmCompanyType = pgEnum("crm_company_type", ["client", "vendor", "network", "studio", "production_company"]);
 export const crmAccountStatus = pgEnum("crm_account_status", ["active", "on_hold", "inactive"]);
-export const crmBookingClearance = pgEnum("crm_booking_clearance", ["clear", "po_required", "finance_approval", "on_hold"]);
+export const crmBookingClearance = pgEnum("crm_booking_clearance", ["clear", "authorisation_required", "finance_approval", "on_hold"]);
 export const crmCompanies = pgTable("crm_companies", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), name: text("name").notNull(), type: crmCompanyType("type").notNull(), address: text("address"), serviceCategory: text("service_category"), isPreferredSupplier: boolean("is_preferred_supplier").default(false).notNull(), paymentTermsDays: integer("payment_terms_days"), currency: text("currency").default("GBP").notNull(), financeEmail: text("finance_email"), billingEmail: text("billing_email"), accountStatus: crmAccountStatus("account_status").default("active").notNull(), /** Operational state visible to schedulers; it deliberately contains no financial amount. */ bookingClearance: crmBookingClearance("booking_clearance").default("clear").notNull(), /** The internal person responsible for the commercial relationship. */ accountOwnerId: uuid("account_owner_id").references(() => people.id, { onDelete: "set null" }), /** A lightweight, internal follow-up—this is not a sales pipeline. */ nextAction: text("next_action"), nextActionDueAt: date("next_action_due_at"), /** Internal-only account notes; never exposed to client users. */ notes: text("notes"), ...auditColumns }, (table) => [uniqueIndex("crm_companies_org_name_idx").on(table.organizationId, table.name), index("crm_companies_org_type_idx").on(table.organizationId, table.type), index("crm_companies_org_status_idx").on(table.organizationId, table.accountStatus), index("crm_companies_org_service_idx").on(table.organizationId, table.serviceCategory), index("crm_companies_org_owner_idx").on(table.organizationId, table.accountOwnerId), index("crm_companies_org_next_action_idx").on(table.organizationId, table.nextActionDueAt), index("crm_companies_org_booking_clearance_idx").on(table.organizationId, table.bookingClearance)]);
 export const crmContactType = pgEnum("crm_contact_type", ["general", "creative_approval", "technical_delivery", "finance", "legal", "client_review"]);
 export const crmContacts = pgTable("crm_contacts", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), companyId: uuid("company_id").notNull().references(() => crmCompanies.id, { onDelete: "cascade" }), name: text("name").notNull(), title: text("title"), email: text("email"), phone: text("phone"), contactType: crmContactType("contact_type").default("general").notNull(), isPrimary: boolean("is_primary").default(false).notNull(), notes: text("notes"), ...auditColumns }, (table) => [index("crm_contacts_company_idx").on(table.companyId), index("crm_contacts_org_idx").on(table.organizationId), index("crm_contacts_org_type_idx").on(table.organizationId, table.contactType)]);
@@ -136,9 +135,8 @@ export const shows = pgTable("shows", {
   index("shows_organization_id_idx").on(table.organizationId),
 ]);
 
-export const showContactResponsibility = pgEnum("show_contact_responsibility", ["creative_approvals", "delivery_qc", "finance_po", "legal_compliance"]);
+export const showContactResponsibility = pgEnum("show_contact_responsibility", ["creative_approvals", "delivery_qc", "finance_billing", "legal_compliance"]);
 export const showContacts = pgTable("show_contacts", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), showId: uuid("show_id").notNull().references(() => shows.id, { onDelete: "cascade" }), contactId: uuid("contact_id").notNull().references(() => crmContacts.id, { onDelete: "cascade" }), responsibility: showContactResponsibility("responsibility").default("creative_approvals").notNull(), relationship: text("relationship").notNull(), isApprovalContact: boolean("is_approval_contact").default(false).notNull(), ...auditColumns }, (table) => [uniqueIndex("show_contacts_show_contact_idx").on(table.showId, table.contactId), uniqueIndex("show_contacts_show_responsibility_idx").on(table.showId, table.responsibility), index("show_contacts_org_idx").on(table.organizationId)]);
-export const purchaseOrders = pgTable("purchase_orders", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), companyId: uuid("company_id").notNull().references(() => crmCompanies.id, { onDelete: "restrict" }), showId: uuid("show_id").references(() => shows.id, { onDelete: "set null" }), episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "set null" }), poNumber: text("po_number").notNull(), kind: purchaseOrderKind("kind").default("vendor_commitment").notNull(), amount: numeric("amount", { precision: 12, scale: 2 }), consumedAmount: numeric("consumed_amount", { precision: 12, scale: 2 }).default("0").notNull(), currency: text("currency").default("GBP").notNull(), expiresAt: date("expires_at"), status: text("status").default("open").notNull(), notes: text("notes"), ...auditColumns }, (table) => [uniqueIndex("purchase_orders_org_number_idx").on(table.organizationId, table.poNumber), index("purchase_orders_org_company_idx").on(table.organizationId, table.companyId), index("purchase_orders_org_episode_idx").on(table.organizationId, table.episodeId), index("purchase_orders_org_kind_status_idx").on(table.organizationId, table.kind, table.status)]);
 
 export const seasons = pgTable("seasons", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -435,7 +433,6 @@ export const postWorkOrders = pgTable("post_work_orders", {
   workflowStageId: uuid("workflow_stage_id").references(() => workflowStages.id, { onDelete: "set null" }),
   bookingId: uuid("booking_id").references(() => bookings.id, { onDelete: "set null" }),
   vendorCompanyId: uuid("vendor_company_id").references(() => crmCompanies.id, { onDelete: "set null" }),
-  purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "set null" }),
   qcIssueId: uuid("qc_issue_id").references(() => qcIssues.id, { onDelete: "set null" }),
   kind: workOrderKind("kind").default("work_order").notNull(),
   title: text("title").notNull(),
@@ -476,7 +473,6 @@ export const budgetLines = pgTable("budget_lines", {
   seasonId: uuid("season_id").references(() => seasons.id, { onDelete: "cascade" }),
   episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "cascade" }),
   workOrderId: uuid("work_order_id").references(() => postWorkOrders.id, { onDelete: "set null" }),
-  purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "set null" }),
   vendorInvoiceId: uuid("vendor_invoice_id").references(() => vendorInvoices.id, { onDelete: "set null" }),
   code: text("code"),
   category: text("category").notNull(),
@@ -490,7 +486,6 @@ export const budgetLines = pgTable("budget_lines", {
   index("budget_lines_organization_id_idx").on(table.organizationId),
   uniqueIndex("budget_lines_work_order_id_idx").on(table.workOrderId),
   uniqueIndex("budget_lines_vendor_invoice_id_idx").on(table.vendorInvoiceId),
-  index("budget_lines_organization_po_idx").on(table.organizationId, table.purchaseOrderId),
 ]);
 
 /** Tenant-owned finance rate card used as the standard price list for post services. */
@@ -518,7 +513,6 @@ export const billables = pgTable("billables", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   showId: uuid("show_id").references(() => shows.id, { onDelete: "cascade" }),
   episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "cascade" }),
-  purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "set null" }),
   vendor: text("vendor").notNull(),
   reference: text("reference"),
   description: text("description"),
@@ -531,14 +525,13 @@ export const billables = pgTable("billables", {
   rateSnapshot: jsonb("rate_snapshot").$type<Record<string, unknown>>(),
   overrideReason: text("override_reason"),
   ...auditColumns,
-}, (table) => [index("billables_organization_status_idx").on(table.organizationId, table.status), index("billables_organization_po_idx").on(table.organizationId, table.purchaseOrderId)]);
+}, (table) => [index("billables_organization_status_idx").on(table.organizationId, table.status)]);
 
 /** Supplier invoice register. It is kept distinct from client billables and creates one linked internal-cost line when posted. */
 export const vendorInvoices = pgTable("vendor_invoices", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   vendorCompanyId: uuid("vendor_company_id").notNull().references(() => crmCompanies.id, { onDelete: "restrict" }),
-  purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "set null" }),
   workOrderId: uuid("work_order_id").references(() => postWorkOrders.id, { onDelete: "set null" }),
   showId: uuid("show_id").references(() => shows.id, { onDelete: "set null" }),
   episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "set null" }),
@@ -550,12 +543,7 @@ export const vendorInvoices = pgTable("vendor_invoices", {
   invoiceDate: date("invoice_date"),
   dueDate: date("due_date"),
   ...auditColumns,
-}, (table) => [uniqueIndex("vendor_invoices_org_number_idx").on(table.organizationId, table.vendorCompanyId, table.invoiceNumber), index("vendor_invoices_org_po_idx").on(table.organizationId, table.purchaseOrderId), index("vendor_invoices_org_work_order_idx").on(table.organizationId, table.workOrderId), index("vendor_invoices_org_status_idx").on(table.organizationId, table.status)]);
-
-/** Immutable commercial events make PO allocation and overrun decisions auditable. */
-export const purchaseOrderEvents = pgTable("purchase_order_events", {
-  id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), purchaseOrderId: uuid("purchase_order_id").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }), actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }), action: text("action").notNull(), amount: numeric("amount", { precision: 14, scale: 2 }), metadata: jsonb("metadata").default({}).notNull(), createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [index("purchase_order_events_org_po_created_idx").on(table.organizationId, table.purchaseOrderId, table.createdAt)]);
+}, (table) => [uniqueIndex("vendor_invoices_org_number_idx").on(table.organizationId, table.vendorCompanyId, table.invoiceNumber), index("vendor_invoices_org_work_order_idx").on(table.organizationId, table.workOrderId), index("vendor_invoices_org_status_idx").on(table.organizationId, table.status)]);
 
 export const activityLog = pgTable("activity_log", {
   id: uuid("id").defaultRandom().primaryKey(),

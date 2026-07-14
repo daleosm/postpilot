@@ -377,7 +377,7 @@ async function seedTenant(tenant: TenantSeed) {
   await db.insert(showContacts).values(tenant.shows.flatMap((_, index) => [
     { organizationId: tenant.id, showId: showId(index + 1), contactId: contactId(1), responsibility: "creative_approvals" as const, relationship: "creative approval", isApprovalContact: true },
     { organizationId: tenant.id, showId: showId(index + 1), contactId: contactId(2), responsibility: "delivery_qc" as const, relationship: "delivery and QC", isApprovalContact: false },
-    { organizationId: tenant.id, showId: showId(index + 1), contactId: contactId(3), responsibility: "finance_po" as const, relationship: "finance and billing", isApprovalContact: false },
+    { organizationId: tenant.id, showId: showId(index + 1), contactId: contactId(3), responsibility: "finance_billing" as const, relationship: "finance and billing", isApprovalContact: false },
     { organizationId: tenant.id, showId: showId(index + 1), contactId: contactId(4), responsibility: "legal_compliance" as const, relationship: "legal and compliance", isApprovalContact: false },
   ]));
   await db.insert(seasons).values(tenant.shows.map((show, index) => ({ id: seasonId(index + 1), organizationId: tenant.id, showId: showId(index + 1), number: 1, title: `${show.title} · Season 1`, startDate: day(-100 + index * 18) })));
