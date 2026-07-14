@@ -448,9 +448,13 @@ export const postWorkOrders = pgTable("post_work_orders", {
   status: workOrderStatus("status").default("open").notNull(),
   billingScope: workOrderBillingScope("billing_scope").default("included").notNull(),
   billingStatus: workOrderBillingStatus("billing_status").default("not_billable").notNull(),
+  /** Internal estimate for work supplied by the selected vendor. */
   estimatedAmount: numeric("estimated_amount", { precision: 14, scale: 2 }),
+  /** Separately agreed client charge; never reuses the vendor estimate. */
+  clientQuoteAmount: numeric("client_quote_amount", { precision: 14, scale: 2 }),
   actualAmount: numeric("actual_amount", { precision: 14, scale: 2 }),
   currency: text("currency").default("USD").notNull(),
+  clientQuoteCurrency: text("client_quote_currency"),
   billingNotes: text("billing_notes"),
   externalUrl: text("external_url"),
   dueAt: timestamp("due_at", { withTimezone: true }),

@@ -372,6 +372,13 @@
       "when": 1783987200027,
       "tag": "0052_manage_users_permission",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1783987200028,
+      "tag": "0053_separate_work_order_vendor_and_client_quotes",
+      "breakpoints": true
     }
   ]
 }

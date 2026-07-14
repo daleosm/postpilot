@@ -6,7 +6,6 @@ import { getDb } from "@/lib/db";
 import { budgetLines, crmCompanies, episodes, postWorkOrders, seasons, shows, vendorInvoices } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
-import { checkPurchaseOrderAllocation, reconcilePurchaseOrder } from "@/lib/purchase-orders";
 import { insertVendorInvoiceSchema } from "@/lib/validations/entities";
 
 /** Record supplier invoices separately from client billables, and put their actual value into the episode cost ledger. */
@@ -19,22 +18,15 @@ export async function POST(request: Request) {
   const [[vendor], [episode], [workOrder]] = await Promise.all([
     db.select({ id: crmCompanies.id, type: crmCompanies.type }).from(crmCompanies).where(and(eq(crmCompanies.id, parsed.data.vendorCompanyId), eq(crmCompanies.organizationId, organizationId))).limit(1),
     db.select({ id: episodes.id, showId: shows.id, seasonId: seasons.id }).from(episodes).innerJoin(seasons, eq(episodes.seasonId, seasons.id)).innerJoin(shows, eq(seasons.showId, shows.id)).where(and(eq(episodes.id, parsed.data.episodeId), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId))).limit(1),
-    parsed.data.workOrderId ? db.select({ id: postWorkOrders.id, episodeId: postWorkOrders.episodeId, status: postWorkOrders.status, purchaseOrderId: postWorkOrders.purchaseOrderId }).from(postWorkOrders).where(and(eq(postWorkOrders.id, parsed.data.workOrderId), eq(postWorkOrders.organizationId, organizationId))).limit(1) : Promise.resolve([]),
+    parsed.data.workOrderId ? db.select({ id: postWorkOrders.id, episodeId: postWorkOrders.episodeId, status: postWorkOrders.status }).from(postWorkOrders).where(and(eq(postWorkOrders.id, parsed.data.workOrderId), eq(postWorkOrders.organizationId, organizationId))).limit(1) : Promise.resolve([]),
   ]);
   if (!vendor || vendor.type !== "vendor") return NextResponse.json({ error: "Select a vendor in this post house." }, { status: 400 });
   if (!episode) return NextResponse.json({ error: "Episode not found." }, { status: 404 });
   if (parsed.data.workOrderId && (!workOrder || workOrder.episodeId !== episode.id)) return NextResponse.json({ error: "Work order not found for this episode." }, { status: 404 });
   if (workOrder?.status === "open") return NextResponse.json({ error: "Approve the vendor work order before recording its invoice." }, { status: 409 });
-  if (workOrder?.purchaseOrderId && parsed.data.purchaseOrderId && workOrder.purchaseOrderId !== parsed.data.purchaseOrderId) return NextResponse.json({ error: "Invoice PO must match the linked work order." }, { status: 400 });
-  const purchaseOrderId = parsed.data.purchaseOrderId ?? workOrder?.purchaseOrderId ?? null;
-  let allocation: Awaited<ReturnType<typeof checkPurchaseOrderAllocation>>;
-  try { allocation = await checkPurchaseOrderAllocation(organizationId, purchaseOrderId, parsed.data.amount, "vendor_commitment", await can("approve_po_overruns")); }
-  catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to allocate the PO." }, { status: 409 }); }
-  if (allocation.purchaseOrder && allocation.purchaseOrder.companyId !== parsed.data.vendorCompanyId) return NextResponse.json({ error: "The invoice vendor does not match the selected PO." }, { status: 400 });
-  const [invoice] = await db.insert(vendorInvoices).values({ organizationId, vendorCompanyId: parsed.data.vendorCompanyId, purchaseOrderId, workOrderId: parsed.data.workOrderId ?? null, showId: episode.showId, episodeId: episode.id, invoiceNumber: parsed.data.invoiceNumber, description: parsed.data.description ?? null, amount: String(parsed.data.amount), currency: parsed.data.currency, status: parsed.data.status, invoiceDate: parsed.data.invoiceDate ? parsed.data.invoiceDate.toISOString().slice(0, 10) : null, dueDate: parsed.data.dueDate ? parsed.data.dueDate.toISOString().slice(0, 10) : null }).returning({ id: vendorInvoices.id });
-  const [line] = await db.insert(budgetLines).values({ organizationId, showId: episode.showId, seasonId: episode.seasonId, episodeId: episode.id, vendorInvoiceId: invoice.id, purchaseOrderId, category: "Vendor invoice", description: `${vendor.type} invoice ${parsed.data.invoiceNumber}${parsed.data.description ? ` · ${parsed.data.description}` : ""}`, budgetedAmount: "0", actualAmount: String(parsed.data.amount), currency: parsed.data.currency, costType: "internal" }).returning({ id: budgetLines.id });
-  if (purchaseOrderId) await reconcilePurchaseOrder(organizationId, purchaseOrderId, { actorUserId: context.userId, action: "vendor_invoice.recorded", amount: parsed.data.amount, metadata: { vendorInvoiceId: invoice.id, budgetLineId: line.id, episodeId: episode.id } });
+  const [invoice] = await db.insert(vendorInvoices).values({ organizationId, vendorCompanyId: parsed.data.vendorCompanyId, workOrderId: parsed.data.workOrderId ?? null, showId: episode.showId, episodeId: episode.id, invoiceNumber: parsed.data.invoiceNumber, description: parsed.data.description ?? null, amount: String(parsed.data.amount), currency: parsed.data.currency, status: parsed.data.status, invoiceDate: parsed.data.invoiceDate ? parsed.data.invoiceDate.toISOString().slice(0, 10) : null, dueDate: parsed.data.dueDate ? parsed.data.dueDate.toISOString().slice(0, 10) : null }).returning({ id: vendorInvoices.id });
+  const [line] = await db.insert(budgetLines).values({ organizationId, showId: episode.showId, seasonId: episode.seasonId, episodeId: episode.id, vendorInvoiceId: invoice.id, category: "Vendor invoice", description: `${vendor.type} invoice ${parsed.data.invoiceNumber}${parsed.data.description ? ` · ${parsed.data.description}` : ""}`, budgetedAmount: "0", actualAmount: String(parsed.data.amount), currency: parsed.data.currency, costType: "internal" }).returning({ id: budgetLines.id });
   if (workOrder) await db.update(postWorkOrders).set({ actualAmount: String(parsed.data.amount), updatedAt: new Date() }).where(and(eq(postWorkOrders.id, workOrder.id), eq(postWorkOrders.organizationId, organizationId)));
-  await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "vendor_invoice.recorded", entityType: "vendor_invoice", entityId: invoice.id, metadata: { budgetLineId: line.id, purchaseOrderId: parsed.data.purchaseOrderId } });
+  await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "vendor_invoice.recorded", entityType: "vendor_invoice", entityId: invoice.id, metadata: { budgetLineId: line.id } });
   return NextResponse.json(invoice, { status: 201 });
 }

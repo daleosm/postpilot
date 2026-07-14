@@ -1,7 +1,6 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { PurchaseOrderForm } from "@/components/purchase-order-form";
-import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can } from "@/lib/permissions";
-import { getCrmData } from "@/server/data";
-export default async function PurchaseOrdersPage() { if (!(await can("manage_budget"))) redirect("/crm"); const context = await getActiveOrganizationContext(); const data = context?.organization ? await getCrmData(context.organization.organizationId) : { purchaseOrders: [], companies: [], showOptions: [], episodeOptions: [] }; return <div className="space-y-5"><header className="flex items-end justify-between gap-3"><div><Link href="/crm" className="text-xs font-semibold text-[#58756b]">← Clients & vendors</Link><h1 className="mt-3 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Purchase orders</h1><p className="mt-1 text-sm text-[#747977]">Approved authorisations and vendor commitments, reconciled from their linked ledger entries.</p></div><PurchaseOrderForm companies={data.companies} shows={data.showOptions} episodes={data.episodeOptions}/></header><section className="panel overflow-x-auto"><div className="min-w-[780px]">{data.purchaseOrders.map((po) => <Link href={`/crm/purchase-orders/${po.id}`} key={po.id} className="grid grid-cols-6 gap-3 border-b px-5 py-3 text-sm hover:bg-[#fafbf9]"><b>{po.poNumber}</b><span>{po.companyName}</span><span className="capitalize">{po.kind.replaceAll("_", " ")}</span><span>{po.showTitle ?? "Unallocated"}</span><span>{po.currency} {Number(po.approvedAmount ?? 0).toFixed(2)}</span><span className={Number(po.approvedAmount ?? 0) - Number(po.consumedAmount ?? 0) < 0 ? "font-semibold text-[#a35e41]" : "text-[#59635e]"}>Remaining {po.currency} {(Number(po.approvedAmount ?? 0)-Number(po.consumedAmount ?? 0)).toFixed(2)}</span></Link>)}{!data.purchaseOrders.length && <p className="px-5 py-10 text-sm text-[#858a87]">No purchase orders yet.</p>}</div></section></div>; }
+
+/** Purchase orders are retained as dormant historical finance records, not a live workflow. */
+export default function PurchaseOrdersPage() {
+  redirect("/crm");
+}

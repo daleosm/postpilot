@@ -1,14 +1,14 @@
 import "server-only";
 
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { bookings, billables, budgetLines, crmCompanies, episodes, people, postWorkOrders, purchaseOrders, rooms, seasons, serviceRates, shows } from "@/lib/db/schema";
+import { bookings, billables, budgetLines, episodes, people, postWorkOrders, rooms, seasons, serviceRates, shows } from "@/lib/db/schema";
 import { resolveRate } from "@/lib/rate-resolution";
 
 export async function getBudgetData(organizationId: string) {
   const db = getDb();
-  const [storedLines, invoices, workOrderCharges, commitments] = await Promise.all([
+  const [storedLines, invoices, workOrderCharges] = await Promise.all([
     db.select({
       id: budgetLines.id,
       category: budgetLines.category,
@@ -32,8 +32,8 @@ export async function getBudgetData(organizationId: string) {
     db.select().from(billables).where(eq(billables.organizationId, organizationId)).orderBy(desc(billables.invoiceDate)),
     db.select({
       id: postWorkOrders.id, title: postWorkOrders.title, department: postWorkOrders.department, status: postWorkOrders.status,
-      billingStatus: postWorkOrders.billingStatus, estimatedAmount: postWorkOrders.estimatedAmount, actualAmount: postWorkOrders.actualAmount,
-      currency: postWorkOrders.currency, billingNotes: postWorkOrders.billingNotes, episodeId: episodes.id, episodeTitle: episodes.title,
+      billingStatus: postWorkOrders.billingStatus, estimatedAmount: sql<string | null>`coalesce(${postWorkOrders.clientQuoteAmount}, ${postWorkOrders.estimatedAmount})`, actualAmount: postWorkOrders.actualAmount,
+      currency: sql<string>`coalesce(${postWorkOrders.clientQuoteCurrency}, ${postWorkOrders.currency})`, billingNotes: postWorkOrders.billingNotes, episodeId: episodes.id, episodeTitle: episodes.title,
       episodeNumber: episodes.number, showTitle: shows.title,
     }).from(postWorkOrders)
       .innerJoin(episodes, eq(postWorkOrders.episodeId, episodes.id))
@@ -41,7 +41,6 @@ export async function getBudgetData(organizationId: string) {
       .innerJoin(shows, eq(seasons.showId, shows.id))
       .where(and(eq(postWorkOrders.organizationId, organizationId), eq(postWorkOrders.billingScope, "billable_change"), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId)))
       .orderBy(asc(postWorkOrders.createdAt)),
-    db.select({ id: purchaseOrders.id, poNumber: purchaseOrders.poNumber, kind: purchaseOrders.kind, amount: purchaseOrders.amount, consumedAmount: purchaseOrders.consumedAmount, currency: purchaseOrders.currency, status: purchaseOrders.status, showId: purchaseOrders.showId, episodeId: purchaseOrders.episodeId, showTitle: shows.title, vendorName: crmCompanies.name }).from(purchaseOrders).innerJoin(crmCompanies, eq(purchaseOrders.companyId, crmCompanies.id)).leftJoin(shows, eq(purchaseOrders.showId, shows.id)).where(and(eq(purchaseOrders.organizationId, organizationId), eq(purchaseOrders.status, "open"))),
   ]);
   const bookingCosts = await listBookingCosts(organizationId);
   const lines = applyBookingCostRollups(storedLines, bookingCosts);
@@ -49,7 +48,6 @@ export async function getBudgetData(organizationId: string) {
     lines,
     billables: invoices,
     workOrderCharges,
-    commitments,
     totals: lines.reduce((total, line) => ({ budgeted: total.budgeted + Number(line.budgetedAmount), actual: total.actual + Number(line.actualAmount) }), { budgeted: 0, actual: 0 }),
   };
 }

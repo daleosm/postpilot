@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { episodes, organizationRolePolicies } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 
-export const permissions = ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "manage_work_orders", "update_assigned_work", "approve_time", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "approve_po_overruns", "manage_qc", "verify_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "manage_catering", "view_assigned"] as const;
+export const permissions = ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "manage_work_orders", "update_assigned_work", "approve_time", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "manage_qc", "verify_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "manage_catering", "view_assigned"] as const;
 export type Permission = (typeof permissions)[number];
 export type TenantRolePolicy = { role: string; label: string; permissions: Permission[] };
 

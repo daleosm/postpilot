@@ -27,10 +27,9 @@ export default async function CrmAccountPage({ params }: { params: Promise<{ com
     </header>
 
     {mayManageBudget && <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <Metric icon={<ReceiptText size={16}/>} label="Open POs" value={String(data.financials.openPurchaseOrderCount)} detail="Current authorisations" />
-      <Metric icon={<Landmark size={16}/>} label="Committed cost" value={money(data.financials.committedCost, company.currency)} detail="Vendor commitments" />
+      <Metric icon={<Landmark size={16}/>} label="Budget exposure" value={money(data.budgetExposure, company.currency)} detail="Recorded episode costs" />
       <Metric icon={<ReceiptText size={16}/>} label={isVendor ? "Vendor invoiced" : "Client invoiced"} value={money(data.financials.invoicedAmount, company.currency)} detail={isVendor ? "Supplier invoice register" : "Client billables"} />
-      <Metric icon={<Landmark size={16}/>} label="Remaining authorised" value={money(data.financials.remainingAuthorisedSpend, company.currency)} detail="Open PO balance" warning={data.financials.remainingAuthorisedSpend < 0} />
+      <Metric icon={<Landmark size={16}/>} label="Account currency" value={company.currency} detail="Commercial reporting currency" />
     </section>}
 
     <section className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(300px,0.9fr)]">
@@ -56,10 +55,7 @@ export default async function CrmAccountPage({ params }: { params: Promise<{ com
       <ShowList title="Past shows" shows={data.pastShows} empty="No completed or archived shows for this account." muted />
     </section>
 
-    <section className="grid gap-4 xl:grid-cols-2">
-      <Panel title="Purchase orders" icon={<Landmark size={16}/> }>
-        <div className="divide-y divide-[#efeeea]">{data.purchaseOrders.map((purchaseOrder) => <Link key={purchaseOrder.id} href={`/crm/purchase-orders/${purchaseOrder.id}`} className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-[#fafbf9]"><div className="min-w-0"><p className="text-sm font-medium text-[#3d4642]">{purchaseOrder.poNumber}</p><p className="mt-1 truncate text-xs text-[#7d837f]">{purchaseOrder.showTitle ?? "Unallocated"} · {purchaseOrder.kind.replaceAll("_", " ")}</p></div><p className="shrink-0 text-right text-xs text-[#68716d]">{money(Number(purchaseOrder.amount ?? 0) - Number(purchaseOrder.consumedAmount ?? 0), purchaseOrder.currency)}<span className="mt-1 block text-[#929793]">remaining</span></p></Link>)}{!data.purchaseOrders.length && <Empty message="No purchase orders for this account." />}</div>
-      </Panel>
+    <section>
       <Panel title="Internal account notes" icon={<FileText size={16}/> }>
         <div className="px-5 py-4"><p className="whitespace-pre-wrap text-sm leading-6 text-[#56615c]">{company.notes ?? "No internal account notes yet."}</p></div>
       </Panel>

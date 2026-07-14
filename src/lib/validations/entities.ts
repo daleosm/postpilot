@@ -279,7 +279,6 @@ export const createPostWorkOrderSchema = z.object({
   workflowStageId: nullableId,
   bookingId: nullableId,
   vendorCompanyId: nullableId,
-  purchaseOrderId: nullableId,
   kind: z.enum(["work_order", "qc_exception"]).default("work_order"),
   title: z.string().trim().min(2, "A work-order title is required.").max(160),
   description: z.string().trim().max(4000).nullable().optional(),
@@ -290,7 +289,9 @@ export const createPostWorkOrderSchema = z.object({
   isBlocking: z.boolean().optional(),
   billingScope: z.enum(workOrderBillingScopes).default("included"),
   estimatedAmount: money.nullable().optional(),
+  clientQuoteAmount: money.nullable().optional(),
   currency: z.string().trim().length(3).toUpperCase().default("USD"),
+  clientQuoteCurrency: z.string().trim().length(3).toUpperCase().nullable().optional(),
   billingNotes: z.string().trim().max(2000).nullable().optional(),
   externalUrl: z.string().url().max(2000).nullable().optional(),
   dueAt: optionalTimestamp.nullable(),
@@ -307,12 +308,13 @@ export const updatePostWorkOrderSchema = z.object({
   assigneePersonId: nullableId,
   assigneeRole: z.string().trim().max(80).nullable().optional(),
   vendorCompanyId: nullableId,
-  purchaseOrderId: nullableId,
   priority: z.enum(workOrderPriorities).optional(),
   isBlocking: z.boolean().optional(),
   billingScope: z.enum(workOrderBillingScopes).optional(),
   estimatedAmount: money.nullable().optional(),
+  clientQuoteAmount: money.nullable().optional(),
   currency: z.string().trim().length(3).toUpperCase().optional(),
+  clientQuoteCurrency: z.string().trim().length(3).toUpperCase().nullable().optional(),
   billingNotes: z.string().trim().max(2000).nullable().optional(),
   externalUrl: z.string().url().max(2000).nullable().optional(),
   dueAt: optionalTimestamp.nullable(),
@@ -322,7 +324,6 @@ export const postWorkOrderChargeSchema = z.object({
   actualAmount: money.positive("Enter the approved client charge."),
   category: z.string().trim().min(2).max(120).optional(),
   reference: z.string().trim().max(120).nullable().optional(),
-  purchaseOrderId: nullableId,
 });
 
 export const insertBudgetLineSchema = z.object({
@@ -343,7 +344,7 @@ export const updateBudgetLineSchema = insertBudgetLineSchema.omit({ organization
 
 // Costs are tracked at episode level. The broader insert schema remains useful for
 // importing historical data, while the product-facing create route uses this one.
-export const createEpisodeBudgetLineSchema = insertBudgetLineSchema.omit({ organizationId: true }).extend({
+export const createEpisodeBudgetLineSchema = insertBudgetLineSchema.omit({ organizationId: true, purchaseOrderId: true }).extend({
   episodeId: id,
 });
 
@@ -385,7 +386,6 @@ export const updateBillableSchema = insertBillableSchema.omit({ organizationId: 
 
 export const insertVendorInvoiceSchema = z.object({
   vendorCompanyId: id,
-  purchaseOrderId: nullableId,
   workOrderId: nullableId,
   episodeId: id,
   invoiceNumber: z.string().trim().min(1).max(120),
