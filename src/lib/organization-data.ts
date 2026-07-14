@@ -7,6 +7,7 @@ export type OrganizationMembership = {
   organizationId: string;
   organizationName: string;
   organizationSlug: string;
+  currency: string;
   role: "owner" | "admin" | "member" | "guest";
 };
 
@@ -18,6 +19,7 @@ export async function getOrganizationMembershipsForUser(userId: string): Promise
       organizationId: organizations.id,
       organizationName: organizations.name,
       organizationSlug: organizations.slug,
+      currency: organizations.currency,
       role: organizationMembers.role,
     })
     .from(organizationMembers)

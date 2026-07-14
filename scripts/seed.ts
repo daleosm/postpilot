@@ -342,7 +342,7 @@ async function seedTenant(tenant: TenantSeed) {
   const primaryNetwork = tenant.networks[0] ?? "Distribution";
   const secondaryNetwork = tenant.networks[1] ?? primaryNetwork;
 
-  await db.insert(organizations).values({ id: tenant.id, name: tenant.name, slug: tenant.slug });
+  await db.insert(organizations).values({ id: tenant.id, name: tenant.name, slug: tenant.slug, currency: tenant.budgetProfile.currency });
   await db.insert(users).values(tenantPeople.map((person) => ({ id: person.userId, name: person.name, email: person.email }))).onConflictDoUpdate({ target: users.id, set: { name: sql`excluded.name`, email: sql`excluded.email` } });
   await db.insert(organizationMembers).values(tenantPeople.map((person) => ({ organizationId: tenant.id, userId: person.userId, role: person.membershipRole })));
   await db.insert(people).values(tenantPeople.map((person, index) => ({

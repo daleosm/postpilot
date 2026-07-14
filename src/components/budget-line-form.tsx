@@ -19,7 +19,7 @@ const schema = z.object({
 });
 type Values = z.infer<typeof schema>;
 
-export function BudgetLineForm({ episodes }: { episodes: Array<{ id: string; label: string }> }) {
+export function BudgetLineForm({ episodes, currency }: { episodes: Array<{ id: string; label: string }>; currency: string }) {
   const [open, setOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const router = useRouter();
@@ -28,7 +28,7 @@ export function BudgetLineForm({ episodes }: { episodes: Array<{ id: string; lab
   async function submit(values: Values) {
     setSubmitError(null);
     try {
-      const response = await fetch("/api/budget-lines", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...values, currency: "USD" }) });
+      const response = await fetch("/api/budget-lines", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
         setSubmitError(body?.error ?? "Unable to save this budget line.");
@@ -51,7 +51,7 @@ export function BudgetLineForm({ episodes }: { episodes: Array<{ id: string; lab
           <Field label="Episode" error={form.formState.errors.episodeId?.message}><select {...form.register("episodeId")} className="control"><option value="">Select episode</option>{episodes.map((episode) => <option key={episode.id} value={episode.id}>{episode.label}</option>)}</select></Field>
           <div className="grid gap-4 sm:grid-cols-2"><Field label="Category" error={form.formState.errors.category?.message}><select {...form.register("category")} className="control">{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></Field><Field label="Cost type" error={form.formState.errors.costType?.message}><select {...form.register("costType")} className="control"><option value="internal">Internal</option><option value="billable">Billable</option></select></Field></div>
           <Field label="Description" error={form.formState.errors.description?.message}><input {...form.register("description")} placeholder="e.g. Final mix and audio stems" className="control" /></Field>
-          <div className="grid gap-4 sm:grid-cols-2"><Field label="Estimated cost (USD)" error={form.formState.errors.budgetedAmount?.message}><input type="number" min="0" step="0.01" inputMode="decimal" {...form.register("budgetedAmount")} className="control" /></Field><Field label="Actual cost (USD)" error={form.formState.errors.actualAmount?.message}><input type="number" min="0" step="0.01" inputMode="decimal" {...form.register("actualAmount")} className="control" /></Field></div>
+          <div className="grid gap-4 sm:grid-cols-2"><Field label={`Estimated cost (${currency})`} error={form.formState.errors.budgetedAmount?.message}><input type="number" min="0" step="0.01" inputMode="decimal" {...form.register("budgetedAmount")} className="control" /></Field><Field label={`Actual cost (${currency})`} error={form.formState.errors.actualAmount?.message}><input type="number" min="0" step="0.01" inputMode="decimal" {...form.register("actualAmount")} className="control" /></Field></div>
         </div>
         {submitError && <p role="alert" className="mt-4 rounded-lg bg-[#f9e7df] px-3 py-2 text-sm text-[#9f563c]">{submitError}</p>}
         <div className="mt-6 flex justify-end gap-2"><Button type="button" variant="tertiary" onPress={() => setOpen(false)}>Cancel</Button><Button type="submit" variant="primary" isDisabled={form.formState.isSubmitting} className="bg-[#263130] text-white">{form.formState.isSubmitting ? "Saving…" : "Save line"}</Button></div>

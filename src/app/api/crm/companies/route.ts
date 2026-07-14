@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
-    const [company] = await getDb().insert(crmCompanies).values({ ...parsed.data, organizationId: context.organization.organizationId }).returning({ id: crmCompanies.id });
+    const [company] = await getDb().insert(crmCompanies).values({ ...parsed.data, organizationId: context.organization.organizationId, currency: context.organization.currency }).returning({ id: crmCompanies.id });
     await writeAuditEvent({ organizationId: context.organization.organizationId, actorUserId: context.userId, action: "crm_company.created", entityType: "crm_company", entityId: company.id, metadata: { name: parsed.data.name, type: parsed.data.type } });
     return NextResponse.json(company, { status: 201 });
   } catch {

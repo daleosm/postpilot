@@ -82,6 +82,8 @@ export const organizations = pgTable("organizations", {
   name: text("name").notNull(),
   slug: text("slug").notNull(),
   logoUrl: text("logo_url"),
+  /** All commercial records in a post house use this reporting currency. */
+  currency: text("currency").default("GBP").notNull(),
   ...auditColumns,
 }, (table) => [uniqueIndex("organizations_slug_idx").on(table.slug)]);
 

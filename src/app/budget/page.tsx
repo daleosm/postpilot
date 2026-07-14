@@ -95,7 +95,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
         <h1 className="mt-2 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Budget</h1>
         <p className="mt-1 text-sm text-[#747977]">Episode-level costs with show roll-ups for post-production control.</p>
       </div>
-      <div className="flex gap-2"><Link href={`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`} className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">All episodes</Link><BudgetLineForm episodes={episodes} /></div>
+      <div className="flex gap-2"><Link href={`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`} className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">All episodes</Link><BudgetLineForm episodes={episodes} currency={currency} /></div>
     </header>
 
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">

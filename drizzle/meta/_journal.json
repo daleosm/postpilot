@@ -393,6 +393,13 @@
       "when": 1783987200030,
       "tag": "0055_remove_purchase_order_clearance",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1783987200031,
+      "tag": "0056_organization_currency",
+      "breakpoints": true
     }
   ]
 }

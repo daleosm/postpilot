@@ -113,7 +113,7 @@ test.describe("Post work orders", () => {
     expect(duplicate.status()).toBe(409);
   });
 
-  test("stores vendor estimates separately from client billable quotes", async ({ page }) => {
+  test("stores vendor estimates and client billable quotes separately in the post-house currency", async ({ page }) => {
     const switchUser = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
     expect(switchUser.status()).toBe(200);
     await activateLab(page);
@@ -124,7 +124,7 @@ test.describe("Post work orders", () => {
     expect(create.status()).toBe(201);
     const workOrderId = (await create.json()).id as string;
     const [workOrder] = await sql`select estimated_amount, currency, client_quote_amount, client_quote_currency from post_work_orders where id = ${workOrderId}`;
-    expect(workOrder).toMatchObject({ estimated_amount: "450.00", currency: "GBP", client_quote_amount: "900.00", client_quote_currency: "USD" });
+    expect(workOrder).toMatchObject({ estimated_amount: "450.00", currency: "GBP", client_quote_amount: "900.00", client_quote_currency: "GBP" });
   });
 
   test("keeps commercial fields out of an operational work-order manager's authority", async ({ page }) => {

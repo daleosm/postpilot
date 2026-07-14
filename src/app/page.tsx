@@ -32,8 +32,8 @@ function formatDate(value: Date | string | null) {
   return new Intl.DateTimeFormat("en-GB", { month: "short", day: "numeric" }).format(new Date(value));
 }
 
-function formatMoney(value: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+function formatMoney(value: number, currency: string) {
+  return new Intl.NumberFormat("en-GB", { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
 }
 
 export default async function DashboardPage() {
@@ -69,6 +69,7 @@ export default async function DashboardPage() {
   weekStart.setHours(0, 0, 0, 0);
 
   const { dashboard, showRows, schedule, budget, team, organizationName, isDemo } = screen;
+  const currency = organizationContext?.organization?.currency ?? "GBP";
 
   const activeShows = showRows.filter((show) => show.seasons.some((season) => season.activeEpisodeCount > 0));
   const dueThisWeek = dashboard.episodes.filter((episode) => episode.deliveryDeadline && episode.deliveryDeadline >= weekStart && episode.deliveryDeadline <= endOfWeek);
@@ -100,7 +101,7 @@ export default async function DashboardPage() {
         <Metric href="/episodes" label="Episodes due" value={String(dueThisWeek.length)} detail="Next 7 days" icon={<Clock3 size={15} />} alert={dueThisWeek.length > 0} />
         <Metric href="/review" label="Locks awaiting approval" value={String(lockedCuts.length)} detail="Picture lock stage" icon={<CheckCircle2 size={15} />} />
         <Metric href="/episodes" label="QC failures" value={String(qcFailures.length)} detail="Need attention" icon={<CircleAlert size={15} />} alert={qcFailures.length > 0} />
-        <Metric href="/budget" label="Budget burn" value={`${budgetBurn}%`} detail={`${formatMoney(budget.totals.actual)} actual`} icon={<DollarSign size={15} />} alert={budgetBurn > 90} />
+        <Metric href="/budget" label="Budget burn" value={`${budgetBurn}%`} detail={`${formatMoney(budget.totals.actual, currency)} actual`} icon={<DollarSign size={15} />} alert={budgetBurn > 90} />
       </section>
 
       <section>
@@ -148,7 +149,7 @@ export default async function DashboardPage() {
           <div className="flex items-start justify-between"><div><h2 className="text-sm font-semibold text-[#303534]">Budget health</h2><p className="mt-0.5 text-xs text-[#838886]">Current estimate vs actual</p></div><DollarSign size={17} className="text-[#76807d]" /></div>
           <div className="mt-6 flex items-end gap-3"><p className="text-3xl font-semibold tracking-[-0.05em] text-[#2f3533]">{budgetBurn}%</p><p className="pb-1 text-xs text-[#777e7b]">burned</p></div>
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#ecebe7]"><div className={`h-full rounded-full ${budgetBurn > 90 ? "bg-[#bd7650]" : "bg-[#64847e]"}`} style={{ width: `${Math.min(100, budgetBurn)}%` }} /></div>
-          <dl className="mt-5 space-y-2.5 text-xs"><div className="flex justify-between"><dt className="text-[#7d827f]">Estimate</dt><dd className="font-medium text-[#464d4a]">{formatMoney(budget.totals.budgeted)}</dd></div><div className="flex justify-between"><dt className="text-[#7d827f]">Actual</dt><dd className="font-medium text-[#464d4a]">{formatMoney(budget.totals.actual)}</dd></div><div className="flex justify-between border-t border-[#ecebe7] pt-2.5"><dt className="text-[#7d827f]">Variance</dt><dd className={`font-semibold ${budget.totals.actual > budget.totals.budgeted ? "text-[#ac633f]" : "text-[#4d8068]"}`}>{formatMoney(budget.totals.actual - budget.totals.budgeted)}</dd></div></dl>
+          <dl className="mt-5 space-y-2.5 text-xs"><div className="flex justify-between"><dt className="text-[#7d827f]">Estimate</dt><dd className="font-medium text-[#464d4a]">{formatMoney(budget.totals.budgeted, currency)}</dd></div><div className="flex justify-between"><dt className="text-[#7d827f]">Actual</dt><dd className="font-medium text-[#464d4a]">{formatMoney(budget.totals.actual, currency)}</dd></div><div className="flex justify-between border-t border-[#ecebe7] pt-2.5"><dt className="text-[#7d827f]">Variance</dt><dd className={`font-semibold ${budget.totals.actual > budget.totals.budgeted ? "text-[#ac633f]" : "text-[#4d8068]"}`}>{formatMoney(budget.totals.actual - budget.totals.budgeted, currency)}</dd></div></dl>
           <Link href="/budget" className="mt-5 flex items-center gap-1 text-xs font-medium text-[#526d69] hover:text-[#314a45]">Open budget <ArrowRight size={13} /></Link>
         </div>
       </section>

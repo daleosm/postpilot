@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
-    const [rate] = await getDb().insert(serviceRates).values({ ...parsed.data, organizationId: context.organization.organizationId, rate: String(parsed.data.rate) }).returning({ id: serviceRates.id });
+    const [rate] = await getDb().insert(serviceRates).values({ ...parsed.data, organizationId: context.organization.organizationId, currency: context.organization.currency, rate: String(parsed.data.rate) }).returning({ id: serviceRates.id });
     return NextResponse.json(rate, { status: 201 });
   } catch {
     return NextResponse.json({ error: "A service with that name already exists in this post house." }, { status: 409 });

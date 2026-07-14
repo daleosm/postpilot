@@ -73,7 +73,6 @@ export const insertCrmCompanySchema = z.object({
   address: z.string().trim().max(1000).nullable().optional(),
   serviceCategory: z.string().trim().max(160).nullable().optional(),
   paymentTermsDays: z.coerce.number().int().min(0).max(365).nullable().optional(),
-  currency: z.string().trim().length(3).transform((value) => value.toUpperCase()),
   financeEmail: z.string().email().max(320).nullable().optional(),
   accountStatus: z.enum(["active", "on_hold", "inactive"]).default("active"),
   bookingClearance: z.enum(["clear", "authorisation_required", "finance_approval", "on_hold"]).default("clear"),
@@ -244,7 +243,6 @@ export const updateCateringRequestSchema = z.object({
   status: z.enum(["requested", "acknowledged", "preparing", "delivered", "cancelled"]),
   runnerNote: z.string().trim().max(1000).nullable().optional(),
   actualCost: money.nullable().optional(),
-  currency: z.string().trim().length(3).transform((value) => value.toUpperCase()).optional(),
   receiptReference: z.string().trim().max(120).nullable().optional(),
 });
 
@@ -290,8 +288,6 @@ export const createPostWorkOrderSchema = z.object({
   billingScope: z.enum(workOrderBillingScopes).default("included"),
   estimatedAmount: money.nullable().optional(),
   clientQuoteAmount: money.nullable().optional(),
-  currency: z.string().trim().length(3).toUpperCase().default("USD"),
-  clientQuoteCurrency: z.string().trim().length(3).toUpperCase().nullable().optional(),
   billingNotes: z.string().trim().max(2000).nullable().optional(),
   externalUrl: z.string().url().max(2000).nullable().optional(),
   dueAt: optionalTimestamp.nullable(),
@@ -313,8 +309,6 @@ export const updatePostWorkOrderSchema = z.object({
   billingScope: z.enum(workOrderBillingScopes).optional(),
   estimatedAmount: money.nullable().optional(),
   clientQuoteAmount: money.nullable().optional(),
-  currency: z.string().trim().length(3).toUpperCase().optional(),
-  clientQuoteCurrency: z.string().trim().length(3).toUpperCase().nullable().optional(),
   billingNotes: z.string().trim().max(2000).nullable().optional(),
   externalUrl: z.string().url().max(2000).nullable().optional(),
   dueAt: optionalTimestamp.nullable(),
@@ -336,7 +330,6 @@ export const insertBudgetLineSchema = z.object({
   description: z.string().trim().max(2000).nullable().optional(),
   budgetedAmount: money.default(0),
   actualAmount: money.default(0),
-  currency: z.string().trim().length(3).toUpperCase().default("USD"),
   costType: z.enum(["billable", "internal"]).default("internal"),
 });
 export const updateBudgetLineSchema = insertBudgetLineSchema.omit({ organizationId: true }).partial();
@@ -353,7 +346,6 @@ export const insertServiceRateSchema = z.object({
   category: z.string().trim().min(1).max(120),
   unit: z.enum(["hour", "day", "episode", "fixed"]),
   rate: money.positive(),
-  currency: z.string().trim().length(3).toUpperCase().default("USD"),
   notes: z.string().trim().max(2000).nullable().optional(),
   isActive: z.boolean().default(true),
 });
@@ -375,7 +367,6 @@ export const insertBillableSchema = z.object({
   reference: z.string().trim().max(120).nullable().optional(),
   description: z.string().trim().max(2000).nullable().optional(),
   amount: money,
-  currency: z.string().trim().length(3).toUpperCase().default("USD"),
   status: z.enum(["draft", "approved", "invoiced", "paid", "void"]).default("draft"),
   invoiceDate: optionalDate.nullable(),
   dueDate: optionalDate.nullable(),
@@ -389,7 +380,6 @@ export const insertVendorInvoiceSchema = z.object({
   invoiceNumber: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000).nullable().optional(),
   amount: money.positive(),
-  currency: z.string().trim().length(3).toUpperCase().default("GBP"),
   status: z.enum(["received", "approved", "paid", "disputed", "void"]).default("received"),
   invoiceDate: optionalDate.nullable(),
   dueDate: optionalDate.nullable(),

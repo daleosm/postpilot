@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   const payload = await request.json();
   const parsed = createPostWorkOrderSchema.safeParse(payload);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Check the work-order details." }, { status: 400 });
-  if (!(await can("manage_budget")) && (parsed.data.billingScope !== "included" || ["estimatedAmount", "currency", "clientQuoteAmount", "clientQuoteCurrency", "billingNotes"].some((field) => field in payload))) return NextResponse.json({ error: "Only users with the Budget permission can set commercial values." }, { status: 403 });
+  if (!(await can("manage_budget")) && (parsed.data.billingScope !== "included" || ["estimatedAmount", "clientQuoteAmount", "billingNotes"].some((field) => field in payload))) return NextResponse.json({ error: "Only users with the Budget permission can set commercial values." }, { status: 403 });
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const organizationId = context.organization.organizationId;
@@ -29,6 +29,8 @@ export async function POST(request: Request) {
     estimatedAmount: estimatedAmount === undefined || estimatedAmount === null ? estimatedAmount : String(estimatedAmount),
     clientQuoteAmount: clientQuoteAmount === undefined || clientQuoteAmount === null ? clientQuoteAmount : String(clientQuoteAmount),
     organizationId,
+    currency: context.organization.currency,
+    clientQuoteCurrency: context.organization.currency,
     billingStatus: parsed.data.billingScope === "billable_change" ? "draft" : "not_billable",
     createdByUserId: context.userId,
   }).returning({ id: postWorkOrders.id });

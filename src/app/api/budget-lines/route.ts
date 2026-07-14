@@ -30,6 +30,7 @@ export async function POST(request: Request) {
     seasonId: episode.seasonId,
     budgetedAmount: String(parsed.data.budgetedAmount),
     actualAmount: String(parsed.data.actualAmount),
+    currency: context.organization.currency,
   }).returning({ id: budgetLines.id });
   return NextResponse.json(line, { status: 201 });
 }
