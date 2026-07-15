@@ -39,10 +39,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ epi
     db.select({ id: people.id, role: people.role }).from(people).where(and(eq(people.id, parsed.data.personId), eq(people.organizationId, org))).limit(1),
   ]);
   if (!episode[0] || !person[0]) return NextResponse.json({ error: "Episode or person not found." }, { status: 404 });
-  const sameRoleAssignments = await db.select({ id: episodeTeamAssignments.id }).from(episodeTeamAssignments)
-    .innerJoin(people, eq(episodeTeamAssignments.personId, people.id))
-    .where(and(eq(episodeTeamAssignments.organizationId, org), eq(episodeTeamAssignments.episodeId, episodeId), eq(people.organizationId, org), eq(people.role, person[0].role)));
-  const [assignment] = await db.insert(episodeTeamAssignments).values({ ...parsed.data, responsibility: person[0].role, isLead: sameRoleAssignments.length === 0, organizationId: org, episodeId }).onConflictDoNothing().returning({ id: episodeTeamAssignments.id });
+  const [assignment] = await db.insert(episodeTeamAssignments).values({ ...parsed.data, responsibility: person[0].role, isLead: false, organizationId: org, episodeId }).onConflictDoNothing().returning({ id: episodeTeamAssignments.id });
   return NextResponse.json(assignment ?? { duplicate: true }, { status: assignment ? 201 : 200 });
 }
 
@@ -75,12 +72,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ e
   const { episodeId } = await params;
   const org = context.organization.organizationId;
   const db = getDb();
-  const [removed] = await db.select({ id: episodeTeamAssignments.id, role: people.role, isSigner: episodeTeamAssignments.isLead }).from(episodeTeamAssignments).innerJoin(people, eq(episodeTeamAssignments.personId, people.id)).where(and(eq(episodeTeamAssignments.id, id), eq(episodeTeamAssignments.episodeId, episodeId), eq(episodeTeamAssignments.organizationId, org), eq(people.organizationId, org))).limit(1);
+  const [removed] = await db.select({ id: episodeTeamAssignments.id }).from(episodeTeamAssignments).innerJoin(people, eq(episodeTeamAssignments.personId, people.id)).where(and(eq(episodeTeamAssignments.id, id), eq(episodeTeamAssignments.episodeId, episodeId), eq(episodeTeamAssignments.organizationId, org), eq(people.organizationId, org))).limit(1);
   if (!removed) return NextResponse.json({ error: "Assignment not found." }, { status: 404 });
   await db.delete(episodeTeamAssignments).where(and(eq(episodeTeamAssignments.id, id), eq(episodeTeamAssignments.episodeId, episodeId), eq(episodeTeamAssignments.organizationId, org)));
-  if (removed.isSigner) {
-    const remaining = await db.select({ id: episodeTeamAssignments.id }).from(episodeTeamAssignments).innerJoin(people, eq(episodeTeamAssignments.personId, people.id)).where(and(eq(episodeTeamAssignments.organizationId, org), eq(episodeTeamAssignments.episodeId, episodeId), eq(people.organizationId, org), eq(people.role, removed.role)));
-    if (remaining.length === 1) await db.update(episodeTeamAssignments).set({ isLead: true, updatedAt: new Date() }).where(and(eq(episodeTeamAssignments.organizationId, org), eq(episodeTeamAssignments.id, remaining[0].id)));
-  }
   return NextResponse.json({ ok: true });
 }
