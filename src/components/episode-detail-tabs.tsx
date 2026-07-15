@@ -219,11 +219,9 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tr
   const currentCanAdvance = !currentRules.some((rule) => rule.isRequired) || currentStatus === "approved";
   const isActiveTrack = (stageId: string) => trackState.some((track) => track.workflowStageId === stageId && ["in_progress", "submitted", "blocked"].includes(track.status));
   const signerForRule = (rule: WorkflowApprovalRule) => {
-    const recorded = approvalState.find((approval) => approval.approvalRuleId === rule.id)?.requiredPersonId;
-    if (recorded) return episodeTeam.find((person) => person.personId === recorded) ?? null;
     const candidates = episodeTeam.filter((person) => person.role === rule.approverRole);
     const selected = candidates.filter((person) => person.isLead);
-    return candidates.length === 1 ? candidates[0] : selected.length === 1 ? selected[0] : null;
+    return selected.length === 1 ? selected[0] : null;
   };
   const nextPendingRule = [...currentRules].sort((left, right) => left.approvalOrder - right.approvalOrder).find((rule) => rule.isRequired && !approvalState.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"));
   const nextSigner = nextPendingRule ? signerForRule(nextPendingRule) : null;

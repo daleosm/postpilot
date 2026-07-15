@@ -31,16 +31,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ep
     db.select({ id: workflowStages.id, name: workflowStages.name, key: workflowStages.key, position: workflowStages.position, canStartEarly: workflowStages.canStartEarly }).from(workflowStages).innerJoin(postWorkflows, eq(workflowStages.workflowId, postWorkflows.id)).where(and(eq(workflowStages.id, parsed.data.workflowStageId), eq(workflowStages.organizationId, organizationId), eq(postWorkflows.organizationId, organizationId))).limit(1),
   ]);
   if (!episode || !stage) return NextResponse.json({ error: "Episode or workflow stage not found." }, { status: 404 });
-  const [targetRules, targetApprovals] = await Promise.all([
-    db.select({ id: workflowStageApprovalRules.id, approverRole: workflowStageApprovalRules.approverRole, isRequired: workflowStageApprovalRules.isRequired })
-      .from(workflowStageApprovalRules)
-      .where(and(eq(workflowStageApprovalRules.organizationId, organizationId), eq(workflowStageApprovalRules.workflowStageId, stage.id))),
-    db.select({ approvalRuleId: episodeWorkflowApprovals.approvalRuleId, requiredPersonId: episodeWorkflowApprovals.requiredPersonId })
-      .from(episodeWorkflowApprovals)
-      .where(and(eq(episodeWorkflowApprovals.organizationId, organizationId), eq(episodeWorkflowApprovals.episodeId, episode.id), eq(episodeWorkflowApprovals.workflowStageId, stage.id))),
-  ]);
-  const rulesNeedingSigner = targetRules.filter((rule) => rule.isRequired && !targetApprovals.some((approval) => approval.approvalRuleId === rule.id && approval.requiredPersonId));
-  const targetSigners = await resolveEpisodeWorkflowSigners(organizationId, episode.id, rulesNeedingSigner);
+  const targetRules = await db.select({ id: workflowStageApprovalRules.id, approverRole: workflowStageApprovalRules.approverRole, isRequired: workflowStageApprovalRules.isRequired })
+    .from(workflowStageApprovalRules)
+    .where(and(eq(workflowStageApprovalRules.organizationId, organizationId), eq(workflowStageApprovalRules.workflowStageId, stage.id)));
+  const targetSigners = await resolveEpisodeWorkflowSigners(organizationId, episode.id, targetRules.filter((rule) => rule.isRequired));
   const unresolvedRule = targetSigners.find((route) => !route.signer);
   if (unresolvedRule) return NextResponse.json({ error: `Choose the episode workflow signer for ${unresolvedRule.approverRole.replaceAll("_", " ")} before moving to this stage.` }, { status: 409 });
   let startedEarly = false;
@@ -114,8 +108,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ epi
   if (!candidate) return NextResponse.json({ error: "Every configured sign-off has already been recorded for this stage." }, { status: 409 });
   if (rules.some((rule) => rule.isRequired && rule.approvalOrder < candidate.approvalOrder && !approvals.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"))) return NextResponse.json({ error: "Complete the earlier required sign-offs first." }, { status: 409 });
   const existingApproval = approvals.find((approval) => approval.approvalRuleId === candidate.id);
-  const fallbackSigner = existingApproval?.requiredPersonId ? null : (await resolveEpisodeWorkflowSigners(organizationId, episodeId, [candidate]))[0]?.signer;
-  const requiredPersonId = existingApproval?.requiredPersonId ?? fallbackSigner?.personId ?? null;
+  const configuredSigner = (await resolveEpisodeWorkflowSigners(organizationId, episodeId, [candidate]))[0]?.signer;
+  const requiredPersonId = configuredSigner?.personId ?? null;
   if (!requiredPersonId) return NextResponse.json({ error: "Choose the episode workflow signer before this stage can be signed off." }, { status: 409 });
   if (requiredPersonId !== person.id) return NextResponse.json({ error: "This sign-off is assigned to another episode-team member." }, { status: 403 });
   if (existingApproval) {

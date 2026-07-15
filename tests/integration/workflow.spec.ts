@@ -141,6 +141,25 @@ test.describe("Configurable workflow integration", () => {
     expect(assumedMaya.status()).toBe(200);
   });
 
+  test("requires an explicit workflow signer even when only one person has the role", async ({ page }) => {
+    await sql`delete from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    await sql`update episodes set workflow_stage_id = ${editorialStageId} where id = ${episodeId}`;
+    await sql`update episode_team_assignments set is_lead = false where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    const assumedMaya = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
+    expect(assumedMaya.status()).toBe(200);
+    await activateWorkflowLab(page);
+
+    const unsigned = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: editorialStageId, action: "sign_off" } });
+    expect(unsigned.status()).toBe(409);
+    await expect(unsigned.json()).resolves.toMatchObject({ error: "Choose the episode workflow signer before this stage can be signed off." });
+
+    await sql`update episode_team_assignments set is_lead = true where organization_id = ${organizationId} and episode_id = ${episodeId} and person_id = ${mayaPersonId}`;
+    const signed = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: editorialStageId, action: "sign_off" } });
+    expect(signed.status()).toBe(200);
+
+    await sql`delete from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+  });
+
   test("does not offer stage movement to a signer without episode-management permission", async ({ page }) => {
     await sql`delete from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId}`;
     await sql`delete from episode_workflow_tracks where organization_id = ${organizationId} and episode_id = ${episodeId}`;
