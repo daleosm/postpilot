@@ -1,16 +1,16 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, notInArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { episodes, people, postWorkOrders, qcReports, seasons, shows } from "@/lib/db/schema";
+import { episodes, people, postWorkOrders, qcIssues, qcReports, seasons, shows } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { insertQcReportSchema } from "@/lib/validations/entities";
 
 export async function POST(request: Request) {
-  if (!(await can("manage_qc")) && !(await can("manage_reviews")) && !(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await can("manage_qc"))) return NextResponse.json({ error: "Your role needs the Record QC reports permission." }, { status: 403 });
   const parsed = insertQcReportSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: "Check the QC report details and waiver reason." }, { status: 400 });
   if (isDebugDemoMode) return NextResponse.json({ id: "demo-qc-report", debug: true, status: parsed.data.status }, { status: 201 });
@@ -23,6 +23,14 @@ export async function POST(request: Request) {
   const [actor] = await db.select({ id: people.id, role: people.role }).from(people)
     .where(and(eq(people.organizationId, context.organization.organizationId), eq(people.userId, context.userId))).limit(1);
   if (parsed.data.status === "waived" && !(await can("waive_qc"))) return NextResponse.json({ error: "Your role needs the QC waiver permission." }, { status: 403 });
+  if (parsed.data.status === "passed" && !(await can("verify_qc"))) return NextResponse.json({ error: "Your role needs the QC verification permission to record a passed result." }, { status: 403 });
+  if (parsed.data.status === "passed") {
+    const [openIssues, openExceptions] = await Promise.all([
+      db.select({ id: qcIssues.id }).from(qcIssues).innerJoin(qcReports, eq(qcIssues.qcReportId, qcReports.id)).where(and(eq(qcIssues.organizationId, context.organization.organizationId), eq(qcReports.organizationId, context.organization.organizationId), eq(qcReports.episodeId, episode.id), eq(qcIssues.status, "open"))).limit(1),
+      db.select({ id: postWorkOrders.id }).from(postWorkOrders).where(and(eq(postWorkOrders.organizationId, context.organization.organizationId), eq(postWorkOrders.episodeId, episode.id), eq(postWorkOrders.kind, "qc_exception"), notInArray(postWorkOrders.status, ["complete", "cancelled"]))).limit(1),
+    ]);
+    if (openIssues.length || openExceptions.length) return NextResponse.json({ error: "Resolve or waive every open QC issue and correction work order before recording a passed re-QC result." }, { status: 409 });
+  }
   const qcStatus = parsed.data.status === "passed" ? "passed" : parsed.data.status === "waived" ? "waived" : parsed.data.status === "failed" ? "needs_attention" : "in_progress";
   const [report] = await db.insert(qcReports).values({
     ...parsed.data,

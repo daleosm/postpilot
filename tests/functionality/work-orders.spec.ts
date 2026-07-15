@@ -43,6 +43,7 @@ test.describe("Post work orders", () => {
     await sql`insert into shows (id, organization_id, title, code, time_zone) values (${showId}, ${organizationId}, 'Work Order Lab Series', 'WOL', 'Europe/London')`;
     await sql`insert into seasons (id, organization_id, show_id, number) values (${seasonId}, ${organizationId}, ${showId}, 1)`;
     await sql`insert into episodes (id, organization_id, season_id, workflow_stage_id, number, title, status, qc_status) values (${episodeId}, ${organizationId}, ${seasonId}, ${stageId}, 1, 'Correction test', 'online', 'needs_attention')`;
+    await sql`insert into episode_team_assignments (organization_id, episode_id, person_id, responsibility, is_lead) values (${organizationId}, ${episodeId}, ${mayaPersonId}, 'post_supervisor', true)`;
   });
 
   test.afterAll(async () => {

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { people, postWorkOrders } from "@/lib/db/schema";
+import { people, postWorkOrders, qcIssues } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can, getTenantRolePolicies } from "@/lib/permissions";
 import { missingTenantReferences } from "@/lib/tenant-resources";
@@ -52,6 +52,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
   const { estimatedAmount, clientQuoteAmount, ...workOrderUpdate } = parsed.data;
   const completionChanged = status !== undefined;
   await db.update(postWorkOrders).set({ ...workOrderUpdate, estimatedAmount: estimatedAmount === undefined || estimatedAmount === null ? estimatedAmount : String(estimatedAmount), clientQuoteAmount: clientQuoteAmount === undefined || clientQuoteAmount === null ? clientQuoteAmount : String(clientQuoteAmount), billingStatus, assigneePersonId: qcHandOff ? null : parsed.data.assigneePersonId, assigneeRole: qcHandOff ? verificationRole : parsed.data.assigneeRole, completedByPersonId: completionChanged ? (isComplete ? person[0]?.id ?? null : null) : workOrder[0].completedByPersonId, completedAt: completionChanged ? (isComplete ? new Date() : null) : workOrder[0].completedAt, updatedAt: new Date() }).where(and(eq(postWorkOrders.id, workOrderId), eq(postWorkOrders.organizationId, organizationId)));
+  if (workOrder[0].kind === "qc_exception" && isComplete && workOrder[0].qcIssueId) await db.update(qcIssues).set({ status: "resolved", resolution: "Verified through linked QC correction work order.", resolvedAt: new Date(), updatedAt: new Date() }).where(and(eq(qcIssues.id, workOrder[0].qcIssueId), eq(qcIssues.organizationId, organizationId)));
   await writeAuditEvent({ organizationId, actorUserId: context.userId, action: isComplete ? "work_order.completed" : "work_order.updated", entityType: "post_work_order", entityId: workOrderId, metadata: { episodeId: workOrder[0].episodeId, status: status ?? workOrder[0].status, billingStatus } });
   return NextResponse.json({ ok: true });
 }
