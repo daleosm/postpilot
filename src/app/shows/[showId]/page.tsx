@@ -10,7 +10,8 @@ import { isDebugDemoMode } from "@/lib/runtime";
 import { getDemoCommandCenterData, getShowWorkspace } from "@/server/data";
 
 export default async function ShowDetailPage({ params }: { params: Promise<{ showId: string }> }) {
-  if (!(await can("manage_shows"))) notFound();
+  const [mayManageShows, organizationContext] = await Promise.all([can("manage_shows"), getActiveOrganizationContext()]);
+  if (!mayManageShows || organizationContext?.organization?.role === "guest") notFound();
   const { showId } = await params;
   const data = await getShowDetail(showId);
   if (!data) notFound();

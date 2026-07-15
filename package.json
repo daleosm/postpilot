@@ -15,6 +15,7 @@
     "test:shows-isolation": "playwright test tests/integration/tenant-isolation/shows.spec.ts",
     "test:episodes": "playwright test tests/ui/episodes.spec.ts",
     "test:episodes-isolation": "playwright test tests/integration/tenant-isolation/episodes.spec.ts",
+    "test:guest-episodes": "playwright test tests/integration/guest-episode-access.spec.ts",
     "test:bookings": "playwright test tests/ui/bookings.spec.ts",
     "test:bookings-isolation": "playwright test tests/integration/tenant-isolation/bookings.spec.ts",
     "test:approvals": "playwright test tests/ui/approvals.spec.ts",

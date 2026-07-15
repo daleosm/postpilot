@@ -7,11 +7,12 @@ import { getDemoCommandCenterData, listEpisodes, listShows, listTeam } from "@/s
 import { redirect } from "next/navigation";
 
 export default async function EpisodesPage() {
-  const [mayManageShows, mayViewAssigned] = await Promise.all([can("manage_shows"), can("view_assigned")]);
+  const [mayManageShows, mayViewAssigned, organizationContext] = await Promise.all([can("manage_shows"), can("view_assigned"), getActiveOrganizationContext()]);
   if (!(mayManageShows || mayViewAssigned)) redirect(await roleHome());
   const activeShow = await getActiveShowName();
-  const data = await getEpisodesData(); const visibleEpisodes = mayManageShows ? data.episodes : (await Promise.all(data.episodes.map(async (episode) => (await isAssignedToEpisode(episode.id)) ? episode : null))).filter((episode): episode is EpisodeTableRow => Boolean(episode)); const episodes = visibleEpisodes.filter((episode) => !activeShow || episode.showTitle === activeShow); const seasons = activeShow ? data.seasons.filter((season) => season.label.startsWith(`${activeShow} ·`)) : data.seasons;
-  return <div className="space-y-5"><header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-xs font-medium uppercase tracking-[0.12em] text-[#7c827f]">Editorial pipeline</p><h1 className="mt-2 text-[27px] font-semibold tracking-[-0.045em] text-[#202524]">Episodes</h1><p className="mt-1 text-sm text-[#747977]">Track assignment, workflow, lock, delivery, and QC at episode level.</p></div>{mayManageShows && <EpisodeFormDialog seasons={seasons} people={data.people} />}</header><EpisodesTable episodes={episodes} /></div>;
+  const canSeeAllEpisodes = mayManageShows && organizationContext?.organization?.role !== "guest";
+  const data = await getEpisodesData(); const visibleEpisodes = canSeeAllEpisodes ? data.episodes : (await Promise.all(data.episodes.map(async (episode) => (await isAssignedToEpisode(episode.id)) ? episode : null))).filter((episode): episode is EpisodeTableRow => Boolean(episode)); const episodes = visibleEpisodes.filter((episode) => !activeShow || episode.showTitle === activeShow); const seasons = activeShow ? data.seasons.filter((season) => season.label.startsWith(`${activeShow} ·`)) : data.seasons;
+  return <div className="space-y-5"><header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-xs font-medium uppercase tracking-[0.12em] text-[#7c827f]">Editorial pipeline</p><h1 className="mt-2 text-[27px] font-semibold tracking-[-0.045em] text-[#202524]">Episodes</h1><p className="mt-1 text-sm text-[#747977]">Track assignment, workflow, lock, delivery, and QC at episode level.</p></div>{canSeeAllEpisodes && <EpisodeFormDialog seasons={seasons} people={data.people} />}</header><EpisodesTable episodes={episodes} /></div>;
 }
 
 async function getEpisodesData(): Promise<{ episodes: EpisodeTableRow[]; seasons: EpisodeSeason[]; people: Array<{ id: string; name: string; role: string }> }> {

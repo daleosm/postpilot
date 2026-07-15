@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { getDb } from "@/lib/db";
 import { activityLog, episodeWorkflowApprovals, episodeWorkflowTracks, episodes, people, postWorkOrders, postWorkflows, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
-import { can } from "@/lib/permissions";
+import { can, isAssignedToEpisode } from "@/lib/permissions";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { createStageWorkOrders } from "@/lib/work-orders";
@@ -20,6 +20,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ep
   const { episodeId } = await params;
 
   if (isDebugDemoMode) return NextResponse.json({ error: "Workflow configuration requires the database-backed debug environment." }, { status: 503 });
+  if (!(await isAssignedToEpisode(episodeId))) return NextResponse.json({ error: "Episode not found." }, { status: 404 });
 
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -74,6 +75,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ epi
   if (!parsed.success) return NextResponse.json({ error: "Choose a valid workflow sign-off action." }, { status: 400 });
   const { episodeId } = await params;
   if (isDebugDemoMode) return NextResponse.json({ error: "Workflow configuration requires the database-backed debug environment." }, { status: 503 });
+  if (!(await isAssignedToEpisode(episodeId))) return NextResponse.json({ error: "Episode not found." }, { status: 404 });
 
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

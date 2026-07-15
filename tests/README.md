@@ -19,6 +19,7 @@ pnpm test:ui
 pnpm test:integration
 pnpm test:tenant-isolation
 pnpm test:qc
+pnpm test:guest-episodes
 ```
 
 ## Conventions
@@ -34,7 +35,7 @@ pnpm test:qc
 | Module | UI journey | Tenant isolation | Business rules |
 | --- | --- | --- | --- |
 | Shows | `ui/shows`, `ui/shows-detail` | `tenant-isolation/shows` | `integration/shows` |
-| Episodes | `ui/episodes` | `tenant-isolation/episodes` | workflow integration |
+| Episodes | `ui/episodes` | `tenant-isolation/episodes`, `integration/guest-episode-access` | workflow integration, guest episode access |
 | Bookings | `ui/bookings`, `ui/my-time` | `tenant-isolation/bookings` | — |
 | Approvals | `ui/approvals` | `tenant-isolation/approvals` | workflow integration |
 | Work orders | — | covered through tenant-scoped APIs | `integration/work-orders` |

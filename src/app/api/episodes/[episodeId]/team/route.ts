@@ -5,7 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { episodeTeamAssignments, episodeWorkflowApprovals, episodes, people } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can } from "@/lib/permissions";
+import { can, isAssignedToEpisode } from "@/lib/permissions";
 import { episodeTeamAssignmentSchema } from "@/lib/validations/entities";
 
 const signerSchema = z.object({ assignmentId: z.string().uuid(), isSigner: z.boolean() });
@@ -16,6 +16,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ epi
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { episodeId } = await params;
+  if (!(await isAssignedToEpisode(episodeId))) return NextResponse.json({ error: "Episode not found." }, { status: 404 });
   const db = getDb();
   const organizationId = context.organization.organizationId;
   const [episode, assignments, organizationPeople] = await Promise.all([
@@ -33,7 +34,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ epi
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Check the assignment." }, { status: 400 });
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { episodeId } = await params; const db = getDb(); const org = context.organization.organizationId;
+  const { episodeId } = await params; if (!(await isAssignedToEpisode(episodeId))) return NextResponse.json({ error: "Episode not found." }, { status: 404 }); const db = getDb(); const org = context.organization.organizationId;
   const [episode, person] = await Promise.all([
     db.select({ id: episodes.id }).from(episodes).where(and(eq(episodes.id, episodeId), eq(episodes.organizationId, org))).limit(1),
     db.select({ id: people.id, role: people.role }).from(people).where(and(eq(people.id, parsed.data.personId), eq(people.organizationId, org))).limit(1),
@@ -50,6 +51,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ep
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { episodeId } = await params;
+  if (!(await isAssignedToEpisode(episodeId))) return NextResponse.json({ error: "Episode not found." }, { status: 404 });
   const org = context.organization.organizationId;
   const db = getDb();
   const team = await db.select({ id: episodeTeamAssignments.id, personId: people.id, role: people.role }).from(episodeTeamAssignments)
@@ -71,6 +73,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ e
   const id = new URL(request.url).searchParams.get("assignmentId"); if (!id) return NextResponse.json({ error: "Assignment is required." }, { status: 400 });
   const context = await getActiveOrganizationContext(); if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { episodeId } = await params;
+  if (!(await isAssignedToEpisode(episodeId))) return NextResponse.json({ error: "Episode not found." }, { status: 404 });
   const org = context.organization.organizationId;
   const db = getDb();
   const [removed] = await db.select({ id: episodeTeamAssignments.id }).from(episodeTeamAssignments).innerJoin(people, eq(episodeTeamAssignments.personId, people.id)).where(and(eq(episodeTeamAssignments.id, id), eq(episodeTeamAssignments.episodeId, episodeId), eq(episodeTeamAssignments.organizationId, org), eq(people.organizationId, org))).limit(1);

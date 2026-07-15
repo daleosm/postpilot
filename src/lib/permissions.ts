@@ -1,7 +1,7 @@
 import { and, eq, or } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { episodes, organizationRolePolicies } from "@/lib/db/schema";
+import { episodeTeamAssignments, episodes, organizationRolePolicies } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 
 export const permissions = ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "manage_work_orders", "update_assigned_work", "approve_time", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "manage_qc", "verify_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "manage_catering", "view_assigned"] as const;
@@ -30,13 +30,35 @@ export async function can(permission: Permission) {
   return policy?.permissions.includes(permission) ?? false;
 }
 
-/** A manager can view every episode; everyone else must be explicitly episode-assigned. */
+/**
+ * Managers can view every episode, except guest memberships. Guests are always
+ * limited to episodes where they are part of the episode team (or hold one of
+ * the legacy episode assignment fields).
+ */
 export async function isAssignedToEpisode(episodeId: string) {
   const context = await getActiveOrganizationContext();
   const current = context?.person;
   if (!context?.organization || !current || !db) return false;
-  if (await can("manage_shows")) return true;
-  const [assignment] = await db.select({ id: episodes.id }).from(episodes).where(and(eq(episodes.id, episodeId), eq(episodes.organizationId, context.organization.organizationId), or(eq(episodes.editorId, current.id), eq(episodes.coloristId, current.id), eq(episodes.soundMixerId, current.id), eq(episodes.assignedProducerId, current.id)))).limit(1);
+  if (context.organization.role !== "guest" && await can("manage_shows")) return true;
+  const [assignment] = await db
+    .select({ id: episodes.id })
+    .from(episodes)
+    .leftJoin(episodeTeamAssignments, and(
+      eq(episodeTeamAssignments.organizationId, context.organization.organizationId),
+      eq(episodeTeamAssignments.episodeId, episodes.id),
+    ))
+    .where(and(
+      eq(episodes.id, episodeId),
+      eq(episodes.organizationId, context.organization.organizationId),
+      or(
+        eq(episodes.editorId, current.id),
+        eq(episodes.coloristId, current.id),
+        eq(episodes.soundMixerId, current.id),
+        eq(episodes.assignedProducerId, current.id),
+        eq(episodeTeamAssignments.personId, current.id),
+      ),
+    ))
+    .limit(1);
   return Boolean(assignment);
 }
 

@@ -9,7 +9,8 @@ import { getBudgetData, getDemoCommandCenterData, listCrmCompanyOptions, listEpi
 import { redirect } from "next/navigation";
 
 export default async function ShowsPage() {
-  if (!(await can("manage_shows"))) redirect(await roleHome());
+  const [mayManageShows, organizationContext] = await Promise.all([can("manage_shows"), getActiveOrganizationContext()]);
+  if (!mayManageShows || organizationContext?.organization?.role === "guest") redirect(await roleHome());
   const activeShow = await getActiveShowName(); const raw = await getShowsData(); const data = raw ? { ...raw, shows: raw.shows.filter((show) => !activeShow || show.title === activeShow) } : null;
   if (!data) return <EmptyWorkspace />;
 
