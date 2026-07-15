@@ -7,13 +7,16 @@ import { getActiveOrganizationContext } from "@/lib/organizations";
 export const permissions = ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "manage_work_orders", "update_assigned_work", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "manage_qc", "verify_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "manage_catering", "view_assigned"] as const;
 export type Permission = (typeof permissions)[number];
 export type TenantRolePolicy = { role: string; label: string; permissions: Permission[] };
+export const guestRolePolicy: TenantRolePolicy = { role: "guest", label: "Guest", permissions: ["approve_reviews", "view_assigned"] };
+export const isFixedRole = (role: string) => role === guestRolePolicy.role;
 
-/** Roles are tenant data. There is deliberately no built-in role list or role-to-permission fallback. */
+/** Roles are tenant data, apart from the fixed external Guest role. */
 export async function getTenantRolePolicies(organizationId: string): Promise<TenantRolePolicy[]> {
-  if (!db) return [];
+  if (!db) return [guestRolePolicy];
   const policies = await db.select({ role: organizationRolePolicies.role, label: organizationRolePolicies.label, permissions: organizationRolePolicies.permissions })
     .from(organizationRolePolicies).where(eq(organizationRolePolicies.organizationId, organizationId));
-  return policies.map((policy) => ({ role: policy.role, label: policy.label, permissions: policy.permissions.filter((permission): permission is Permission => permissions.includes(permission as Permission)) }));
+  const configurable = policies.filter((policy) => !isFixedRole(policy.role)).map((policy) => ({ role: policy.role, label: policy.label, permissions: policy.permissions.filter((permission): permission is Permission => permissions.includes(permission as Permission)) }));
+  return [guestRolePolicy, ...configurable];
 }
 
 export async function getCurrentPerson() {

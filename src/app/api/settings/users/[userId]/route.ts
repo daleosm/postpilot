@@ -5,7 +5,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { organizationMembers, organizationRolePolicies, people } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can } from "@/lib/permissions";
+import { can, guestRolePolicy } from "@/lib/permissions";
 import { updateOrganizationUserSchema } from "@/lib/validations/entities";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ userId: string }> }) {
@@ -17,20 +17,22 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ us
   const { userId } = await params;
   if (userId === context.userId && parsed.data.membershipRole !== "admin") return NextResponse.json({ error: "You cannot remove your own administrator access." }, { status: 409 });
   const organizationId = context.organization.organizationId;
+  const input = { ...parsed.data, personRole: parsed.data.membershipRole === "guest" ? guestRolePolicy.role : parsed.data.personRole };
+  if (input.membershipRole !== "guest" && input.personRole === guestRolePolicy.role) return NextResponse.json({ error: "Guest is reserved for guest access." }, { status: 400 });
   const db = getDb();
   const [[membership], [policy]] = await Promise.all([
     db.select({ userId: organizationMembers.userId, membershipRole: organizationMembers.role }).from(organizationMembers).where(and(eq(organizationMembers.organizationId, organizationId), eq(organizationMembers.userId, userId))).limit(1),
-    db.select({ role: organizationRolePolicies.role }).from(organizationRolePolicies).where(and(eq(organizationRolePolicies.organizationId, organizationId), eq(organizationRolePolicies.role, parsed.data.personRole))).limit(1),
+    db.select({ role: organizationRolePolicies.role }).from(organizationRolePolicies).where(and(eq(organizationRolePolicies.organizationId, organizationId), eq(organizationRolePolicies.role, input.personRole))).limit(1),
   ]);
   if (!membership) return NextResponse.json({ error: "User not found in this post house." }, { status: 404 });
   if (membership.membershipRole === "owner") return NextResponse.json({ error: "The post-house owner access cannot be changed here." }, { status: 403 });
-  if (!policy) return NextResponse.json({ error: "Select a role configured for this post house." }, { status: 400 });
+  if (!policy && input.personRole !== guestRolePolicy.role) return NextResponse.json({ error: "Select a role configured for this post house." }, { status: 400 });
 
   await db.transaction(async (tx) => {
-    await tx.update(organizationMembers).set({ role: parsed.data.membershipRole }).where(and(eq(organizationMembers.organizationId, organizationId), eq(organizationMembers.userId, userId)));
-    await tx.update(people).set({ role: parsed.data.personRole, updatedAt: new Date() }).where(and(eq(people.organizationId, organizationId), eq(people.userId, userId)));
+    await tx.update(organizationMembers).set({ role: input.membershipRole }).where(and(eq(organizationMembers.organizationId, organizationId), eq(organizationMembers.userId, userId)));
+    await tx.update(people).set({ role: input.personRole, updatedAt: new Date() }).where(and(eq(people.organizationId, organizationId), eq(people.userId, userId)));
   });
-  await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "organization.user_access_updated", entityType: "user", entityId: userId, metadata: parsed.data });
+  await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "organization.user_access_updated", entityType: "user", entityId: userId, metadata: input });
   return NextResponse.json({ ok: true });
 }
 

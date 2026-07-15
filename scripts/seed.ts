@@ -53,9 +53,9 @@ const stages = [
   ["Ingest, verification and editorial preparation", "ingest_verification_editorial_preparation", "#5f7ee6", "assistant_editor"],
   ["Assembly cut", "assembly_cut", "#7b8eb3", "editor"],
   ["Editor’s cut", "editor_cut", "#5f7ee6", "editor"],
-  ["Director’s cut / review", "director_review", "#9b70e5", "director"],
+  ["Director’s cut / review", "director_review", "#9b70e5", "guest"],
   ["Producer review", "producer_review", "#a7785d", "producer"],
-  ["Studio, network or client review", "studio_network_client_review", "#9c6fb9", "network_client_executive"],
+  ["Studio, network or client review", "studio_network_client_review", "#9c6fb9", "guest"],
   ["Legal, compliance and clearances", "legal_compliance_clearances", "#977a67", "producer"],
   ["Fine cut and final creative approval", "fine_cut_final_creative_approval", "#c58a52", "producer"],
   ["Picture lock", "picture_lock", "#d99a45", "producer"],
@@ -70,7 +70,7 @@ const stages = [
   ["Quality control", "quality_control", "#b56d54", "qc"],
   ["Corrections and re-QC", "corrections_re_qc", "#bd7650", "qc"],
   ["Delivery", "delivery", "#607b70", "post_supervisor"],
-  ["Client or network acceptance", "client_network_acceptance", "#8c719d", "network_client_representative"],
+  ["Client or network acceptance", "client_network_acceptance", "#8c719d", "guest"],
   ["Archive and closeout", "archive_closeout", "#6d7671", "post_supervisor"],
 ] as const;
 
@@ -101,6 +101,7 @@ const specialistRoleSeeds: Array<{ role: PersonRole; title: string }> = [
 ];
 
 const defaultRolePolicies: Record<string, string[]> = {
+  guest: ["approve_reviews", "view_assigned"],
   post_supervisor: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "approve_time", "manage_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "view_assigned"],
   producer: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "approve_time", "manage_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "view_assigned"],
   head_of_production: ["manage_shows", "manage_bookings", "manage_work_orders", "manage_budget", "request_catering", "view_assigned"],
@@ -333,11 +334,15 @@ async function seedTenant(tenant: TenantSeed) {
   // Each facility person has a tenant-local Auth.js identity and membership.
   // Maya is intentionally the only shared debug platform administrator.
   const sourcePeople: PersonSeed[] = [...tenant.people, ...specialistRoleSeeds.map((specialist, index) => ({ name: `${tenant.name} ${specialist.title}`, email: `${specialist.role}.${index + 1}@${tenant.slug}.test`, role: specialist.role, isFreelancer: true }))];
-  const tenantPeople = sourcePeople.map((person, index) => ({
-    ...person,
-    userId: person.userId ?? `user_${tenant.slug.replaceAll("-", "_")}_${index + 1}`,
-    membershipRole: person.membershipRole ?? (person.role === "client" || person.role === "director" ? "guest" : "member") as MembershipRole,
-  }));
+  const tenantPeople = sourcePeople.map((person, index) => {
+    const membershipRole = person.membershipRole ?? (person.role === "client" || person.role === "director" ? "guest" : "member") as MembershipRole;
+    return {
+      ...person,
+      role: membershipRole === "guest" ? "guest" : person.role,
+      userId: person.userId ?? `user_${tenant.slug.replaceAll("-", "_")}_${index + 1}`,
+      membershipRole,
+    };
+  });
   const byRole = (role: PersonRole) => personId(tenantPeople.findIndex((person) => person.role === role) + 1);
   const primaryNetwork = tenant.networks[0] ?? "Distribution";
   const secondaryNetwork = tenant.networks[1] ?? primaryNetwork;
@@ -406,7 +411,9 @@ async function seedTenant(tenant: TenantSeed) {
     const roles = ["producer", "editor", "assistant_editor"];
     if (["locked", "online", "delivered"].includes(episode.status)) roles.push("colorist", "sound_mixer");
     if (index % 3 === 0) roles.push("qc");
-    return roles.map((role) => ({ organizationId: tenant.id, episodeId: episode.id, personId: byRole(role), responsibility: role }));
+    const stagePosition = lifecyclePatterns[index % lifecyclePatterns.length][2];
+    if ([5, 7, 22].includes(stagePosition)) roles.push("guest");
+    return roles.map((role) => ({ organizationId: tenant.id, episodeId: episode.id, personId: byRole(role), responsibility: role, isLead: true }));
   }));
 
   await db.insert(rooms).values([

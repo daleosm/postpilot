@@ -435,6 +435,13 @@
       "when": 1784125648682,
       "tag": "0061_remove_booking_strike_buffer",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1784125648683,
+      "tag": "0062_fixed_guest_role",
+      "breakpoints": true
     }
   ]
 }
