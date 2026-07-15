@@ -102,10 +102,10 @@ test.describe("Configurable workflow integration", () => {
       values (${episodeId}, ${organizationId}, ${seasonId}, ${editorialStageId}, 1, 'WFL101', 'Custom workflow episode', 'development', 'not_started')
     `;
     await sql`
-      insert into episode_team_assignments (organization_id, episode_id, person_id, responsibility, is_lead)
+      insert into episode_team_assignments (organization_id, episode_id, person_id, is_lead)
       values
-        (${organizationId}, ${episodeId}, ${mayaPersonId}, 'post_supervisor', true),
-        (${organizationId}, ${episodeId}, ${viewerPersonId}, 'post_supervisor', false)
+        (${organizationId}, ${episodeId}, ${mayaPersonId}, true),
+        (${organizationId}, ${episodeId}, ${viewerPersonId}, false)
     `;
   });
 

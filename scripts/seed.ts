@@ -354,7 +354,7 @@ async function seedTenant(tenant: TenantSeed) {
     id: personId(index + 1), organizationId: tenant.id, name: person.name, email: person.email, role: person.role, userId: person.userId,
     availability: (index % 5 === 0 ? "limited" : "available") as "limited" | "available", isFreelancer: person.isFreelancer ?? false, hourlyRate: String(65 + index * 8), dayRate: String(520 + index * 55),
   })));
-  await db.insert(organizationRolePolicies).values([...new Set(tenantPeople.map((person) => person.role))].map((role) => ({ organizationId: tenant.id, role, label: roleLabel(role), permissions: defaultRolePolicies[role] ?? [] })));
+  await db.insert(organizationRolePolicies).values([...new Set(tenantPeople.map((person) => person.role).filter((role) => role !== "guest"))].map((role) => ({ organizationId: tenant.id, role, label: roleLabel(role), permissions: defaultRolePolicies[role] ?? [] })));
 
   await db.insert(postWorkflows).values({ id: workflowId, organizationId: tenant.id, name: tenant.workflowName, description: tenant.workflowDescription, isDefault: true });
   await db.insert(workflowStages).values(stages.map(([name, key, color], index) => ({ id: stageId(index + 1), organizationId: tenant.id, workflowId, name, key, color, position: index + 1, isTerminal: key === "archive_closeout" })));
@@ -413,7 +413,7 @@ async function seedTenant(tenant: TenantSeed) {
     if (index % 3 === 0) roles.push("qc");
     const stagePosition = lifecyclePatterns[index % lifecyclePatterns.length][2];
     if ([5, 7, 22].includes(stagePosition)) roles.push("guest");
-    return roles.map((role) => ({ organizationId: tenant.id, episodeId: episode.id, personId: byRole(role), responsibility: role, isLead: true }));
+    return roles.map((role) => ({ organizationId: tenant.id, episodeId: episode.id, personId: byRole(role), isLead: true }));
   }));
 
   await db.insert(rooms).values([

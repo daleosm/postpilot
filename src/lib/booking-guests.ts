@@ -41,7 +41,6 @@ export async function addGuestToEpisodeTeam(organizationId: string, episodeId: s
     organizationId,
     episodeId,
     personId: guest.id,
-    responsibility: guest.role,
     isLead: false,
   });
   return true;

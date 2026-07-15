@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { EpisodeTeam } from "@/components/episode-team";
 
 type TeamData = {
-  assignments: Array<{ id: string; personId: string; name: string; role: string; responsibility: string; isLead: boolean }>;
+  assignments: Array<{ id: string; personId: string; name: string; role: string; isLead: boolean }>;
   people: Array<{ id: string; name: string; role: string }>;
 };
 

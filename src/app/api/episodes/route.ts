@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       airDate: parsed.data.airDate ? parsed.data.airDate.toISOString().slice(0, 10) : null,
       lockedCutDate: parsed.data.lockedCutDate ? parsed.data.lockedCutDate.toISOString().slice(0, 10) : null,
     }).returning({ id: episodes.id });
-    if (team.length) { const teamPeople = await db.select({ id: people.id, role: people.role }).from(people).where(and(eq(people.organizationId, organizationId), inArray(people.id, team))); await db.insert(episodeTeamAssignments).values(teamPeople.map((person) => ({ organizationId, episodeId: episode.id, personId: person.id, responsibility: person.role }))); }
+    if (team.length) { const teamPeople = await db.select({ id: people.id }).from(people).where(and(eq(people.organizationId, organizationId), inArray(people.id, team))); await db.insert(episodeTeamAssignments).values(teamPeople.map((person) => ({ organizationId, episodeId: episode.id, personId: person.id }))); }
     if (parsed.data.workflowStageId) await createStageWorkOrders({ organizationId: context.organization.organizationId, episodeId: episode.id, workflowStageId: parsed.data.workflowStageId, createdByUserId: context.userId });
     return NextResponse.json(episode, { status: 201 });
   } catch {

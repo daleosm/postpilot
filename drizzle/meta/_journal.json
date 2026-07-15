@@ -442,6 +442,13 @@
       "when": 1784125648683,
       "tag": "0062_fixed_guest_role",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1784125648684,
+      "tag": "0063_remove_redundant_guest_policy_and_team_responsibility",
+      "breakpoints": true
     }
   ]
 }

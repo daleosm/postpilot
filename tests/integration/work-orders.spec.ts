@@ -60,7 +60,7 @@ test.describe("Post work orders integration", () => {
     await sql`insert into rooms (id, organization_id, name, type) values (${roomId}, ${organizationId}, 'Lab Online', 'online')`;
     await sql`insert into bookings (id, organization_id, room_id, episode_id, title, starts_at, ends_at, status, booking_type) values (${otherBookingId}, ${organizationId}, ${roomId}, ${otherEpisodeId}, 'Other episode online', '2035-02-01T09:00:00.000Z', '2035-02-01T12:00:00.000Z', 'confirmed', 'conform')`;
     await sql`insert into post_work_orders (id, organization_id, episode_id, workflow_stage_id, title) values (${foreignWorkOrderId}, ${foreignOrganizationId}, ${foreignEpisodeId}, ${foreignStageId}, 'Foreign work order')`;
-    await sql`insert into episode_team_assignments (organization_id, episode_id, person_id, responsibility, is_lead) values (${organizationId}, ${episodeId}, ${mayaPersonId}, 'post_supervisor', true)`;
+    await sql`insert into episode_team_assignments (organization_id, episode_id, person_id, is_lead) values (${organizationId}, ${episodeId}, ${mayaPersonId}, true)`;
   });
 
   test.beforeEach(async () => {

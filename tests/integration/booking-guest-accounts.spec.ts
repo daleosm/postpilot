@@ -101,8 +101,8 @@ test.describe("Booking guest accounts", () => {
 
     const [booking] = await sql`select guest_person_id from bookings where id = ${bookingId}`;
     expect(booking.guest_person_id).toBe(guestPersonId);
-    const [assignment] = await sql`select person_id, responsibility from episode_team_assignments where organization_id = ${organizationId} and episode_id = ${episodeId} and person_id = ${guestPersonId}`;
-    expect(assignment).toMatchObject({ person_id: guestPersonId, responsibility: "client_reviewer" });
+    const [assignment] = await sql`select person_id from episode_team_assignments where organization_id = ${organizationId} and episode_id = ${episodeId} and person_id = ${guestPersonId}`;
+    expect(assignment).toMatchObject({ person_id: guestPersonId });
 
     const update = await page.request.patch(`/api/bookings/${bookingId}`, { data: { ...bookingPayload(guestPersonId), title: "Updated guest review session" } });
     expect(update.status()).toBe(200);
@@ -146,13 +146,13 @@ test.describe("Booking guest accounts", () => {
     expect(membership.role).toBe("guest");
 
     const [assignment] = await sql`
-      select person_id, responsibility
+      select person_id
       from episode_team_assignments
       where organization_id = ${organizationId}
         and episode_id = ${episodeId}
         and person_id = ${guest.id}
     `;
-    expect(assignment).toMatchObject({ person_id: guest.id, responsibility: "guest" });
+    expect(assignment).toMatchObject({ person_id: guest.id });
   });
 
   test("rejects creating a guest account for an episode in another post house", async ({ page }) => {

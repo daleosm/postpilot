@@ -195,7 +195,7 @@ export const insertEpisodeSchema = z.object({
   team: z.array(id).max(100).default([]),
 });
 export const updateEpisodeSchema = insertEpisodeSchema.omit({ seasonId: true }).partial();
-export const episodeTeamAssignmentSchema = z.object({ personId: id, responsibility: z.string().trim().min(2, "Enter a responsibility.").max(80), isLead: z.boolean().default(false) });
+export const episodeTeamAssignmentSchema = z.object({ personId: id, isLead: z.boolean().default(false) });
 
 const bookingTypes = ["edit", "color", "mix", "qc", "client_review", "ingest", "conform", "leave", "training", "sick", "unavailable"] as const;
 const personnelAvailabilityTypes = ["leave", "training", "sick", "unavailable"] as const;

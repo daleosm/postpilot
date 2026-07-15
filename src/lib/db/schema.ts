@@ -275,13 +275,12 @@ export const episodeTeamAssignments = pgTable("episode_team_assignments", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
   personId: uuid("person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
-  responsibility: text("responsibility").notNull(),
   isLead: boolean("is_lead").default(false).notNull(),
   startsOn: date("starts_on"),
   endsOn: date("ends_on"),
   ...auditColumns,
 }, (table) => [
-  uniqueIndex("episode_team_assignment_unique_idx").on(table.episodeId, table.personId, table.responsibility),
+  uniqueIndex("episode_team_assignment_episode_person_idx").on(table.episodeId, table.personId),
   index("episode_team_assignment_episode_idx").on(table.episodeId),
   index("episode_team_assignment_org_person_idx").on(table.organizationId, table.personId),
 ]);

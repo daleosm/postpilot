@@ -88,7 +88,7 @@ test.describe("Episode lifecycle integration", () => {
     await sql`insert into shows (id, organization_id, title, code, time_zone) values (${showId}, ${organizationId}, 'Episode Lifecycle Series', 'EPL', 'Europe/London'), (${foreignShowId}, ${foreignOrganizationId}, 'Foreign Episode Series', 'FEP', 'Europe/London')`;
     await sql`insert into seasons (id, organization_id, show_id, number, title) values (${seasonId}, ${organizationId}, ${showId}, 1, 'Episode Lifecycle · Season 1'), (${emptySeasonId}, ${organizationId}, ${showId}, 2, 'Episode Lifecycle · Season 2'), (${foreignSeasonId}, ${foreignOrganizationId}, ${foreignShowId}, 1, 'Foreign Episode · Season 1')`;
     await sql`insert into episodes (id, organization_id, season_id, workflow_stage_id, editor_id, number, production_code, title, status, qc_status) values (${priorEpisodeId}, ${organizationId}, ${seasonId}, ${workflowStageId}, ${editorOneId}, 1, 'EPL101', 'Prior episode', 'assembly', 'not_started'), (${foreignEpisodeId}, ${foreignOrganizationId}, ${foreignSeasonId}, ${foreignStageId}, ${foreignPersonId}, 1, 'FEP101', 'Foreign episode', 'assembly', 'not_started')`;
-    await sql`insert into episode_team_assignments (organization_id, episode_id, person_id, responsibility, is_lead) values (${organizationId}, ${priorEpisodeId}, ${editorOneId}, 'editor', true)`;
+    await sql`insert into episode_team_assignments (organization_id, episode_id, person_id, is_lead) values (${organizationId}, ${priorEpisodeId}, ${editorOneId}, true)`;
   });
 
   test.afterAll(async () => {
@@ -107,8 +107,8 @@ test.describe("Episode lifecycle integration", () => {
     expect(episode).toMatchObject({ number: 2, production_code: "EPL102", title: "New episode workflow", workflow_stage_id: workflowStageId, editor_id: editorOneId, colorist_id: coloristId, status: "assembly" });
     expect(new Date(episode.air_date).toISOString().slice(0, 10)).toBe("2035-03-11");
     expect(new Date(episode.locked_cut_date).toISOString().slice(0, 10)).toBe("2035-03-04");
-    const team = await sql`select person_id, responsibility from episode_team_assignments where organization_id = ${organizationId} and episode_id = ${createdEpisodeId} order by responsibility`;
-    expect(team).toEqual(expect.arrayContaining([{ person_id: editorOneId, responsibility: "editor" }, { person_id: coloristId, responsibility: "colorist" }]));
+    const team = await sql`select person_id from episode_team_assignments where organization_id = ${organizationId} and episode_id = ${createdEpisodeId} order by person_id`;
+    expect(team).toEqual(expect.arrayContaining([{ person_id: editorOneId }, { person_id: coloristId }]));
     const [workOrder] = await sql`select title, workflow_stage_id, is_blocking from post_work_orders where organization_id = ${organizationId} and episode_id = ${createdEpisodeId}`;
     expect(workOrder).toMatchObject({ title: "Prepare editorial turnover", workflow_stage_id: workflowStageId, is_blocking: true });
   });
@@ -161,7 +161,7 @@ test.describe("Episode lifecycle integration", () => {
     if (!editorTwoAssignment) throw new Error("Expected the second editor to be assigned.");
     const signer = await page.request.patch(`/api/episodes/${createdEpisodeId}/team`, { data: { assignmentId: editorTwoAssignment.id, isSigner: true } });
     expect(signer.status()).toBe(200);
-    const editors = await sql`select person_id, is_lead from episode_team_assignments where organization_id = ${organizationId} and episode_id = ${createdEpisodeId} and responsibility = 'editor' order by person_id`;
+    const editors = await sql`select assignment.person_id, assignment.is_lead from episode_team_assignments assignment inner join people person on person.id = assignment.person_id and person.organization_id = assignment.organization_id where assignment.organization_id = ${organizationId} and assignment.episode_id = ${createdEpisodeId} and person.role = 'editor' order by assignment.person_id`;
     expect(editors).toEqual(expect.arrayContaining([{ person_id: editorOneId, is_lead: false }, { person_id: editorTwoId, is_lead: true }]));
 
     await sql`insert into episode_workflow_approvals (organization_id, episode_id, workflow_stage_id, approval_rule_id, approver_role, required_person_id, status) values (${organizationId}, ${createdEpisodeId}, ${workflowStageId}, ${approvalRuleId}, 'editor', ${editorTwoId}, 'pending')`;

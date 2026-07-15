@@ -77,9 +77,9 @@ test.describe("QC lifecycle integration", () => {
     await sql`insert into shows (id, organization_id, title, code, time_zone) values (${showId}, ${organizationId}, 'QC Lifecycle Series', 'QCL', 'Europe/London')`;
     await sql`insert into seasons (id, organization_id, show_id, number) values (${seasonId}, ${organizationId}, ${showId}, 1)`;
     await sql`insert into episodes (id, organization_id, season_id, workflow_stage_id, editor_id, number, title, status, qc_status) values (${episodeId}, ${organizationId}, ${seasonId}, ${stageId}, ${editorPersonId}, 1, 'Re-QC episode', 'online', 'in_progress')`;
-    await sql`insert into episode_team_assignments (organization_id, episode_id, person_id, responsibility, is_lead) values
-      (${organizationId}, ${episodeId}, ${qcPersonId}, 'qc_verifier', true),
-      (${organizationId}, ${episodeId}, ${recorderPersonId}, 'qc_recorder', false)`;
+    await sql`insert into episode_team_assignments (organization_id, episode_id, person_id, is_lead) values
+      (${organizationId}, ${episodeId}, ${qcPersonId}, true),
+      (${organizationId}, ${episodeId}, ${recorderPersonId}, false)`;
     await sql`insert into shows (id, organization_id, title, code, time_zone) values (${crossShowId}, ${crossOrganizationId}, 'Isolated QC Series', 'XQC', 'Europe/London')`;
     await sql`insert into seasons (id, organization_id, show_id, number) values (${crossSeasonId}, ${crossOrganizationId}, ${crossShowId}, 1)`;
     await sql`insert into episodes (id, organization_id, season_id, number, title, status, qc_status) values (${crossEpisodeId}, ${crossOrganizationId}, ${crossSeasonId}, 1, 'Other tenant episode', 'online', 'in_progress')`;

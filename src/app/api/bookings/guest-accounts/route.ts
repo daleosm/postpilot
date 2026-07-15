@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       ? await tx.update(people).set({ userId, name: input.name, role: input.personRole, isActive: true, updatedAt: new Date() }).where(and(eq(people.id, existingPerson.id), eq(people.organizationId, organizationId))).returning({ id: people.id, name: people.name, role: people.role, email: people.email })
       : await tx.insert(people).values({ organizationId, userId, name: input.name, email: input.email, role: input.personRole }).returning({ id: people.id, name: people.name, role: people.role, email: people.email });
     const [assignment] = await tx.select({ id: episodeTeamAssignments.id }).from(episodeTeamAssignments).where(and(eq(episodeTeamAssignments.organizationId, organizationId), eq(episodeTeamAssignments.episodeId, input.episodeId), eq(episodeTeamAssignments.personId, guest.id))).limit(1);
-    if (!assignment) await tx.insert(episodeTeamAssignments).values({ organizationId, episodeId: input.episodeId, personId: guest.id, responsibility: guest.role, isLead: false });
+    if (!assignment) await tx.insert(episodeTeamAssignments).values({ organizationId, episodeId: input.episodeId, personId: guest.id, isLead: false });
     return guest;
   });
 

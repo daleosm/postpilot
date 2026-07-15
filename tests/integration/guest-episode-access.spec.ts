@@ -72,8 +72,8 @@ test.describe("Guest episode access", () => {
         (${privateEpisodeId}, ${organizationId}, ${seasonId}, 2, 'GAS102', 'Private episode', 'assembly', 'not_started', null)
     `;
     await sql`
-      insert into episode_team_assignments (organization_id, episode_id, person_id, responsibility, is_lead)
-      values (${organizationId}, ${assignedEpisodeId}, ${guestPersonId}, 'guest', true)
+      insert into episode_team_assignments (organization_id, episode_id, person_id, is_lead)
+      values (${organizationId}, ${assignedEpisodeId}, ${guestPersonId}, true)
     `;
   });
 

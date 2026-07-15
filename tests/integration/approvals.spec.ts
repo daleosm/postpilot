@@ -116,11 +116,11 @@ test.describe("Approvals integration", () => {
         (${foreignEpisodeId}, ${foreignOrganizationId}, ${foreignSeasonId}, ${foreignStageId}, 1, 'FAS101', 'Foreign episode', 'development', 'not_started')
     `;
     await sql`
-      insert into episode_team_assignments (organization_id, episode_id, person_id, responsibility, is_lead) values
-        (${organizationId}, ${episodeOneId}, ${editorPersonId}, 'editor', false),
-        (${organizationId}, ${episodeOneId}, ${producerPersonId}, 'producer', false),
-        (${organizationId}, ${episodeTwoId}, ${editorPersonId}, 'editor', false),
-        (${organizationId}, ${episodeTwoId}, ${producerPersonId}, 'producer', false)
+      insert into episode_team_assignments (organization_id, episode_id, person_id, is_lead) values
+        (${organizationId}, ${episodeOneId}, ${editorPersonId}, true),
+        (${organizationId}, ${episodeOneId}, ${producerPersonId}, true),
+        (${organizationId}, ${episodeTwoId}, ${editorPersonId}, true),
+        (${organizationId}, ${episodeTwoId}, ${producerPersonId}, true)
     `;
   });
 

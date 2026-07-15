@@ -5,7 +5,7 @@ import { Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-type Assignment = { id: string; personId: string; name: string; role: string; responsibility: string; isLead: boolean };
+type Assignment = { id: string; personId: string; name: string; role: string; isLead: boolean };
 type Person = { id: string; name: string; role: string };
 
 export function EpisodeTeam({ episodeId, assignments, people, canManage, onChanged }: { episodeId: string; assignments: Assignment[]; people: Person[]; canManage: boolean; onChanged?: () => void | Promise<void> }) {
