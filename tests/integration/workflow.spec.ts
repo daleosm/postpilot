@@ -141,6 +141,53 @@ test.describe("Configurable workflow integration", () => {
     expect(assumedMaya.status()).toBe(200);
   });
 
+  test("does not offer stage movement to a signer without episode-management permission", async ({ page }) => {
+    await sql`delete from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    await sql`delete from episode_workflow_tracks where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    await sql`update episodes set workflow_stage_id = ${editorialStageId} where id = ${episodeId}`;
+    await sql`
+      insert into organization_role_policies (organization_id, role, label, permissions)
+      values (${organizationId}, 'post_supervisor', 'Post Supervisor', ${JSON.stringify(["approve_reviews"])})
+      on conflict (organization_id, role) do update set permissions = excluded.permissions
+    `;
+    await sql`update episode_team_assignments set is_lead = case when person_id = ${viewerPersonId} then true else false end where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+
+    const assumedViewer = await page.request.post("/api/debug/user", { data: { userId: viewerUserId } });
+    expect(assumedViewer.status()).toBe(200);
+    await openWorkflow(page);
+    await page.getByRole("button", { name: "Sign off", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("Stage fully signed off.");
+    await page.getByRole("button", { name: "Select Creative sign-off", exact: true }).click();
+    await expect(page.getByText("This stage is ready. A user with episode-management permission can move the episode forward.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Move episode to Creative sign-off", exact: true })).toHaveCount(0);
+
+    await sql`delete from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    await sql`update episode_team_assignments set is_lead = case when person_id = ${mayaPersonId} then true else false end where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    const assumedMaya = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
+    expect(assumedMaya.status()).toBe(200);
+  });
+
+  test("updates the workflow view after an authorised user moves the episode", async ({ page }) => {
+    await sql`delete from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    await sql`delete from episode_workflow_tracks where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    await sql`update episodes set workflow_stage_id = ${editorialStageId} where id = ${episodeId}`;
+    await sql`update episode_team_assignments set is_lead = case when person_id = ${mayaPersonId} then true else false end where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+
+    const assumedMaya = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
+    expect(assumedMaya.status()).toBe(200);
+    await openWorkflow(page);
+    await page.getByRole("button", { name: "Sign off", exact: true }).click();
+    await page.getByRole("button", { name: "Select Creative sign-off", exact: true }).click();
+    await page.getByRole("button", { name: "Move episode to Creative sign-off", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Creative sign-off", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Move episode to Creative sign-off", exact: true })).toHaveCount(0);
+    const [episode] = await sql`select workflow_stage_id from episodes where id = ${episodeId}`;
+    expect(episode.workflow_stage_id).toBe(lockStageId);
+
+    await sql`delete from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    await sql`update episodes set workflow_stage_id = ${editorialStageId} where id = ${episodeId}`;
+  });
+
   test("enforces normal stage order and blocks the next stage until the current sign-off is complete", async ({ page }) => {
     await openWorkflow(page);
 

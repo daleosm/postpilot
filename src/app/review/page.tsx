@@ -32,7 +32,7 @@ export default async function ApprovalsPage() {
         <span className="inline-flex items-center gap-2 text-xs font-medium text-[#5e746c]"><FileCheck2 size={15} /> {visibleSignOffs.length} sign-offs · {visibleWorkOrders.length} work orders</span>
       </header>
 
-      <WorkflowSignOffQueue signOffs={visibleSignOffs} canOpenEpisodes={mayManage} canSignOff={mayApprove} />
+      <WorkflowSignOffQueue signOffs={visibleSignOffs} canSignOff={mayApprove} />
       <WorkOrderQueue workOrders={visibleWorkOrders} canOpenEpisodes={mayManage || mayUpdateWork} />
     </div>
   );
