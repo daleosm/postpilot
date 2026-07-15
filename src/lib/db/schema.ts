@@ -330,7 +330,8 @@ export const bookings = pgTable("bookings", {
   roomId: uuid("room_id").references(() => rooms.id, { onDelete: "set null" }),
   episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "set null" }),
   personId: uuid("person_id").references(() => people.id, { onDelete: "set null" }),
-  clientContactId: uuid("client_contact_id").references(() => crmContacts.id, { onDelete: "set null" }),
+  /** External guest account attending this episode-linked booking. */
+  guestPersonId: uuid("guest_person_id").references(() => people.id, { onDelete: "set null" }),
   title: text("title").notNull(),
   startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
   endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
@@ -348,6 +349,7 @@ export const bookings = pgTable("bookings", {
 }, (table) => [
   index("bookings_room_time_idx").on(table.roomId, table.startsAt),
   index("bookings_episode_time_idx").on(table.episodeId, table.startsAt),
+  index("bookings_guest_person_time_idx").on(table.guestPersonId, table.startsAt),
 ]);
 
 /** Artist-submitted actuals are held separately until a producer/finance approver accepts them. */

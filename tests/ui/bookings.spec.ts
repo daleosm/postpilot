@@ -63,6 +63,22 @@ test.describe("Bookings UI", () => {
     await expect(page.getByText("A booking title is required.")).toBeVisible();
   });
 
+  test("searches guest accounts and offers episode-scoped account creation", async ({ page }) => {
+    await openBookings(page);
+
+    await page.getByRole("button", { name: "New booking" }).click();
+    const guestSearch = page.getByRole("textbox", { name: "Search guest accounts" });
+    const createGuest = page.getByRole("button", { name: "Create", exact: true });
+    await expect(guestSearch).toBeVisible();
+    await guestSearch.fill("review");
+    await expect(createGuest).toBeDisabled();
+
+    await page.getByRole("combobox", { name: "Episode", exact: true }).selectOption({ index: 1 });
+    await expect(createGuest).toBeEnabled();
+    await createGuest.click();
+    await expect(page.getByRole("heading", { name: "Create guest account" })).toBeVisible();
+  });
+
   test("opens an existing booking for editing without changing it", async ({ page }) => {
     await openBookings(page);
 

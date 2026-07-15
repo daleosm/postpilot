@@ -204,7 +204,7 @@ const bookingFormSchema = z.object({
   roomId: nullableId,
   episodeId: nullableId,
   personId: nullableId,
-  clientContactId: nullableId,
+  guestPersonId: nullableId,
   title: z.string().trim().min(1).max(160),
   startsAt: z.coerce.date(),
   endsAt: z.coerce.date(),
@@ -217,8 +217,9 @@ const bookingFormSchema = z.object({
 });
 function validateBooking<T extends z.ZodTypeAny>(schema: T) {
   return schema.superRefine((value: z.infer<T>, context) => {
-    const booking = value as { startsAt?: Date; endsAt?: Date; bookingType?: string; personId?: string | null; roomId?: string | null };
+    const booking = value as { startsAt?: Date; endsAt?: Date; bookingType?: string; personId?: string | null; guestPersonId?: string | null; episodeId?: string | null; roomId?: string | null };
     if (booking.startsAt && booking.endsAt && booking.endsAt <= booking.startsAt) context.addIssue({ code: z.ZodIssueCode.custom, message: "End time must be after the start time.", path: ["endsAt"] });
+    if (booking.guestPersonId && !booking.episodeId) context.addIssue({ code: z.ZodIssueCode.custom, message: "Choose an episode before adding a guest account.", path: ["episodeId"] });
     if (booking.bookingType && personnelAvailabilityTypes.includes(booking.bookingType as typeof personnelAvailabilityTypes[number])) {
       if (!booking.personId) context.addIssue({ code: z.ZodIssueCode.custom, message: "Choose the person whose availability is affected.", path: ["personId"] });
       if (booking.roomId) context.addIssue({ code: z.ZodIssueCode.custom, message: "Leave, training, sickness, and unavailability cannot reserve a room.", path: ["roomId"] });
@@ -228,6 +229,13 @@ function validateBooking<T extends z.ZodTypeAny>(schema: T) {
 export const insertBookingSchema = validateBooking(bookingFormSchema);
 export const bookingRequestSchema = validateBooking(bookingFormSchema.omit({ organizationId: true }));
 export const updateBookingSchema = bookingFormSchema.omit({ organizationId: true }).partial();
+
+export const createBookingGuestSchema = z.object({
+  episodeId: id,
+  name: z.string().trim().min(2, "Enter the guest's name.").max(120),
+  email: z.string().email("Enter a valid work email.").max(320),
+  personRole: roleKey,
+});
 
 export const createCateringRequestSchema = z.object({
   bookingId: nullableId,

@@ -20,7 +20,7 @@ export default async function SchedulePage() {
 
 async function getScheduleData() {
   const context = await getActiveOrganizationContext();
-  if (!context?.organization) return { organizationName: "No workspace", bookings: [], resources: { rooms: [], people: [], contacts: [], episodes: [] }, cateringRequests: [], pendingTimes: [] };
+  if (!context?.organization) return { organizationName: "No workspace", bookings: [], resources: { rooms: [], people: [], guestAccounts: [], guestRoles: [], episodes: [] }, cateringRequests: [], pendingTimes: [] };
   const from = new Date(Date.now() - 60 * 86_400_000); const to = new Date(Date.now() + 90 * 86_400_000);
   const [bookings, resources, cateringRequests, pendingTimes] = await Promise.all([listSchedule(context.organization.organizationId, from, to), getScheduleResources(context.organization.organizationId), listCateringRequests(context.organization.organizationId), listPendingBookingTimeSubmissions(context.organization.organizationId)]);
   return { organizationName: context.organization.organizationName, bookings, resources, cateringRequests, pendingTimes };

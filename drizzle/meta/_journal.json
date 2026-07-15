@@ -400,6 +400,20 @@
       "when": 1783987200031,
       "tag": "0056_organization_currency",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1783987200032,
+      "tag": "0057_booking_guest_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1783987200033,
+      "tag": "0058_remove_booking_client_contacts",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { getBookingSuggestions } from "@/lib/booking-conflicts";
+import { addGuestToEpisodeTeam, getGuestAccountForBooking } from "@/lib/booking-guests";
 import { getDb } from "@/lib/db";
 import { bookings } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
@@ -30,9 +31,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ bo
     roomId: parsed.data.roomId,
     episodeId: parsed.data.episodeId,
     personId: parsed.data.personId,
-    contactId: parsed.data.clientContactId,
   });
   if (missing.length) return NextResponse.json({ error: `Invalid ${missing.join(", ")} for this organization.` }, { status: 404 });
+  const guest = parsed.data.guestPersonId ? await getGuestAccountForBooking(context.organization.organizationId, parsed.data.guestPersonId) : null;
+  if (parsed.data.guestPersonId && !guest) return NextResponse.json({ error: "Guest account not found for this organization." }, { status: 404 });
 
   const availability = parsed.data.status === "cancelled" ? { conflicts: [] } : await getBookingSuggestions(context.organization.organizationId, { ...parsed.data, excludeId: bookingId });
   if (availability.conflicts.length) return NextResponse.json({ error: "This room or artist already has a conflicting booking.", ...availability }, { status: 409 });
@@ -40,6 +42,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ bo
   const [booking] = await db.update(bookings).set(parsed.data)
     .where(and(eq(bookings.id, bookingId), eq(bookings.organizationId, context.organization.organizationId)))
     .returning({ id: bookings.id });
+  if (guest && parsed.data.episodeId) await addGuestToEpisodeTeam(context.organization.organizationId, parsed.data.episodeId, guest);
   const changed = existing.startsAt.getTime() !== parsed.data.startsAt.getTime() || existing.endsAt.getTime() !== parsed.data.endsAt.getTime() || existing.roomId !== parsed.data.roomId || existing.personId !== parsed.data.personId;
   if (changed) await writeAuditEvent({ organizationId: context.organization.organizationId, actorUserId: context.userId, action: "booking.changed", entityType: "booking", entityId: bookingId, metadata: { episodeId: existing.episodeId, from: { startsAt: existing.startsAt.toISOString(), endsAt: existing.endsAt.toISOString(), roomId: existing.roomId, personId: existing.personId }, to: { startsAt: parsed.data.startsAt.toISOString(), endsAt: parsed.data.endsAt.toISOString(), roomId: parsed.data.roomId, personId: parsed.data.personId }, recipientPersonIds: [existing.personId, parsed.data.personId].filter(Boolean), notificationTitle: "Booking changed", notificationBody: `${existing.title} was moved or reassigned.` } });
   return NextResponse.json(booking);
