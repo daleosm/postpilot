@@ -23,7 +23,6 @@ export const organizationRole = pgEnum("organization_role", ["owner", "admin", "
 export const episodeStatus = pgEnum("episode_status", ["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"]);
 export const qcStatus = pgEnum("qc_status", ["not_started", "in_progress", "passed", "needs_attention", "waived"]);
 export const bookingStatus = pgEnum("booking_status", ["tentative", "confirmed", "hold", "cancelled"]);
-export const bookingTimeApprovalStatus = pgEnum("booking_time_approval_status", ["pending", "approved", "rejected"]);
 export const bookingType = pgEnum("booking_type", ["edit", "color", "mix", "qc", "client_review", "ingest", "conform", "leave", "training", "sick", "unavailable"]);
 export const approvalStatus = pgEnum("approval_status", ["pending", "approved", "changes_requested"]);
 export const billableStatus = pgEnum("billable_status", ["draft", "approved", "invoiced", "paid", "void"]);
@@ -338,7 +337,6 @@ export const bookings = pgTable("bookings", {
   /** Operational buffers sit outside the client-facing booked window and still block resources. */
   setupMinutes: integer("setup_minutes").default(0).notNull(),
   handoverMinutes: integer("handover_minutes").default(0).notNull(),
-  strikeMinutes: integer("strike_minutes").default(0).notNull(),
   actualStartsAt: timestamp("actual_starts_at", { withTimezone: true }),
   actualEndsAt: timestamp("actual_ends_at", { withTimezone: true }),
   approvedOvertimeMinutes: integer("approved_overtime_minutes").default(0).notNull(),
@@ -351,22 +349,6 @@ export const bookings = pgTable("bookings", {
   index("bookings_episode_time_idx").on(table.episodeId, table.startsAt),
   index("bookings_guest_person_time_idx").on(table.guestPersonId, table.startsAt),
 ]);
-
-/** Artist-submitted actuals are held separately until a producer/finance approver accepts them. */
-export const bookingTimeSubmissions = pgTable("booking_time_submissions", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-  bookingId: uuid("booking_id").notNull().references(() => bookings.id, { onDelete: "cascade" }),
-  submittedByPersonId: uuid("submitted_by_person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
-  actualStartsAt: timestamp("actual_starts_at", { withTimezone: true }).notNull(),
-  actualEndsAt: timestamp("actual_ends_at", { withTimezone: true }).notNull(),
-  overtimeMinutes: integer("overtime_minutes").default(0).notNull(),
-  note: text("note"),
-  status: bookingTimeApprovalStatus("status").default("pending").notNull(),
-  reviewedByPersonId: uuid("reviewed_by_person_id").references(() => people.id, { onDelete: "set null" }),
-  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
-  ...auditColumns,
-}, (table) => [index("booking_time_submissions_booking_idx").on(table.bookingId), index("booking_time_submissions_organization_status_idx").on(table.organizationId, table.status)]);
 
 /** Internal room-service requests. No payment, vendor, or dietary profile is stored. */
 export const cateringRequests = pgTable("catering_requests", {

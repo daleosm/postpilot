@@ -210,7 +210,6 @@ const bookingFormSchema = z.object({
   endsAt: z.coerce.date(),
   setupMinutes: z.coerce.number().int().min(0).max(480).default(0),
   handoverMinutes: z.coerce.number().int().min(0).max(480).default(0),
-  strikeMinutes: z.coerce.number().int().min(0).max(480).default(0),
   status: z.enum(["tentative", "confirmed", "hold", "cancelled"]).default("tentative"),
   bookingType: z.enum(bookingTypes).default("edit"),
   notes: z.string().trim().max(2000).nullable().optional(),

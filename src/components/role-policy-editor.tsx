@@ -14,7 +14,6 @@ const permissionLabels: Record<string, string> = {
   approve_reviews: "Approve workflow gates",
   manage_work_orders: "Manage work orders",
   update_assigned_work: "Update assigned work",
-  approve_time: "Approve actual time",
   approve_budget_overruns: "Approve budget overruns",
   manage_rates: "Manage service rate cards",
   approve_rate_overrides: "Approve rate overrides",

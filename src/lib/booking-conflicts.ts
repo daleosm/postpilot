@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { bookings, episodes, people, rooms } from "@/lib/db/schema";
 
-type BookingWindow = { roomId?: string | null; personId?: string | null; startsAt: Date; endsAt: Date; setupMinutes?: number; handoverMinutes?: number; strikeMinutes?: number; bookingType?: string; excludeId?: string };
+type BookingWindow = { roomId?: string | null; personId?: string | null; startsAt: Date; endsAt: Date; setupMinutes?: number; handoverMinutes?: number; bookingType?: string; excludeId?: string };
 
 const roomTypesForBooking: Record<string, string[]> = {
   edit: ["edit_bay"], color: ["color_suite"], mix: ["mix_room"], qc: ["qc_room"], client_review: ["edit_bay", "mix_room"], ingest: ["edit_bay"], conform: ["edit_bay", "color_suite"],
@@ -16,10 +16,10 @@ export async function findBookingConflicts(organizationId: string, window: Booki
   const operational = operationalWindow(window);
   const resources = [window.roomId ? eq(bookings.roomId, window.roomId) : undefined, window.personId ? eq(bookings.personId, window.personId) : undefined].filter(Boolean);
   if (!resources.length) return [];
-  const conditions = [eq(bookings.organizationId, organizationId), ne(bookings.status, "cancelled"), or(...resources), sql`${bookings.startsAt} - (${bookings.setupMinutes} * interval '1 minute') < ${operational.endsAt.toISOString()}::timestamptz`, sql`${bookings.endsAt} + ((${bookings.handoverMinutes} + ${bookings.strikeMinutes}) * interval '1 minute') > ${operational.startsAt.toISOString()}::timestamptz`];
+  const conditions = [eq(bookings.organizationId, organizationId), ne(bookings.status, "cancelled"), or(...resources), sql`${bookings.startsAt} - (${bookings.setupMinutes} * interval '1 minute') < ${operational.endsAt.toISOString()}::timestamptz`, sql`${bookings.endsAt} + (${bookings.handoverMinutes} * interval '1 minute') > ${operational.startsAt.toISOString()}::timestamptz`];
   if (window.excludeId) conditions.push(ne(bookings.id, window.excludeId));
 
-  const conflicts = await getDb().select({ id: bookings.id, title: bookings.title, startsAt: bookings.startsAt, endsAt: bookings.endsAt, setupMinutes: bookings.setupMinutes, handoverMinutes: bookings.handoverMinutes, strikeMinutes: bookings.strikeMinutes, bookingType: bookings.bookingType, roomId: bookings.roomId, personId: bookings.personId, roomName: rooms.name, personName: people.name, personAvailability: people.availability, personIsFreelancer: people.isFreelancer, episodeTitle: episodes.title })
+  const conflicts = await getDb().select({ id: bookings.id, title: bookings.title, startsAt: bookings.startsAt, endsAt: bookings.endsAt, setupMinutes: bookings.setupMinutes, handoverMinutes: bookings.handoverMinutes, bookingType: bookings.bookingType, roomId: bookings.roomId, personId: bookings.personId, roomName: rooms.name, personName: people.name, personAvailability: people.availability, personIsFreelancer: people.isFreelancer, episodeTitle: episodes.title })
     .from(bookings).leftJoin(rooms, eq(bookings.roomId, rooms.id)).leftJoin(people, eq(bookings.personId, people.id)).leftJoin(episodes, eq(bookings.episodeId, episodes.id)).where(and(...conditions));
   return conflicts.map((conflict) => ({ ...conflict, overlaps: [conflict.roomId && conflict.roomId === window.roomId ? "room" : null, conflict.personId && conflict.personId === window.personId ? "person" : null].filter((resource): resource is "room" | "person" => Boolean(resource)) }));
 }
@@ -37,32 +37,32 @@ export async function getBookingSuggestions(organizationId: string, window: Book
   const [availableRooms, availablePeople, resourceBookings] = await Promise.all([
     compatibleTypes.length ? db.select({ id: rooms.id, name: rooms.name, type: rooms.type }).from(rooms).where(and(eq(rooms.organizationId, organizationId), inArray(rooms.type, compatibleTypes))).orderBy(asc(rooms.name)) : [],
     compatibleRoles.length ? db.select({ id: people.id, name: people.name, role: people.role, availability: people.availability, isFreelancer: people.isFreelancer }).from(people).where(and(eq(people.organizationId, organizationId), inArray(people.role, compatibleRoles), eq(people.isActive, true), inArray(people.availability, ["available", "limited"]))).orderBy(asc(people.name)) : [],
-    (window.roomId || window.personId) ? db.select({ startsAt: bookings.startsAt, endsAt: bookings.endsAt, setupMinutes: bookings.setupMinutes, handoverMinutes: bookings.handoverMinutes, strikeMinutes: bookings.strikeMinutes }).from(bookings).where(and(eq(bookings.organizationId, organizationId), ne(bookings.status, "cancelled"), or(window.roomId ? eq(bookings.roomId, window.roomId) : undefined, window.personId ? eq(bookings.personId, window.personId) : undefined), sql`${bookings.endsAt} + ((${bookings.handoverMinutes} + ${bookings.strikeMinutes}) * interval '1 minute') > ${operational.startsAt.toISOString()}::timestamptz`, window.excludeId ? ne(bookings.id, window.excludeId) : undefined)).orderBy(asc(bookings.startsAt)) : [],
+    (window.roomId || window.personId) ? db.select({ startsAt: bookings.startsAt, endsAt: bookings.endsAt, setupMinutes: bookings.setupMinutes, handoverMinutes: bookings.handoverMinutes }).from(bookings).where(and(eq(bookings.organizationId, organizationId), ne(bookings.status, "cancelled"), or(window.roomId ? eq(bookings.roomId, window.roomId) : undefined, window.personId ? eq(bookings.personId, window.personId) : undefined), sql`${bookings.endsAt} + (${bookings.handoverMinutes} * interval '1 minute') > ${operational.startsAt.toISOString()}::timestamptz`, window.excludeId ? ne(bookings.id, window.excludeId) : undefined)).orderBy(asc(bookings.startsAt)) : [],
   ]);
   const duration = operational.endsAt.getTime() - operational.startsAt.getTime();
   const alternativeResourceConditions = [availableRooms.length ? inArray(bookings.roomId, availableRooms.map((room) => room.id)) : undefined, availablePeople.length ? inArray(bookings.personId, availablePeople.map((person) => person.id)) : undefined].filter(Boolean);
   const busyAlternatives = alternativeResourceConditions.length ? await db.select({ roomId: bookings.roomId, personId: bookings.personId }).from(bookings)
-    .where(and(eq(bookings.organizationId, organizationId), ne(bookings.status, "cancelled"), or(...alternativeResourceConditions), sql`${bookings.startsAt} - (${bookings.setupMinutes} * interval '1 minute') < ${operational.endsAt.toISOString()}::timestamptz`, sql`${bookings.endsAt} + ((${bookings.handoverMinutes} + ${bookings.strikeMinutes}) * interval '1 minute') > ${operational.startsAt.toISOString()}::timestamptz`, window.excludeId ? ne(bookings.id, window.excludeId) : undefined)) : [];
+    .where(and(eq(bookings.organizationId, organizationId), ne(bookings.status, "cancelled"), or(...alternativeResourceConditions), sql`${bookings.startsAt} - (${bookings.setupMinutes} * interval '1 minute') < ${operational.endsAt.toISOString()}::timestamptz`, sql`${bookings.endsAt} + (${bookings.handoverMinutes} * interval '1 minute') > ${operational.startsAt.toISOString()}::timestamptz`, window.excludeId ? ne(bookings.id, window.excludeId) : undefined)) : [];
   const busyRoomIds = new Set(busyAlternatives.flatMap((booking) => booking.roomId ? [booking.roomId] : []));
   const busyPersonIds = new Set(busyAlternatives.flatMap((booking) => booking.personId ? [booking.personId] : []));
   let nextStart = new Date(operational.startsAt);
   for (const booking of resourceBookings) {
     const nextEnd = new Date(nextStart.getTime() + duration);
     const occupiedStart = new Date(booking.startsAt.getTime() - booking.setupMinutes * 60_000);
-    const occupiedEnd = new Date(booking.endsAt.getTime() + (booking.handoverMinutes + booking.strikeMinutes) * 60_000);
+    const occupiedEnd = new Date(booking.endsAt.getTime() + booking.handoverMinutes * 60_000);
     if (occupiedStart < nextEnd && occupiedEnd > nextStart) nextStart = occupiedEnd;
   }
   return {
     conflicts,
     availableRooms: availableRooms.filter((room) => room.id !== window.roomId && !busyRoomIds.has(room.id)).slice(0, 4),
     availablePeople: availablePeople.filter((person) => person.id !== window.personId && !busyPersonIds.has(person.id)).slice(0, 4),
-    nearestSlot: resourceBookings.length ? { startsAt: new Date(nextStart.getTime() + (window.setupMinutes ?? 0) * 60_000), endsAt: new Date(nextStart.getTime() + duration - (window.handoverMinutes ?? 0) * 60_000 - (window.strikeMinutes ?? 0) * 60_000) } : null,
+    nearestSlot: resourceBookings.length ? { startsAt: new Date(nextStart.getTime() + (window.setupMinutes ?? 0) * 60_000), endsAt: new Date(nextStart.getTime() + duration - (window.handoverMinutes ?? 0) * 60_000) } : null,
   };
 }
 
 function operationalWindow(window: BookingWindow) {
   return {
     startsAt: new Date(window.startsAt.getTime() - (window.setupMinutes ?? 0) * 60_000),
-    endsAt: new Date(window.endsAt.getTime() + ((window.handoverMinutes ?? 0) + (window.strikeMinutes ?? 0)) * 60_000),
+    endsAt: new Date(window.endsAt.getTime() + (window.handoverMinutes ?? 0) * 60_000),
   };
 }

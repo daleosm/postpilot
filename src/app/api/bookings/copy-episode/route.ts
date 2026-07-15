@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     const offset = booking.startsAt.getTime() - sourceDay.getTime();
     const duration = booking.endsAt.getTime() - booking.startsAt.getTime();
     const startsAt = new Date(targetDay.getTime() + offset); const endsAt = new Date(startsAt.getTime() + duration);
-    return { organizationId, roomId: booking.roomId, personId: booking.personId, episodeId: target.id, title: source.productionCode && target.productionCode ? booking.title.replaceAll(source.productionCode, target.productionCode) : booking.title, startsAt, endsAt, setupMinutes: booking.setupMinutes, handoverMinutes: booking.handoverMinutes, strikeMinutes: booking.strikeMinutes, status: "tentative" as const, bookingType: booking.bookingType, notes: booking.notes };
+    return { organizationId, roomId: booking.roomId, personId: booking.personId, episodeId: target.id, title: source.productionCode && target.productionCode ? booking.title.replaceAll(source.productionCode, target.productionCode) : booking.title, startsAt, endsAt, setupMinutes: booking.setupMinutes, handoverMinutes: booking.handoverMinutes, status: "tentative" as const, bookingType: booking.bookingType, notes: booking.notes };
   });
   const conflicts = (await Promise.all(copies.map((booking) => findBookingConflicts(organizationId, booking)))).flat();
   if (conflicts.length) return NextResponse.json({ error: "The copied sequence conflicts with existing room or personnel bookings.", conflicts }, { status: 409 });

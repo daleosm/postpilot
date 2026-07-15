@@ -2,7 +2,6 @@
 
 import { Button } from "@heroui/react";
 import { ChevronLeft, ChevronRight, Coffee, UsersRound } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { BookingFormDialog, type BookingResources } from "@/components/booking-form-dialog";
@@ -19,7 +18,6 @@ export type ScheduleBooking = {
   approvedOvertimeMinutes: number;
   setupMinutes: number;
   handoverMinutes: number;
-  strikeMinutes: number;
   status: string;
   bookingType: string;
   roomId: string | null;
@@ -46,7 +44,7 @@ const HOURS_PER_DAY = MINUTES_IN_SUITE_DAY / 60;
 const ROOM_COLUMN_WIDTH = 168;
 const DAY_WIDTH = 260;
 
-export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, pendingTimes, initialDate, canManage, canApproveTime, canSubmitOwnTime, currentPersonId }: { bookings: ScheduleBooking[]; rooms: Array<{ id: string; name: string; type: string }>; resources: BookingResources; cateringRequests: CateringRequest[]; pendingTimes: Array<{ id: string; bookingTitle: string; personName: string; actualStartsAt: Date; actualEndsAt: Date; overtimeMinutes: number; note: string | null }>; initialDate: string; canManage: boolean; canApproveTime: boolean; canSubmitOwnTime: boolean; currentPersonId: string | null }) {
+export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, initialDate, canManage, canSubmitOwnTime, currentPersonId }: { bookings: ScheduleBooking[]; rooms: Array<{ id: string; name: string; type: string }>; resources: BookingResources; cateringRequests: CateringRequest[]; initialDate: string; canManage: boolean; canSubmitOwnTime: boolean; currentPersonId: string | null }) {
   const [view, setView] = useState<"day" | "week">("week");
   const [mode, setMode] = useState<"rooms" | "staff">("rooms");
   const [cursor, setCursor] = useState(() => startOfDay(new Date(initialDate)));
@@ -83,12 +81,9 @@ export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, pe
       </div>
     </section>
     </> : <StaffDayView people={resources.people} bookings={bookings} cateringRequests={cateringRequests} day={cursor} onSelect={setSelectedBooking} />}
-    {canApproveTime && <TimeApprovalQueue items={pendingTimes} />}
     {selectedBooking && <div className="fixed bottom-5 right-5 z-40 flex flex-wrap gap-2 rounded-lg border border-[#e2e3de] bg-[#fafbf9] p-2 shadow-lg">{canManage && <BookingFormDialog key={selectedBooking.id} resources={resources} initialStart={toInput(cursor)} booking={selectedBooking} onClose={() => setSelectedBooking(null)} />}{canSubmitOwnTime && selectedBooking.personId === currentPersonId && <><ActualTimeDialog booking={selectedBooking} /><BookingConflictFlagDialog bookingId={selectedBooking.id} title={selectedBooking.title} /></>}<Button size="sm" variant="tertiary" onPress={() => setSelectedBooking(null)}>Close</Button></div>}
   </div>;
 }
-
-function TimeApprovalQueue({ items }: { items: Array<{ id: string; bookingTitle: string; personName: string; actualStartsAt: Date; actualEndsAt: Date; overtimeMinutes: number; note: string | null }> }) { const router = useRouter(); const [working, setWorking] = useState<string | null>(null); const [error, setError] = useState(""); const approve = async (id: string) => { setWorking(id); setError(""); const response = await fetch(`/api/booking-time-submissions/${id}/approve`, { method: "POST" }); const body = await response.json().catch(() => null); setWorking(null); if (response.ok) return router.refresh(); setError(body?.error ?? "Could not approve this time submission."); }; return <section className="panel p-4"><h2 className="text-sm font-semibold text-[#343c38]">Time awaiting approval</h2><p className="mt-1 text-xs text-[#858a87]">Approved time updates booking-derived costs. Budget overruns require the relevant approval permission.</p>{items.length ? <div className="mt-3 divide-y divide-[#ecebe7]">{items.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-2 text-xs"><p><b>{item.personName}</b> · {item.bookingTitle} · {timeLabel(item.actualStartsAt)}–{timeLabel(item.actualEndsAt)}{item.overtimeMinutes ? ` · ${item.overtimeMinutes}m overtime` : ""}{item.note ? ` · ${item.note}` : ""}</p><Button size="sm" variant="primary" isDisabled={working === item.id} onPress={() => approve(item.id)} className="bg-[#557b69] text-white">Approve time</Button></div>)}</div> : <p className="mt-2 text-xs text-[#858a87]">No artist time confirmations awaiting approval.</p>}{error && <p role="alert" className="mt-3 rounded-md bg-[#fcf1eb] px-3 py-2 text-xs text-[#984f35]">{error}</p>}</section>; }
 
 function StaffDayView({ people, bookings, cateringRequests, day, onSelect }: { people: BookingResources["people"]; bookings: ScheduleBooking[]; cateringRequests: CateringRequest[]; day: Date; onSelect: (booking: ScheduleBooking) => void }) {
   const dayEnd = addDays(day, 1);
@@ -168,7 +163,7 @@ function startOfDay(date: Date) { const value = new Date(date); value.setHours(0
 function addDays(date: Date, count: number) { const value = new Date(date); value.setDate(value.getDate() + count); return value; }
 function overlaps(start: Date, end: Date, rangeStart: Date, rangeEnd: Date) { return start < rangeEnd && end > rangeStart; }
 function operationalStart(booking: ScheduleBooking) { return new Date(booking.startsAt.getTime() - booking.setupMinutes * 60_000); }
-function operationalEnd(booking: ScheduleBooking) { return new Date(booking.endsAt.getTime() + (booking.handoverMinutes + booking.strikeMinutes) * 60_000); }
+function operationalEnd(booking: ScheduleBooking) { return new Date(booking.endsAt.getTime() + booking.handoverMinutes * 60_000); }
 function calendarDayDistance(rangeStart: Date, value: Date) { return Math.floor((startOfDay(value).getTime() - rangeStart.getTime()) / 86_400_000); }
 function minutesOfDay(date: Date) { return date.getHours() * 60 + date.getMinutes(); }
 function timeLabel(date: Date) { return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date); }

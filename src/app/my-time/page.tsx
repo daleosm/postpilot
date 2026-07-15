@@ -17,7 +17,7 @@ export default async function MyTimePage() {
     <header>
       <p className="text-xs font-medium uppercase tracking-[0.12em] text-[#7c827f]">Personal time confirmation · {context.organization.organizationName}</p>
       <h1 className="mt-2 text-[27px] font-semibold tracking-[-0.045em] text-[#202524]">My time</h1>
-      <p className="mt-1 max-w-2xl text-sm text-[#747977]">Confirm the actual time you worked. Production or finance approves it before it affects operational cost or billing.</p>
+      <p className="mt-1 max-w-2xl text-sm text-[#747977]">Confirm the actual time you worked. Confirmed time updates operational cost and billing immediately.</p>
     </header>
     <MyTimeBoard bookings={bookings} />
   </div>;

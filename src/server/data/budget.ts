@@ -66,14 +66,14 @@ const bookingRateCategory: Partial<Record<string, { category: string; unit: "hou
 };
 
 /**
- * A live room-and-artist cost basis. Planned and approved actual time are the
+ * A live room-and-artist cost basis. Planned and confirmed actual time are the
  * source of truth for booking-derived budget categories.
  */
 export async function listEpisodeBookingCosts(organizationId: string, episodeId: string) {
   return listBookingCosts(organizationId, episodeId);
 }
 
-export async function getBookingCostApprovalProjection(organizationId: string, episodeId: string, actualOverride: { bookingId: string; actualStartsAt: Date; actualEndsAt: Date; overtimeMinutes: number }) {
+export async function getBookingCostProjection(organizationId: string, episodeId: string, actualOverride: { bookingId: string; actualStartsAt: Date; actualEndsAt: Date; overtimeMinutes: number }) {
   const costs = await listBookingCosts(organizationId, episodeId, actualOverride);
   const changed = costs.find((cost) => cost.id === actualOverride.bookingId);
   if (!changed?.category) return null;

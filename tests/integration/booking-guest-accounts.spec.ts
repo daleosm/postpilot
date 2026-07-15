@@ -33,7 +33,6 @@ function bookingPayload(guestPersonId: string | null) {
     endsAt: "2034-06-10T12:00:00.000Z",
     setupMinutes: 15,
     handoverMinutes: 0,
-    strikeMinutes: 15,
     status: "confirmed",
     bookingType: "client_review",
     notes: null,

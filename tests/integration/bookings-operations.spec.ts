@@ -9,10 +9,8 @@ const organizationId = "97000000-0000-4000-8000-000000000001";
 const foreignOrganizationId = "97000000-0000-4000-8000-000000000002";
 const managerUserId = "user_booking_operations_manager";
 const artistUserId = "user_booking_operations_artist";
-const approverUserId = "user_booking_operations_approver";
 const managerPersonId = "97000000-0000-4000-8000-000000000003";
 const artistPersonId = "97000000-0000-4000-8000-000000000004";
-const approverPersonId = "97000000-0000-4000-8000-000000000005";
 const roomOneId = "97000000-0000-4000-8000-000000000006";
 const roomTwoId = "97000000-0000-4000-8000-000000000007";
 const showId = "97000000-0000-4000-8000-000000000008";
@@ -44,7 +42,6 @@ function bookingPayload(overrides: Record<string, unknown> = {}) {
     endsAt: "2035-05-01T14:00:00.000Z",
     setupMinutes: 0,
     handoverMinutes: 0,
-    strikeMinutes: 0,
     status: "confirmed",
     bookingType: "edit",
     notes: null,
@@ -67,22 +64,19 @@ test.describe("Booking operations integration", () => {
     await sql`
       insert into users (id, name, email) values
         (${managerUserId}, 'Booking Operations Manager', 'booking-operations-manager@postpilot.test'),
-        (${artistUserId}, 'Booking Operations Artist', 'booking-operations-artist@postpilot.test'),
-        (${approverUserId}, 'Booking Operations Approver', 'booking-operations-approver@postpilot.test')
+        (${artistUserId}, 'Booking Operations Artist', 'booking-operations-artist@postpilot.test')
       on conflict (id) do update set name = excluded.name, email = excluded.email
     `;
     await sql`insert into organizations (id, name, slug, currency) values (${organizationId}, 'Booking Operations Lab', 'booking-operations-lab', 'GBP'), (${foreignOrganizationId}, 'Foreign Booking Operations', 'foreign-booking-operations', 'GBP')`;
-    await sql`insert into organization_members (organization_id, user_id, role) values (${organizationId}, ${managerUserId}, 'admin'), (${organizationId}, ${artistUserId}, 'member'), (${organizationId}, ${approverUserId}, 'member')`;
+    await sql`insert into organization_members (organization_id, user_id, role) values (${organizationId}, ${managerUserId}, 'admin'), (${organizationId}, ${artistUserId}, 'member')`;
     await sql`
       insert into organization_role_policies (organization_id, role, label, permissions) values
-        (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb),
-        (${organizationId}, 'time_approver', 'Time approver', '["approve_time"]'::jsonb)
+        (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb)
     `;
     await sql`
       insert into people (id, organization_id, user_id, name, email, role) values
         (${managerPersonId}, ${organizationId}, ${managerUserId}, 'Booking Operations Manager', 'booking-operations-manager@postpilot.test', 'producer'),
-        (${artistPersonId}, ${organizationId}, ${artistUserId}, 'Booking Operations Artist', 'booking-operations-artist@postpilot.test', 'editor'),
-        (${approverPersonId}, ${organizationId}, ${approverUserId}, 'Booking Operations Approver', 'booking-operations-approver@postpilot.test', 'time_approver')
+        (${artistPersonId}, ${organizationId}, ${artistUserId}, 'Booking Operations Artist', 'booking-operations-artist@postpilot.test', 'editor')
     `;
     await sql`insert into rooms (id, organization_id, name, type) values (${roomOneId}, ${organizationId}, 'Operations Edit 1', 'edit_bay'), (${roomTwoId}, ${organizationId}, 'Operations Edit 2', 'edit_bay')`;
     await sql`insert into rooms (id, organization_id, name, type) values (${foreignRoomId}, ${foreignOrganizationId}, 'Foreign Edit 1', 'edit_bay')`;
@@ -98,18 +92,18 @@ test.describe("Booking operations integration", () => {
     `;
     await sql`insert into service_rates (organization_id, name, category, unit, rate, currency) values (${organizationId}, 'Edit suite day', 'Edit suite', 'day', '900.00', 'GBP')`;
     await sql`
-      insert into bookings (id, organization_id, room_id, episode_id, person_id, title, starts_at, ends_at, setup_minutes, handover_minutes, strike_minutes, status, booking_type) values
-        (${conflictBookingId}, ${organizationId}, ${roomOneId}, ${sourceEpisodeId}, ${artistPersonId}, 'Protected edit block', '2035-05-01T09:00:00.000Z', '2035-05-01T12:00:00.000Z', 15, 30, 0, 'confirmed', 'edit'),
-        (${sourceBookingOneId}, ${organizationId}, ${roomOneId}, ${sourceEpisodeId}, ${artistPersonId}, 'BOS101 editorial', '2035-05-05T10:00:00.000Z', '2035-05-05T12:00:00.000Z', 15, 0, 0, 'confirmed', 'edit'),
-        (${sourceBookingTwoId}, ${organizationId}, ${roomTwoId}, ${sourceEpisodeId}, ${artistPersonId}, 'BOS101 finishing', '2035-05-06T09:00:00.000Z', '2035-05-06T11:00:00.000Z', 0, 20, 10, 'confirmed', 'edit'),
-        (${actualBookingId}, ${organizationId}, ${roomOneId}, ${actualEpisodeId}, ${artistPersonId}, 'Actual-time edit day', '2035-05-25T09:00:00.000Z', '2035-05-25T18:00:00.000Z', 0, 0, 0, 'confirmed', 'edit')
+      insert into bookings (id, organization_id, room_id, episode_id, person_id, title, starts_at, ends_at, setup_minutes, handover_minutes, status, booking_type) values
+        (${conflictBookingId}, ${organizationId}, ${roomOneId}, ${sourceEpisodeId}, ${artistPersonId}, 'Protected edit block', '2035-05-01T09:00:00.000Z', '2035-05-01T12:00:00.000Z', 15, 30, 'confirmed', 'edit'),
+        (${sourceBookingOneId}, ${organizationId}, ${roomOneId}, ${sourceEpisodeId}, ${artistPersonId}, 'BOS101 editorial', '2035-05-05T10:00:00.000Z', '2035-05-05T12:00:00.000Z', 15, 0, 'confirmed', 'edit'),
+        (${sourceBookingTwoId}, ${organizationId}, ${roomTwoId}, ${sourceEpisodeId}, ${artistPersonId}, 'BOS101 finishing', '2035-05-06T09:00:00.000Z', '2035-05-06T11:00:00.000Z', 0, 20, 'confirmed', 'edit'),
+        (${actualBookingId}, ${organizationId}, ${roomOneId}, ${actualEpisodeId}, ${artistPersonId}, 'Actual-time edit day', '2035-05-25T09:00:00.000Z', '2035-05-25T18:00:00.000Z', 0, 0, 'confirmed', 'edit')
     `;
     await sql`insert into bookings (id, organization_id, room_id, episode_id, title, starts_at, ends_at, status, booking_type) values (${foreignBookingId}, ${foreignOrganizationId}, ${foreignRoomId}, ${foreignEpisodeId}, 'Foreign booking', '2035-05-25T09:00:00.000Z', '2035-05-25T18:00:00.000Z', 'confirmed', 'edit')`;
   });
 
   test.afterAll(async () => {
     await sql`delete from organizations where id in (${organizationId}, ${foreignOrganizationId})`;
-    await sql`delete from users where id in (${managerUserId}, ${artistUserId}, ${approverUserId})`;
+    await sql`delete from users where id in (${managerUserId}, ${artistUserId})`;
     await sql.end();
   });
 
@@ -144,9 +138,9 @@ test.describe("Booking operations integration", () => {
     const copiedBody = await copied.json();
     expect(copied.status(), JSON.stringify(copiedBody)).toBe(201);
     expect(copiedBody).toMatchObject({ created: 4 });
-    const targetBookings = await sql`select title, starts_at, ends_at, status, setup_minutes, handover_minutes, strike_minutes from bookings where organization_id = ${organizationId} and episode_id = ${targetEpisodeId} order by starts_at`;
+    const targetBookings = await sql`select title, starts_at, ends_at, status, setup_minutes, handover_minutes from bookings where organization_id = ${organizationId} and episode_id = ${targetEpisodeId} order by starts_at`;
     expect(targetBookings).toHaveLength(4);
-    expect(targetBookings).toEqual(expect.arrayContaining([expect.objectContaining({ title: "BOS102 editorial", status: "tentative", setup_minutes: 15 }), expect.objectContaining({ title: "BOS102 finishing", status: "tentative", handover_minutes: 20, strike_minutes: 10 })]));
+    expect(targetBookings).toEqual(expect.arrayContaining([expect.objectContaining({ title: "BOS102 editorial", status: "tentative", setup_minutes: 15 }), expect.objectContaining({ title: "BOS102 finishing", status: "tentative", handover_minutes: 20 })]));
     expect(new Date(targetBookings.find((booking) => booking.title === "BOS102 editorial")!.starts_at).toISOString()).toBe("2035-06-05T10:00:00.000Z");
     expect(new Date(targetBookings.find((booking) => booking.title === "BOS102 finishing")!.starts_at).toISOString()).toBe("2035-06-06T09:00:00.000Z");
 
@@ -160,11 +154,11 @@ test.describe("Booking operations integration", () => {
     expect(foreign.status()).toBe(404);
   });
 
-  test("submits own actual time, protects it from unauthorised approval, and rolls approved cost into budget", async ({ page }) => {
+  test("confirms own actual time and rolls its cost into budget immediately", async ({ page }) => {
     await useSession(page, artistUserId);
     const submission = await page.request.post(`/api/bookings/${actualBookingId}/time-submissions`, { data: { actualStartsAt: "2035-05-25T09:00:00.000Z", actualEndsAt: "2035-05-25T19:00:00.000Z", overtimeMinutes: 0, note: "Client notes ran long." } });
     expect(submission.status()).toBe(201);
-    const submissionId = (await submission.json()).id as string;
+    await expect(submission.json()).resolves.toMatchObject({ confirmed: true, budgetOverrun: true });
     const duplicate = await page.request.post(`/api/bookings/${actualBookingId}/time-submissions`, { data: { actualStartsAt: "2035-05-25T09:00:00.000Z", actualEndsAt: "2035-05-25T19:00:00.000Z", overtimeMinutes: 0 } });
     expect(duplicate.status()).toBe(409);
     const flag = await page.request.post(`/api/bookings/${actualBookingId}/flag-conflict`, { data: { reason: "Client notes ran beyond the booked finish." } });
@@ -172,15 +166,6 @@ test.describe("Booking operations integration", () => {
     const [flagged] = await sql`select action from activity_log where organization_id = ${organizationId} and entity_id = ${actualBookingId} and action = 'booking.conflict_flagged'`;
     expect(flagged.action).toBe("booking.conflict_flagged");
 
-    await useSession(page, approverUserId);
-    const blockedOverrun = await page.request.post(`/api/booking-time-submissions/${submissionId}/approve`);
-    expect(blockedOverrun.status()).toBe(409);
-    await expect(blockedOverrun.json()).resolves.toMatchObject({ code: "BUDGET_OVERRUN" });
-
-    await useSession(page, managerUserId);
-    const approved = await page.request.post(`/api/booking-time-submissions/${submissionId}/approve`);
-    expect(approved.status()).toBe(200);
-    await expect(approved.json()).resolves.toMatchObject({ approved: true, budgetOverrun: true });
     const [booking] = await sql`select actual_starts_at, actual_ends_at, approved_overtime_minutes from bookings where id = ${actualBookingId}`;
     expect(new Date(booking.actual_ends_at).toISOString()).toBe("2035-05-25T19:00:00.000Z");
     expect(booking.approved_overtime_minutes).toBe(0);
@@ -188,7 +173,7 @@ test.describe("Booking operations integration", () => {
     expect(budget).toMatchObject({ category: "Edit suite", budgeted_amount: "900.00", actual_amount: "1000.00", currency: "GBP" });
   });
 
-  test("does not permit a foreign booking mutation or time approval", async ({ page }) => {
+  test("does not permit a foreign booking mutation", async ({ page }) => {
     await useSession(page, managerUserId);
     const foreignUpdate = await page.request.patch(`/api/bookings/${foreignBookingId}`, { data: bookingPayload() });
     expect(foreignUpdate.status()).toBe(404);

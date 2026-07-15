@@ -1,4 +1,4 @@
-export { getBookingCostApprovalProjection, getBudgetData, listEpisodeBookingCosts, listServiceRates } from "./budget";
+export { getBookingCostProjection, getBudgetData, listEpisodeBookingCosts, listServiceRates } from "./budget";
 export { getCrmData, listCrmCompanyOptions } from "./crm";
 export { getCateringResources, listCateringRequests } from "./catering";
 export { getDashboardData } from "./dashboard";
@@ -6,7 +6,7 @@ export { getDemoCommandCenterData } from "./demo-dashboard";
 export { getEpisode, getEpisodeWorkspace, listEpisodes } from "./episodes";
 export { listWorkflowSignOffInbox } from "./workflow-approvals";
 export { listEpisodeWorkOrders, listWorkOrderInbox } from "./work-orders";
-export { getScheduleResources, listMyTimeBookings, listPendingBookingTimeSubmissions, listRooms, listSchedule } from "./schedule";
+export { getScheduleResources, listMyTimeBookings, listRooms, listSchedule } from "./schedule";
 export { getShow, getShowWorkspace, listShowEpisodeTeam, listShows } from "./shows";
 export { listTeam } from "./team";
 export { listOrganizationUsers } from "./organization-users";
