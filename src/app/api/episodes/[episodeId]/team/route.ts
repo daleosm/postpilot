@@ -1,11 +1,14 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { getDb } from "@/lib/db";
 import { episodeTeamAssignments, episodes, people } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { episodeTeamAssignmentSchema } from "@/lib/validations/entities";
+
+const signerSchema = z.object({ assignmentId: z.string().uuid(), isSigner: z.boolean() });
 
 export async function GET(_request: Request, { params }: { params: Promise<{ episodeId: string }> }) {
   if (!(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -36,14 +39,48 @@ export async function POST(request: Request, { params }: { params: Promise<{ epi
     db.select({ id: people.id, role: people.role }).from(people).where(and(eq(people.id, parsed.data.personId), eq(people.organizationId, org))).limit(1),
   ]);
   if (!episode[0] || !person[0]) return NextResponse.json({ error: "Episode or person not found." }, { status: 404 });
-  const [assignment] = await db.insert(episodeTeamAssignments).values({ ...parsed.data, responsibility: person[0].role, organizationId: org, episodeId }).onConflictDoNothing().returning({ id: episodeTeamAssignments.id });
+  const sameRoleAssignments = await db.select({ id: episodeTeamAssignments.id }).from(episodeTeamAssignments)
+    .innerJoin(people, eq(episodeTeamAssignments.personId, people.id))
+    .where(and(eq(episodeTeamAssignments.organizationId, org), eq(episodeTeamAssignments.episodeId, episodeId), eq(people.organizationId, org), eq(people.role, person[0].role)));
+  const [assignment] = await db.insert(episodeTeamAssignments).values({ ...parsed.data, responsibility: person[0].role, isLead: sameRoleAssignments.length === 0, organizationId: org, episodeId }).onConflictDoNothing().returning({ id: episodeTeamAssignments.id });
   return NextResponse.json(assignment ?? { duplicate: true }, { status: assignment ? 201 : 200 });
+}
+
+export async function PATCH(request: Request, { params }: { params: Promise<{ episodeId: string }> }) {
+  if (!(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const parsed = signerSchema.safeParse(await request.json());
+  if (!parsed.success) return NextResponse.json({ error: "Choose an episode-team signer." }, { status: 400 });
+  const context = await getActiveOrganizationContext();
+  if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { episodeId } = await params;
+  const org = context.organization.organizationId;
+  const db = getDb();
+  const team = await db.select({ id: episodeTeamAssignments.id, role: people.role }).from(episodeTeamAssignments)
+    .innerJoin(people, eq(episodeTeamAssignments.personId, people.id))
+    .where(and(eq(episodeTeamAssignments.organizationId, org), eq(episodeTeamAssignments.episodeId, episodeId), eq(people.organizationId, org)));
+  const selected = team.find((assignment) => assignment.id === parsed.data.assignmentId);
+  if (!selected) return NextResponse.json({ error: "Episode-team assignment not found." }, { status: 404 });
+  const sameRoleIds = team.filter((assignment) => assignment.role === selected.role).map((assignment) => assignment.id);
+  await db.transaction(async (tx) => {
+    await tx.update(episodeTeamAssignments).set({ isLead: false, updatedAt: new Date() }).where(and(eq(episodeTeamAssignments.organizationId, org), inArray(episodeTeamAssignments.id, sameRoleIds)));
+    if (parsed.data.isSigner) await tx.update(episodeTeamAssignments).set({ isLead: true, updatedAt: new Date() }).where(and(eq(episodeTeamAssignments.organizationId, org), eq(episodeTeamAssignments.id, selected.id)));
+  });
+  return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ episodeId: string }> }) {
   if (!(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const id = new URL(request.url).searchParams.get("assignmentId"); if (!id) return NextResponse.json({ error: "Assignment is required." }, { status: 400 });
   const context = await getActiveOrganizationContext(); if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { episodeId } = await params; const result = await getDb().delete(episodeTeamAssignments).where(and(eq(episodeTeamAssignments.id, id), eq(episodeTeamAssignments.episodeId, episodeId), eq(episodeTeamAssignments.organizationId, context.organization.organizationId))).returning({ id: episodeTeamAssignments.id });
-  return result.length ? NextResponse.json({ ok: true }) : NextResponse.json({ error: "Assignment not found." }, { status: 404 });
+  const { episodeId } = await params;
+  const org = context.organization.organizationId;
+  const db = getDb();
+  const [removed] = await db.select({ id: episodeTeamAssignments.id, role: people.role, isSigner: episodeTeamAssignments.isLead }).from(episodeTeamAssignments).innerJoin(people, eq(episodeTeamAssignments.personId, people.id)).where(and(eq(episodeTeamAssignments.id, id), eq(episodeTeamAssignments.episodeId, episodeId), eq(episodeTeamAssignments.organizationId, org), eq(people.organizationId, org))).limit(1);
+  if (!removed) return NextResponse.json({ error: "Assignment not found." }, { status: 404 });
+  await db.delete(episodeTeamAssignments).where(and(eq(episodeTeamAssignments.id, id), eq(episodeTeamAssignments.episodeId, episodeId), eq(episodeTeamAssignments.organizationId, org)));
+  if (removed.isSigner) {
+    const remaining = await db.select({ id: episodeTeamAssignments.id }).from(episodeTeamAssignments).innerJoin(people, eq(episodeTeamAssignments.personId, people.id)).where(and(eq(episodeTeamAssignments.organizationId, org), eq(episodeTeamAssignments.episodeId, episodeId), eq(people.organizationId, org), eq(people.role, removed.role)));
+    if (remaining.length === 1) await db.update(episodeTeamAssignments).set({ isLead: true, updatedAt: new Date() }).where(and(eq(episodeTeamAssignments.organizationId, org), eq(episodeTeamAssignments.id, remaining[0].id)));
+  }
+  return NextResponse.json({ ok: true });
 }

@@ -67,7 +67,7 @@ test.describe("Configurable workflow functionality", () => {
     `;
     await sql`
       insert into people (id, organization_id, user_id, name, email, role)
-      values (${viewerPersonId}, ${organizationId}, ${viewerUserId}, 'Workflow Viewer', 'workflow-viewer@postpilot.test', 'editor')
+      values (${viewerPersonId}, ${organizationId}, ${viewerUserId}, 'Workflow Viewer', 'workflow-viewer@postpilot.test', 'post_supervisor')
     `;
     await sql`
       insert into post_workflows (id, organization_id, name, description, is_default)
@@ -100,6 +100,12 @@ test.describe("Configurable workflow functionality", () => {
     await sql`
       insert into episodes (id, organization_id, season_id, workflow_stage_id, number, production_code, title, status, qc_status)
       values (${episodeId}, ${organizationId}, ${seasonId}, ${editorialStageId}, 1, 'WFL101', 'Custom workflow episode', 'development', 'not_started')
+    `;
+    await sql`
+      insert into episode_team_assignments (organization_id, episode_id, person_id, responsibility, is_lead)
+      values
+        (${organizationId}, ${episodeId}, ${mayaPersonId}, 'post_supervisor', true),
+        (${organizationId}, ${episodeId}, ${viewerPersonId}, 'post_supervisor', false)
     `;
   });
 
@@ -185,12 +191,30 @@ test.describe("Configurable workflow functionality", () => {
     await expect(page.getByRole("switch", { name: "Allow Delivery prep to start early" })).toBeChecked();
   });
 
-  test("shows the sign-off form only to the user with the next configured sign-off role", async ({ page }) => {
+  test("sends a shared-role sign-off only to the episode’s selected signer", async ({ page }) => {
     const assumedUser = await page.request.post("/api/debug/user", { data: { userId: viewerUserId } });
     expect(assumedUser.status()).toBe(200);
 
     await openWorkflow(page);
     await expect(page.getByRole("button", { name: "Sign off", exact: true })).toHaveCount(0);
-    await expect(page.getByText("Awaiting sign-off from Graphics lead approval.")).toBeVisible();
+    await expect(page.getByText("Awaiting sign-off from Maya Ortiz.")).toBeVisible();
+  });
+
+  test("lets a manager select the other shared-role episode signer", async ({ page }) => {
+    const assumedManager = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
+    expect(assumedManager.status()).toBe(200);
+    await activateWorkflowLab(page);
+    const teamResponse = await page.request.get(`/api/episodes/${episodeId}/team`);
+    expect(teamResponse.status()).toBe(200);
+    const team = await teamResponse.json() as { assignments: Array<{ id: string; personId: string }> };
+    const viewerAssignment = team.assignments.find((assignment) => assignment.personId === viewerPersonId);
+    expect(viewerAssignment).toBeTruthy();
+    const updateSigner = await page.request.patch(`/api/episodes/${episodeId}/team`, { data: { assignmentId: viewerAssignment?.id, isSigner: true } });
+    expect(updateSigner.status()).toBe(200);
+
+    const assumedViewer = await page.request.post("/api/debug/user", { data: { userId: viewerUserId } });
+    expect(assumedViewer.status()).toBe(200);
+    await openWorkflow(page);
+    await expect(page.getByRole("button", { name: "Sign off", exact: true })).toBeVisible();
   });
 });

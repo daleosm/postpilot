@@ -4,11 +4,12 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
 import { episodeWorkflowApprovals, episodes, people, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
+import { resolveEpisodeWorkflowSigners } from "@/lib/workflow-signoffs";
 
 /** Current workflow stages for which this user is the next configured sign-off. */
 export async function listWorkflowSignOffInbox(organizationId: string, userId: string) {
   const db = getDb();
-  const [person] = await db.select({ id: people.id, role: people.role }).from(people)
+  const [person] = await db.select({ id: people.id }).from(people)
     .where(and(eq(people.organizationId, organizationId), eq(people.userId, userId))).limit(1);
   if (!person) return [];
 
@@ -41,7 +42,7 @@ export async function listWorkflowSignOffInbox(organizationId: string, userId: s
   if (!stageRules.length) return [];
 
   const episodeIds = [...new Set(stageRules.map((rule) => rule.episodeId))];
-  const approvals = await db.select({ episodeId: episodeWorkflowApprovals.episodeId, workflowStageId: episodeWorkflowApprovals.workflowStageId, approvalRuleId: episodeWorkflowApprovals.approvalRuleId, status: episodeWorkflowApprovals.status })
+  const approvals = await db.select({ episodeId: episodeWorkflowApprovals.episodeId, workflowStageId: episodeWorkflowApprovals.workflowStageId, approvalRuleId: episodeWorkflowApprovals.approvalRuleId, requiredPersonId: episodeWorkflowApprovals.requiredPersonId, status: episodeWorkflowApprovals.status })
     .from(episodeWorkflowApprovals)
     .where(and(eq(episodeWorkflowApprovals.organizationId, organizationId), inArray(episodeWorkflowApprovals.episodeId, episodeIds)));
   const approvalsByStage = new Map<string, Set<string>>();
@@ -50,17 +51,20 @@ export async function listWorkflowSignOffInbox(organizationId: string, userId: s
     const key = `${approval.episodeId}:${approval.workflowStageId}`;
     approvalsByStage.set(key, new Set([...(approvalsByStage.get(key) ?? []), approval.approvalRuleId]));
   }
-  const roleMatches = (role: string) => role === person.role;
   const byStage = new Map<string, typeof stageRules>();
   for (const rule of stageRules) {
     const key = `${rule.episodeId}:${rule.workflowStageId}`;
     byStage.set(key, [...(byStage.get(key) ?? []), rule]);
   }
 
-  return [...byStage.entries()].flatMap(([, rules]) => {
+  return (await Promise.all([...byStage.entries()].map(async ([, rules]) => {
     const approved = approvalsByStage.get(`${rules[0].episodeId}:${rules[0].workflowStageId}`) ?? new Set<string>();
     const nextRule = rules.find((rule) => !approved.has(rule.ruleId));
-    if (!nextRule || !roleMatches(nextRule.approverRole)) return [];
+    if (!nextRule) return [];
+    const approval = approvals.find((item) => item.episodeId === nextRule.episodeId && item.workflowStageId === nextRule.workflowStageId && item.approvalRuleId === nextRule.ruleId);
+    const fallback = approval?.requiredPersonId ? null : (await resolveEpisodeWorkflowSigners(organizationId, nextRule.episodeId, [{ id: nextRule.ruleId, approverRole: nextRule.approverRole }]))[0]?.signer;
+    const requiredPersonId = approval?.requiredPersonId ?? fallback?.personId ?? null;
+    if (requiredPersonId !== person.id) return [];
     return [{ ...nextRule, id: `${nextRule.episodeId}:${nextRule.ruleId}` }];
-  });
+  }))).flat();
 }
