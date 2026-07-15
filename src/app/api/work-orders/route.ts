@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { episodes, postWorkOrders, seasons, shows } from "@/lib/db/schema";
+import { bookings, crmCompanies, episodes, postWorkOrders, seasons, shows, workflowStages } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { missingTenantReferences } from "@/lib/tenant-resources";
@@ -20,10 +20,20 @@ export async function POST(request: Request) {
   const organizationId = context.organization.organizationId;
   const missing = await missingTenantReferences(organizationId, { episodeId: parsed.data.episodeId, workflowStageId: parsed.data.workflowStageId, bookingId: parsed.data.bookingId, personId: parsed.data.assigneePersonId, companyId: parsed.data.vendorCompanyId });
   if (missing.length) return NextResponse.json({ error: `Invalid ${missing.join(", ")} for this post house.` }, { status: 404 });
-  const [episode] = await getDb().select({ id: episodes.id }).from(episodes).innerJoin(seasons, eq(episodes.seasonId, seasons.id)).innerJoin(shows, eq(seasons.showId, shows.id)).where(and(eq(episodes.id, parsed.data.episodeId), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId))).limit(1);
+  const db = getDb();
+  const [episode] = await db.select({ id: episodes.id, workflowStageId: episodes.workflowStageId }).from(episodes).innerJoin(seasons, eq(episodes.seasonId, seasons.id)).innerJoin(shows, eq(seasons.showId, shows.id)).where(and(eq(episodes.id, parsed.data.episodeId), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId))).limit(1);
   if (!episode) return NextResponse.json({ error: "Episode not found for this post house." }, { status: 404 });
+  const [[booking], [targetStage], [currentStage], [vendor]] = await Promise.all([
+    parsed.data.bookingId ? db.select({ episodeId: bookings.episodeId }).from(bookings).where(and(eq(bookings.id, parsed.data.bookingId), eq(bookings.organizationId, organizationId))).limit(1) : Promise.resolve([]),
+    parsed.data.workflowStageId ? db.select({ workflowId: workflowStages.workflowId }).from(workflowStages).where(and(eq(workflowStages.id, parsed.data.workflowStageId), eq(workflowStages.organizationId, organizationId))).limit(1) : Promise.resolve([]),
+    episode.workflowStageId ? db.select({ workflowId: workflowStages.workflowId }).from(workflowStages).where(and(eq(workflowStages.id, episode.workflowStageId), eq(workflowStages.organizationId, organizationId))).limit(1) : Promise.resolve([]),
+    parsed.data.vendorCompanyId ? db.select({ type: crmCompanies.type }).from(crmCompanies).where(and(eq(crmCompanies.id, parsed.data.vendorCompanyId), eq(crmCompanies.organizationId, organizationId))).limit(1) : Promise.resolve([]),
+  ]);
+  if (booking && booking.episodeId !== episode.id) return NextResponse.json({ error: "Booking must belong to this episode." }, { status: 409 });
+  if (targetStage && currentStage && targetStage.workflowId !== currentStage.workflowId) return NextResponse.json({ error: "Workflow stage does not belong to this episode's workflow." }, { status: 409 });
+  if (vendor && vendor.type !== "vendor") return NextResponse.json({ error: "Select a vendor account for external work." }, { status: 400 });
   const { estimatedAmount, clientQuoteAmount, ...workOrderData } = parsed.data;
-  const [workOrder] = await getDb().insert(postWorkOrders).values({
+  const [workOrder] = await db.insert(postWorkOrders).values({
     ...workOrderData,
     vendorCompanyId: parsed.data.vendorCompanyId,
     estimatedAmount: estimatedAmount === undefined || estimatedAmount === null ? estimatedAmount : String(estimatedAmount),

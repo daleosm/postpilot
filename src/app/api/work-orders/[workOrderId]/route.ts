@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { people, postWorkOrders, qcIssues } from "@/lib/db/schema";
+import { crmCompanies, people, postWorkOrders, qcIssues } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can, getTenantRolePolicies } from "@/lib/permissions";
 import { missingTenantReferences } from "@/lib/tenant-resources";
@@ -30,12 +30,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
   if (!mayManage && !(mayUpdateAssigned && isAssigned)) return NextResponse.json({ error: "You can only update work assigned to you." }, { status: 403 });
   const managerFields = ["title", "description", "department", "assigneePersonId", "assigneeRole", "vendorCompanyId", "priority", "isBlocking", "billingScope", "estimatedAmount", "clientQuoteAmount", "billingNotes", "externalUrl", "dueAt"];
   if (!mayManage && managerFields.some((field) => field in parsed.data)) return NextResponse.json({ error: "Only post management can change work-order details or assignments." }, { status: 403 });
-  if (!mayManage && parsed.data.status === "in_progress" && workOrder[0].status === "open") return NextResponse.json({ error: "A user with Work Orders permission must approve a draft before work begins." }, { status: 403 });
+  if (!mayManage && workOrder[0].kind !== "qc_exception" && parsed.data.status !== undefined && workOrder[0].status === "open") return NextResponse.json({ error: "A user with Work Orders permission must approve a draft before work begins." }, { status: 403 });
   const commercialFields = ["billingScope", "estimatedAmount", "clientQuoteAmount", "billingNotes"];
   if (!mayManageCommercial && commercialFields.some((field) => field in parsed.data)) return NextResponse.json({ error: "Only users with the Budget permission can set commercial values." }, { status: 403 });
   if (workOrder[0].billingStatus === "posted" && ["billingScope", "estimatedAmount", "clientQuoteAmount", "billingNotes"].some((field) => field in parsed.data)) return NextResponse.json({ error: "A charge already posted to budget cannot be changed here." }, { status: 409 });
   const missing = mayManage ? await missingTenantReferences(organizationId, { personId: parsed.data.assigneePersonId, companyId: parsed.data.vendorCompanyId }) : [];
   if (missing.length) return NextResponse.json({ error: `Invalid ${missing.join(", ")} for this post house.` }, { status: 404 });
+  if (mayManage && parsed.data.vendorCompanyId) {
+    const [vendor] = await db.select({ type: crmCompanies.type }).from(crmCompanies).where(and(eq(crmCompanies.id, parsed.data.vendorCompanyId), eq(crmCompanies.organizationId, organizationId))).limit(1);
+    if (!vendor || vendor.type !== "vendor") return NextResponse.json({ error: "Select a vendor account for external work." }, { status: 400 });
+  }
   const status = parsed.data.status;
   const nextStatus = status ?? workOrder[0].status;
   if (workOrder[0].kind === "qc_exception" && status === "complete" && !mayVerifyQc) return NextResponse.json({ error: "Your role needs the QC verification permission to close a QC exception. Mark it ready for re-QC instead." }, { status: 403 });

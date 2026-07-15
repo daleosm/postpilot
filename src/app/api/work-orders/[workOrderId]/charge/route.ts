@@ -31,22 +31,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ wor
   if (!workOrder) return NextResponse.json({ error: "Work order not found." }, { status: 404 });
   if (workOrder.billingScope !== "billable_change") return NextResponse.json({ error: "Only a client-billable change can be posted to the budget." }, { status: 409 });
   if (workOrder.status !== "complete" || workOrder.billingStatus !== "awaiting_finance") return NextResponse.json({ error: "Complete the work order before its approved charge can be posted." }, { status: 409 });
-  const [line] = await db.insert(budgetLines).values({
-    organizationId,
-    showId: workOrder.showId,
-    seasonId: workOrder.seasonId,
-    episodeId: workOrder.episodeId,
-    workOrderId: workOrder.id,
-    category: parsed.data.category ?? workOrder.department ?? "Post work order",
-    description: `${workOrder.title}${parsed.data.reference ? ` · ${parsed.data.reference}` : ""}`,
-    budgetedAmount: String(workOrder.clientQuoteAmount ?? workOrder.estimatedAmount ?? parsed.data.actualAmount),
-    actualAmount: String(parsed.data.actualAmount),
-    currency: workOrder.clientQuoteCurrency ?? workOrder.currency,
-    costType: "billable",
-  }).returning({ id: budgetLines.id });
-  const [billable] = await db.insert(billables).values({ organizationId, showId: workOrder.showId, episodeId: workOrder.episodeId, vendor: "Client change", reference: parsed.data.reference ?? null, description: workOrder.title, amount: String(parsed.data.actualAmount), currency: workOrder.clientQuoteCurrency ?? workOrder.currency, status: "approved" }).returning({ id: billables.id });
-  await db.update(postWorkOrders).set({ actualAmount: String(parsed.data.actualAmount), billingStatus: "posted", updatedAt: new Date() })
-    .where(and(eq(postWorkOrders.id, workOrder.id), eq(postWorkOrders.organizationId, organizationId)));
+  const { line, billable } = await db.transaction(async (tx) => {
+    const [line] = await tx.insert(budgetLines).values({
+      organizationId,
+      showId: workOrder.showId,
+      seasonId: workOrder.seasonId,
+      episodeId: workOrder.episodeId,
+      workOrderId: workOrder.id,
+      category: parsed.data.category ?? workOrder.department ?? "Post work order",
+      description: `${workOrder.title}${parsed.data.reference ? ` · ${parsed.data.reference}` : ""}`,
+      budgetedAmount: String(workOrder.clientQuoteAmount ?? workOrder.estimatedAmount ?? parsed.data.actualAmount),
+      actualAmount: String(parsed.data.actualAmount),
+      currency: workOrder.clientQuoteCurrency ?? workOrder.currency,
+      costType: "billable",
+    }).returning({ id: budgetLines.id });
+    const [billable] = await tx.insert(billables).values({ organizationId, showId: workOrder.showId, episodeId: workOrder.episodeId, vendor: "Client change", reference: parsed.data.reference ?? null, description: workOrder.title, amount: String(parsed.data.actualAmount), currency: workOrder.clientQuoteCurrency ?? workOrder.currency, status: "approved" }).returning({ id: billables.id });
+    await tx.update(postWorkOrders).set({ actualAmount: String(parsed.data.actualAmount), billingStatus: "posted", updatedAt: new Date() })
+      .where(and(eq(postWorkOrders.id, workOrder.id), eq(postWorkOrders.organizationId, organizationId)));
+    return { line, billable };
+  });
   await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "work_order.charge_posted", entityType: "post_work_order", entityId: workOrder.id, metadata: { episodeId: workOrder.episodeId, budgetLineId: line.id, billableId: billable.id, actualAmount: parsed.data.actualAmount } });
   return NextResponse.json(line, { status: 201 });
 }
