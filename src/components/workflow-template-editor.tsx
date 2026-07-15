@@ -77,6 +77,46 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
     });
   }
 
+  function moveStage(id: string, direction: -1 | 1) {
+    setStages((items) => {
+      const ordered = [...items].sort((a, b) => a.position - b.position);
+      const index = ordered.findIndex((stage) => stage.id === id);
+      const targetIndex = index + direction;
+      if (index < 0 || targetIndex < 0 || targetIndex >= ordered.length) return items;
+      const [moved] = ordered.splice(index, 1);
+      ordered.splice(targetIndex, 0, moved);
+      return ordered.map((stage, position) => ({ ...stage, position: position + 1 }));
+    });
+  }
+
+  function addStage() {
+    setStages((items) => {
+      let sequence = items.length + 1;
+      let key = `stage_${sequence}`;
+      while (items.some((stage) => stage.key === key)) {
+        sequence += 1;
+        key = `stage_${sequence}`;
+      }
+      return [...items, { id: crypto.randomUUID(), name: "New stage", key, position: items.length + 1, color: "#687a78", isTerminal: false, canStartEarly: false, requiresQcPass: false }];
+    });
+  }
+
+  function removeStage(id: string) {
+    const stage = stages.find((item) => item.id === id);
+    if (!stage) return;
+    if (stage.requiresQcPass) {
+      setMessage("The QC workflow stage cannot be deleted.");
+      return;
+    }
+    if (stages.length === 1) {
+      setMessage("A workflow must have at least one stage.");
+      return;
+    }
+    setStages((items) => items.filter((item) => item.id !== id).sort((a, b) => a.position - b.position).map((item, index) => ({ ...item, position: index + 1 })));
+    setRules((items) => items.filter((item) => item.workflowStageId !== id));
+    setWorkOrderTemplates((items) => items.filter((item) => item.workflowStageId !== id));
+  }
+
   async function save() {
     setSaving(true);
     setMessage("");
@@ -102,20 +142,24 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
       <p className="rounded-lg border border-[#e5e6e1] bg-[#fafaf8] px-4 py-3 text-xs leading-5 text-[#7d837f]">This is your organization’s single workflow. Stages are sequential by default; allow an early start only where your facility has agreed that work can begin before its normal turn. Existing sign-offs remain as recorded.</p>
 
       <section className="panel overflow-hidden">
-        <div className="border-b border-[#ebeae6] px-5 py-4">
-          <h2 className="text-sm font-semibold text-[#353b39]">Workflow stages and sign-off roles</h2>
-          <p className="mt-1 text-xs text-[#858a87]">Drag stages to set the order. Add as many role-based sign-offs as this post house needs for each stage.</p>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#ebeae6] px-5 py-4">
+          <div>
+            <h2 className="text-sm font-semibold text-[#353b39]">Workflow stages and sign-off roles</h2>
+            <p className="mt-1 text-xs text-[#858a87]">Drag stages to set the order. Add as many role-based sign-offs as this post house needs for each stage.</p>
+          </div>
+          <Button size="sm" variant="tertiary" onPress={addStage} className="border border-[#dfe5e1] bg-white text-[#45685e]"><Plus size={14} /> Add stage</Button>
         </div>
         <div className="divide-y divide-[#efeeea]">
           {[...stages].sort((a, b) => a.position - b.position).map((stage) => {
             const stageRules = rules.filter((rule) => rule.workflowStageId === stage.id).sort((a, b) => a.approvalOrder - b.approvalOrder);
             const stageWorkOrders = workOrderTemplates.filter((item) => item.workflowStageId === stage.id).sort((a, b) => a.position - b.position);
+            const isOnlyQcGate = stage.requiresQcPass && stages.filter((item) => item.requiresQcPass).length === 1;
             return (
               <div key={stage.id} onDragOver={(event) => { event.preventDefault(); if (draggedStageId !== stage.id) setDropTargetId(stage.id); }} onDrop={() => { reorderStages(stage.id); setDraggedStageId(null); setDropTargetId(null); }} className={`p-5 transition-colors ${dropTargetId === stage.id ? "bg-[#edf3ef]" : ""}`}>
                 <div className="grid gap-3 md:grid-cols-[32px_minmax(220px,1fr)_auto]">
-                  <button type="button" draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedStageId(stage.id); }} onDragEnd={() => { setDraggedStageId(null); setDropTargetId(null); }} className="mt-5 cursor-grab touch-none self-start rounded p-1 text-[#7d837f] hover:bg-[#efeeea] hover:text-[#353b39] active:cursor-grabbing" aria-label={`Drag to reorder ${stage.name}`} title="Drag to reorder"><GripVertical size={17} /></button>
+                  <button type="button" draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedStageId(stage.id); }} onDragEnd={() => { setDraggedStageId(null); setDropTargetId(null); }} onKeyDown={(event) => { if (event.key === "ArrowUp") { event.preventDefault(); moveStage(stage.id, -1); } if (event.key === "ArrowDown") { event.preventDefault(); moveStage(stage.id, 1); } }} className="mt-5 cursor-grab touch-none self-start rounded p-1 text-[#7d837f] hover:bg-[#efeeea] hover:text-[#353b39] active:cursor-grabbing" aria-label={`Drag to reorder ${stage.name}`} aria-keyshortcuts="ArrowUp ArrowDown" title="Drag to reorder, or use the up and down arrow keys"><GripVertical size={17} /></button>
                   <label className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7d837f]">Stage name<input value={stage.name} onChange={(event) => updateStage(stage.id, { name: event.target.value })} className="mt-1 h-9 w-full rounded-md border border-[#dedfda] px-2 text-sm normal-case tracking-normal" /></label>
-                  <div className="flex flex-wrap items-end gap-x-4 gap-y-2 pb-2 text-xs font-medium text-[#59615e]"><label className="flex items-center gap-2"><input type="checkbox" role="switch" aria-label={`Allow ${stage.name} to start early`} aria-checked={stage.canStartEarly} checked={stage.canStartEarly} onChange={(event) => updateStage(stage.id, { canStartEarly: event.target.checked })} /> Allow early start</label><label className="flex items-center gap-2"><input type="checkbox" role="switch" aria-label={`Require passed QC for ${stage.name}`} aria-checked={stage.requiresQcPass} checked={stage.requiresQcPass} onChange={(event) => updateStage(stage.id, { requiresQcPass: event.target.checked })} /> Require passed QC</label></div>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-2 text-xs font-medium text-[#59615e]"><label className="flex items-center gap-2"><input type="checkbox" role="switch" aria-label={`Allow ${stage.name} to start early`} aria-checked={stage.canStartEarly} checked={stage.canStartEarly} onChange={(event) => updateStage(stage.id, { canStartEarly: event.target.checked })} /> Allow early start</label><label className="flex items-center gap-2"><input type="checkbox" role="switch" aria-label={`Require passed QC for ${stage.name}`} aria-checked={stage.requiresQcPass} checked={stage.requiresQcPass} disabled={isOnlyQcGate} onChange={(event) => updateStage(stage.id, { requiresQcPass: event.target.checked })} /> Require passed QC{isOnlyQcGate ? " · required" : ""}</label>{stage.requiresQcPass && <span className="text-[#68716d]">QC protected</span>}<Button isIconOnly size="sm" variant="tertiary" onPress={() => removeStage(stage.id)} isDisabled={stage.requiresQcPass || stages.length === 1} aria-label={`Delete ${stage.name}${stage.requiresQcPass ? " (QC stages cannot be deleted)" : ""}`} className="text-[#a35e41]"><Trash2 size={15} /></Button></div>
                 </div>
                 {(stage.canStartEarly || stage.requiresQcPass) && <p className="mt-2 text-xs leading-5 text-[#68716d]">{stage.canStartEarly ? "This stage may start out of sequence." : ""}{stage.canStartEarly && stage.requiresQcPass ? " " : ""}{stage.requiresQcPass ? "A passed or authorised-waived QC report is required before this stage can progress." : ""}</p>}
                 <div className="mt-4 rounded-lg bg-[#fafaf8] p-3">

@@ -40,6 +40,7 @@ pnpm test:booking-guests
 | Episodes | `ui/episodes` | `tenant-isolation/episodes`, `integration/guest-episode-access` | creation, details, team, copied-team, workflow, QC, and guest episode access |
 | Bookings | `ui/bookings`, `ui/my-time` | `tenant-isolation/bookings`, guest scheduling boundary | lifecycle/conflicts, copied sequences, immediate actual-time cost roll-up, and guest accounts |
 | Approvals | `ui/approvals` | `tenant-isolation/approvals` | workflow integration |
+| Workflow settings | stage, sign-off, checklist, validation, empty-state, and mobile journeys in `integration/workflow-settings` | cross-tenant workflow/stage mutation checks in `integration/workflow-settings` | configuration persistence, protected QC/history stages, and default work-order creation |
 | Work orders | episode work-order form and assigned-work queue | covered through tenant-scoped APIs | `integration/work-orders` |
 | Budget | episode budget drill-down and manual-line form | `integration/budget` | manual ledger, service rates, rate inheritance, booking roll-up, and commercial source locks |
 | QC | episode QC UI is covered through the episode workspace | `integration/qc-lifecycle` | `integration/qc-lifecycle` |

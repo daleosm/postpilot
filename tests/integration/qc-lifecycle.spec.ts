@@ -116,6 +116,25 @@ test.describe("QC lifecycle integration", () => {
     await expect(passed.json()).resolves.toMatchObject({ error: expect.stringContaining("QC verification") });
   });
 
+  test("does not allow the QC workflow stage to be deleted", async ({ page }) => {
+    await switchUser(page, managerUserId);
+
+    const response = await page.request.patch(`/api/workflows/${workflowId}`, {
+      data: {
+        name: "QC lifecycle workflow",
+        description: null,
+        stages: [
+          { id: deliveryStageId, name: "Delivery", key: "delivery", position: 1, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: false },
+        ],
+        rules: [],
+        workOrderTemplates: [],
+      },
+    });
+
+    expect(response.status()).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "The QC workflow stage cannot be deleted." });
+  });
+
   test("keeps failed QC in one decision stage and advances only after a passed re-QC", async ({ page }) => {
     await switchUser(page, qcUserId);
     const beforeResult = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: stageId, approvalRuleId: qcApprovalRuleId, action: "sign_off" } });
@@ -286,5 +305,45 @@ test.describe("QC lifecycle integration", () => {
     await page.goto(`/episodes/${episodeId}`);
     await page.getByRole("button", { name: "QC", exact: true }).click();
     await expect(page.getByText("you can view QC history, but your current role cannot record QC results.", { exact: false })).toBeVisible();
+  });
+
+  test("creates and deletes an unused workflow stage", async ({ page }) => {
+    const temporaryStageId = "92000000-0000-4000-8000-000000000020";
+    await switchUser(page, managerUserId);
+
+    const add = await page.request.patch(`/api/workflows/${workflowId}`, {
+      data: {
+        name: "QC lifecycle workflow",
+        description: null,
+        stages: [
+          { id: stageId, name: "Quality control", key: "quality_control", position: 1, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: true },
+          { id: deliveryStageId, name: "Delivery", key: "delivery", position: 2, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: false },
+          { id: temporaryStageId, name: "Archive preparation", key: "archive_preparation", position: 3, color: "#687a78", isTerminal: false, canStartEarly: false, requiresQcPass: false },
+        ],
+        rules: [
+          { id: qcApprovalRuleId, workflowStageId: stageId, approverRole: "qc_verifier", label: "QC sign-off", approvalOrder: 1, isRequired: true },
+        ],
+        workOrderTemplates: [],
+      },
+    });
+    expect(add.status()).toBe(200);
+    expect(await sql`select id from workflow_stages where id = ${temporaryStageId}`).toHaveLength(1);
+
+    const remove = await page.request.patch(`/api/workflows/${workflowId}`, {
+      data: {
+        name: "QC lifecycle workflow",
+        description: null,
+        stages: [
+          { id: stageId, name: "Quality control", key: "quality_control", position: 1, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: true },
+          { id: deliveryStageId, name: "Delivery", key: "delivery", position: 2, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: false },
+        ],
+        rules: [
+          { id: qcApprovalRuleId, workflowStageId: stageId, approverRole: "qc_verifier", label: "QC sign-off", approvalOrder: 1, isRequired: true },
+        ],
+        workOrderTemplates: [],
+      },
+    });
+    expect(remove.status()).toBe(200);
+    expect(await sql`select id from workflow_stages where id = ${temporaryStageId}`).toHaveLength(0);
   });
 });

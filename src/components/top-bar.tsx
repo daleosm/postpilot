@@ -125,7 +125,7 @@ export function TopBar({ debugUser, debugUsers, debugMode, activeOrganization, o
   }
 
   return (
-    <header className="sticky top-0 z-10 flex h-[60px] items-center justify-between gap-3 border-b border-[#e6e5e1] bg-[#fbfbf9]/95 px-4 backdrop-blur-sm sm:px-6 lg:h-[66px] lg:px-8">
+    <header className="sticky top-0 z-10 flex h-[60px] items-center justify-between gap-2 border-b border-[#e6e5e1] bg-[#fbfbf9]/95 px-3 backdrop-blur-sm sm:gap-3 sm:px-6 lg:h-[66px] lg:px-8">
       <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <div className="relative min-w-0" ref={organizationRef}>
           {canSwitchOrganizations ? (
@@ -136,7 +136,7 @@ export function TopBar({ debugUser, debugUsers, debugMode, activeOrganization, o
                 setOrganizationOpen((value) => !value);
               }}
               isDisabled={Boolean(switchingOrganizationId)}
-              className={`flex h-8 max-w-[190px] min-w-0 items-center gap-2 border px-2.5 text-xs font-medium shadow-sm sm:max-w-[250px] ${debugMode ? "border-[#e6c98a] bg-[#fff9ed] text-[#765720] hover:bg-[#fff2d6]" : "border-[#e3e4df] bg-white text-[#434946] hover:bg-[#f1f3f0]"}`}
+              className={`flex h-8 w-[120px] min-w-0 max-w-[120px] items-center gap-2 border px-2.5 text-xs font-medium shadow-sm sm:w-auto sm:max-w-[250px] ${debugMode ? "border-[#e6c98a] bg-[#fff9ed] text-[#765720] hover:bg-[#fff2d6]" : "border-[#e3e4df] bg-white text-[#434946] hover:bg-[#f1f3f0]"}`}
               aria-label={debugMode ? "Switch debug tenant" : "Switch post house"}
               aria-expanded={organizationOpen}
             >
@@ -145,7 +145,7 @@ export function TopBar({ debugUser, debugUsers, debugMode, activeOrganization, o
               <ChevronDown size={14} className={`shrink-0 text-[#8b8f8d] transition ${organizationOpen ? "rotate-180" : ""}`} />
             </Button>
           ) : (
-            <div className={`flex h-8 max-w-[190px] items-center gap-2 rounded-md border px-2.5 text-xs font-medium sm:max-w-[250px] ${debugMode ? "border-[#ead39f] bg-[#fff9ed] text-[#765720]" : "border-[#e7e7e2] bg-[#f6f6f3] text-[#59605d]"}`} title={organizationName}>
+            <div className={`flex h-8 w-[120px] max-w-[120px] items-center gap-2 rounded-md border px-2.5 text-xs font-medium sm:w-auto sm:max-w-[250px] ${debugMode ? "border-[#ead39f] bg-[#fff9ed] text-[#765720]" : "border-[#e7e7e2] bg-[#f6f6f3] text-[#59605d]"}`} title={organizationName}>
               <Building2 size={14} className={`shrink-0 ${debugMode ? "text-[#9a7124]" : "text-[#747a77]"}`} />
               <span className="truncate">{debugMode ? `Debug tenant · ${organizationName}` : organizationName}</span>
             </div>
@@ -191,7 +191,7 @@ export function TopBar({ debugUser, debugUsers, debugMode, activeOrganization, o
       </div>
 
       <div className="flex shrink-0 items-center gap-2.5">
-        {hasDebugControls && <div className="relative" ref={userRef}><Button variant="tertiary" onClick={() => setUserOpen((value) => !value)} aria-label="Switch debug user" className="flex h-8 max-w-[136px] min-w-0 gap-1.5 border border-[#e6c98a] bg-[#fff9ed] px-2 text-xs text-[#765720] hover:bg-[#fff2d6] sm:max-w-[190px]"><UserRound size={14} className="shrink-0" /><span className="hidden font-semibold uppercase tracking-[.08em] sm:inline">Debug</span><span className="truncate">{activeDebugUser.name}</span><ChevronDown size={13} className="shrink-0" /></Button>{userOpen && <div className="absolute right-0 top-10 z-30 w-60 overflow-hidden rounded-lg border border-[#e1c986] bg-[#fffdf8] p-1 shadow-lg"><p className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[.08em] text-[#8b6721]">Debug user / role</p><p className="px-3 pb-2 text-[10px] leading-4 text-[#8a7a58]">Every user in this post house is available. Maya is the platform admin across tenants.</p><div className="max-h-[calc(100vh-9rem)] overflow-y-auto overscroll-contain">{tenantDebugUsers.map((user) => <Button key={user.id} variant="tertiary" onClick={() => chooseDebugUser(user)} className="flex h-auto w-full justify-between rounded-md px-3 py-2 text-left text-xs text-[#4f5753] hover:bg-[#fff3dc]"><span><span className="block font-medium">{user.name}</span><span className="block text-[10px] text-[#898e8a]">{user.label}</span></span>{activeDebugUser.userId === user.userId && <Check size={14} className="text-[#8a6727]" />}</Button>)}{!tenantDebugUsers.length && <p className="px-3 py-4 text-xs text-[#8a7a58]">No tenant users are available.</p>}</div></div>}</div>}
+        {hasDebugControls && <div className="relative" ref={userRef}><Button variant="tertiary" onClick={() => setUserOpen((value) => !value)} aria-label="Switch debug user" className="flex h-8 w-[76px] min-w-0 max-w-[76px] gap-1.5 border border-[#e6c98a] bg-[#fff9ed] px-2 text-xs text-[#765720] hover:bg-[#fff2d6] sm:w-auto sm:max-w-[190px]"><UserRound size={14} className="shrink-0" /><span className="font-semibold sm:hidden">User</span><span className="hidden font-semibold uppercase tracking-[.08em] sm:inline">Debug</span><span className="hidden truncate sm:inline">{activeDebugUser.name}</span><ChevronDown size={13} className="shrink-0" /></Button>{userOpen && <div className="absolute right-0 top-10 z-30 w-60 overflow-hidden rounded-lg border border-[#e1c986] bg-[#fffdf8] p-1 shadow-lg"><p className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[.08em] text-[#8b6721]">Debug user / role</p><p className="px-3 pb-2 text-[10px] leading-4 text-[#8a7a58]">Every user in this post house is available. Maya is the platform admin across tenants.</p><div className="max-h-[calc(100vh-9rem)] overflow-y-auto overscroll-contain">{tenantDebugUsers.map((user) => <Button key={user.id} variant="tertiary" onClick={() => chooseDebugUser(user)} className="flex h-auto w-full justify-between rounded-md px-3 py-2 text-left text-xs text-[#4f5753] hover:bg-[#fff3dc]"><span><span className="block font-medium">{user.name}</span><span className="block text-[10px] text-[#898e8a]">{user.label}</span></span>{activeDebugUser.userId === user.userId && <Check size={14} className="text-[#8a6727]" />}</Button>)}{!tenantDebugUsers.length && <p className="px-3 py-4 text-xs text-[#8a7a58]">No tenant users are available.</p>}</div></div>}</div>}
         <Button variant="tertiary" className="hidden h-8 w-[218px] justify-start gap-2 border border-[#e6e5e1] bg-white px-2.5 text-left text-xs text-[#969a97] shadow-sm lg:flex"><Search size={14} /> Search <kbd className="ml-auto rounded border border-[#e8e7e3] bg-[#fafaf9] px-1 py-0.5 text-[9px] text-[#9da09e]">⌘ K</kbd></Button>
         <Button isIconOnly variant="tertiary" aria-label="Notifications" className="relative h-8 min-w-0 w-8 text-[#747a77] hover:bg-[#f0f0ed]"><Bell size={17} /><span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#c77c49] ring-2 ring-[#fbfbf9]" /></Button>
       </div>
