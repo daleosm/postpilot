@@ -16,25 +16,25 @@ export type WorkflowSignOffItem = {
   signOffLabel: string;
   approverRole: string;
   approvalOrder: number;
-  passedAt: Date;
+  passedAt: Date | null;
   showTitle: string;
   episodeTitle: string;
   episodeNumber: number;
 };
 
-export function WorkflowSignOffQueue({ signOffs, canOpenEpisodes }: { signOffs: WorkflowSignOffItem[]; canOpenEpisodes: boolean }) {
+export function WorkflowSignOffQueue({ signOffs, canOpenEpisodes, canSignOff }: { signOffs: WorkflowSignOffItem[]; canOpenEpisodes: boolean; canSignOff: boolean }) {
   return (
     <section className="panel overflow-hidden">
       <div className="border-b border-[#ebeae6] px-5 py-4"><h2 className="text-sm font-semibold text-[#343b38]">Awaiting my sign-off</h2><p className="mt-1 text-xs text-[#858a87]">Current workflow stages that have reached your configured sign-off role.</p></div>
       <div className="divide-y divide-[#efeeea]">
-        {signOffs.map((signOff) => <SignOffRow key={signOff.id} signOff={signOff} canOpenEpisodes={canOpenEpisodes} />)}
+        {signOffs.map((signOff) => <SignOffRow key={signOff.id} signOff={signOff} canOpenEpisodes={canOpenEpisodes} canSignOff={canSignOff} />)}
         {!signOffs.length && <p className="px-5 py-10 text-center text-sm text-[#858a87]">No workflow stages are waiting for your sign-off.</p>}
       </div>
     </section>
   );
 }
 
-function SignOffRow({ signOff: item, canOpenEpisodes }: { signOff: WorkflowSignOffItem; canOpenEpisodes: boolean }) {
+function SignOffRow({ signOff: item, canOpenEpisodes, canSignOff }: { signOff: WorkflowSignOffItem; canOpenEpisodes: boolean; canSignOff: boolean }) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -70,7 +70,7 @@ function SignOffRow({ signOff: item, canOpenEpisodes }: { signOff: WorkflowSignO
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Button variant="primary" onClick={signOff} isDisabled={saving} className="button--success"><Check size={15} /> {saving ? "Saving…" : "Sign off"}</Button>
+          {canSignOff && <Button variant="primary" onClick={signOff} isDisabled={saving} className="button--success"><Check size={15} /> {saving ? "Saving…" : "Sign off"}</Button>}
         </div>
       </div>
       {message && <p role="status" className={`mt-3 text-xs ${message.includes("recorded") || message.includes("signed off") ? "text-[#3f7563]" : "text-[#a35e41]"}`}>{message}</p>}
@@ -78,6 +78,6 @@ function SignOffRow({ signOff: item, canOpenEpisodes }: { signOff: WorkflowSignO
   );
 }
 
-function formatDate(value: Date | string) {
-  return new Intl.DateTimeFormat("en-GB", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+function formatDate(value: Date | string | null) {
+  return value ? new Intl.DateTimeFormat("en-GB", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)) : "just now";
 }

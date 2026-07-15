@@ -13,12 +13,13 @@ type EpisodeData = { id?: string; title: string; showTitle: string; seasonNumber
 type WorkflowStage = { id: string; name: string; key: string; position: number; canStartEarly?: boolean };
 type WorkflowApprovalRule = { id: string; workflowStageId: string; approverRole: string; label: string; approvalOrder: number; isRequired: boolean };
 type WorkflowApproval = { id: string; workflowStageId: string; approvalRuleId: string; approverRole: string; requiredPersonId: string | null; status: string; comment: string | null; submittedAt: Date | string; respondedAt: Date | string | null };
+type WorkflowTrack = { id: string; workflowStageId: string; status: string; startedAt: Date | string | null; completedAt: Date | string | null; blockedReason: string | null };
 type WorkOrder = { id: string; workflowStageId: string | null; workflowStageName: string | null; kind: string; title: string; description: string | null; department: string | null; assigneePersonId: string | null; assigneeName: string | null; assigneeRole: string | null; vendorCompanyId: string | null; priority: string; isBlocking: boolean; status: string; billingScope: string; billingStatus: string; estimatedAmount: string | number | null; clientQuoteAmount: string | number | null; actualAmount: string | number | null; currency: string; clientQuoteCurrency: string | null; billingNotes: string | null; budgetLineId: string | null; externalUrl: string | null; dueAt: Date | string | null; completedAt: Date | string | null };
 type QcReport = { id: string; status: string; reportUrl: string | null; summary: string | null; waiverReason: string | null; completedAt: Date | string | null; createdAt: Date | string };
 type QcIssue = { id: string; qcReportId: string; code: string | null; severity: string; description: string; timecodeSeconds: string | number | null; status: string; resolution: string | null; resolvedAt: Date | string | null; createdAt: Date | string };
-type WorkspaceData = { episode: EpisodeData; schedule: Array<Row & { title: string; startsAt: Date | string; roomName: string | null }>; budget: Array<Row & { category: string; actualAmount: string | number; budgetedAmount: string | number }>; activity: Array<Row & { action: string; createdAt: Date | string }>; workflowStages: readonly WorkflowStage[]; workflowApprovalRules: WorkflowApprovalRule[]; workflowApprovals: WorkflowApproval[]; workflowApprovers: Array<{ id: string; name: string; role: string }>; episodeTeam: Array<{ id: string; personId: string; name: string; role: string; responsibility: string; isLead: boolean }>; workOrders: WorkOrder[]; qcHistory: QcReport[]; qcIssueHistory: QcIssue[]; vendorOptions: Array<{ id: string; name: string }> };
+type WorkspaceData = { episode: EpisodeData; schedule: Array<Row & { title: string; startsAt: Date | string; roomName: string | null }>; budget: Array<Row & { category: string; actualAmount: string | number; budgetedAmount: string | number }>; activity: Array<Row & { action: string; createdAt: Date | string }>; workflowStages: readonly WorkflowStage[]; workflowApprovalRules: WorkflowApprovalRule[]; workflowApprovals: WorkflowApproval[]; workflowTracks: WorkflowTrack[]; workflowApprovers: Array<{ id: string; name: string; role: string }>; episodeTeam: Array<{ id: string; personId: string; name: string; role: string; responsibility: string; isLead: boolean }>; workOrders: WorkOrder[]; qcHistory: QcReport[]; qcIssueHistory: QcIssue[]; vendorOptions: Array<{ id: string; name: string }> };
 
-export function EpisodeDetailTabs({ data, canManageWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canWaiveQc, currentPersonId }: { data: WorkspaceData; canManageWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canWaiveQc: boolean; currentPersonId: string | null }) {
+export function EpisodeDetailTabs({ data, canManageWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canWaiveQc, canApproveReviews, currentPersonId }: { data: WorkspaceData; canManageWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canWaiveQc: boolean; canApproveReviews: boolean; currentPersonId: string | null }) {
   const [tab, setTab] = useState<TabName>("Overview");
   const visibleTabs = canManageCommercial ? tabs : tabs.filter((item) => item !== "Budget");
 
@@ -31,14 +32,14 @@ export function EpisodeDetailTabs({ data, canManageWorkOrders, canUpdateWorkOrde
           </Button>
         ))}
       </div>
-      <div className="p-5"><TabContent tab={tab} data={data} canManageWorkOrders={canManageWorkOrders} canUpdateWorkOrders={canUpdateWorkOrders} canManageCommercial={canManageCommercial} canManageQc={canManageQc} canWaiveQc={canWaiveQc} currentPersonId={currentPersonId} /></div>
+      <div className="p-5"><TabContent tab={tab} data={data} canManageWorkOrders={canManageWorkOrders} canUpdateWorkOrders={canUpdateWorkOrders} canManageCommercial={canManageCommercial} canManageQc={canManageQc} canWaiveQc={canWaiveQc} canApproveReviews={canApproveReviews} currentPersonId={currentPersonId} /></div>
     </section>
   );
 }
 
-function TabContent({ tab, data, canManageWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canWaiveQc, currentPersonId }: { tab: TabName; data: WorkspaceData; canManageWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canWaiveQc: boolean; currentPersonId: string | null }) {
+function TabContent({ tab, data, canManageWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canWaiveQc, canApproveReviews, currentPersonId }: { tab: TabName; data: WorkspaceData; canManageWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canWaiveQc: boolean; canApproveReviews: boolean; currentPersonId: string | null }) {
   if (tab === "Overview") return <EpisodeOverview data={data} />;
-  if (tab === "Workflow") return <WorkflowPanel episodeId={data.episode.id} initialStageId={data.episode.workflowStageId} stages={data.workflowStages} rules={data.workflowApprovalRules} approvals={data.workflowApprovals} episodeTeam={data.episodeTeam} currentPersonId={currentPersonId} />;
+  if (tab === "Workflow") return <WorkflowPanel episodeId={data.episode.id} initialStageId={data.episode.workflowStageId} stages={data.workflowStages} rules={data.workflowApprovalRules} approvals={data.workflowApprovals} tracks={data.workflowTracks} episodeTeam={data.episodeTeam} canApproveReviews={canApproveReviews} currentPersonId={currentPersonId} />;
   if (tab === "QC") return <QcPanel episodeId={data.episode.id ?? ""} episodeStatus={data.episode.qcStatus} initialHistory={data.qcHistory} initialIssues={data.qcIssueHistory} canManage={canManageQc} canWaive={canWaiveQc} />;
   if (tab === "Work orders") return <EpisodeWorkOrders episodeId={data.episode.id ?? ""} initialWorkOrders={data.workOrders} people={data.workflowApprovers} stages={data.workflowStages} currentStageId={data.episode.workflowStageId} vendors={data.vendorOptions} canManage={canManageWorkOrders} canUpdate={canUpdateWorkOrders} canManageCommercial={canManageCommercial} />;
   if (tab === "Bookings") return <List empty="No scheduled room bookings." items={data.schedule} render={(item) => <><b>{item.title}</b><span>{formatDate(item.startsAt)} · {item.roomName}</span></>} />;
@@ -179,11 +180,12 @@ function OverviewItem({ label, value, tone }: { label: string; value: string; to
   return <div className="rounded-lg border border-[#e7e9e5] bg-white/50 px-3 py-2.5"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#858c88]">{label}</p><p className={`mt-1 text-sm font-medium capitalize ${toneClass}`}>{value}</p></div>;
 }
 
-function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, episodeTeam, currentPersonId }: { episodeId?: string; initialStageId: string | null; stages: readonly WorkflowStage[]; rules: WorkflowApprovalRule[]; approvals: WorkflowApproval[]; episodeTeam: WorkspaceData["episodeTeam"]; currentPersonId: string | null }) {
+function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tracks, episodeTeam, canApproveReviews, currentPersonId }: { episodeId?: string; initialStageId: string | null; stages: readonly WorkflowStage[]; rules: WorkflowApprovalRule[]; approvals: WorkflowApproval[]; tracks: WorkflowTrack[]; episodeTeam: WorkspaceData["episodeTeam"]; canApproveReviews: boolean; currentPersonId: string | null }) {
   const router = useRouter();
   const [currentStageId, setCurrentStageId] = useState(initialStageId ?? stages[0]?.id ?? "");
   const [selectedStageId, setSelectedStageId] = useState(initialStageId ?? stages[0]?.id ?? "");
   const [approvalState, setApprovalState] = useState(approvals);
+  const [trackState, setTrackState] = useState(tracks);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [comment, setComment] = useState("");
@@ -191,8 +193,9 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, ep
   const stageStatus = (stageId: string) => {
     const stageRules = rules.filter((rule) => rule.workflowStageId === stageId);
     const stageApprovals = approvalState.filter((approval) => approval.workflowStageId === stageId);
-    const required = stageRules;
-    if (required.length && required.every((rule) => stageApprovals.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"))) return "approved";
+    if (stageRules.length && stageRules.every((rule) => stageApprovals.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"))) return "approved";
+    const track = trackState.find((item) => item.workflowStageId === stageId);
+    if (track && ["in_progress", "submitted", "blocked"].includes(track.status)) return "in_progress";
     if (stageApprovals.length) return "awaiting_sign_off";
     return stageId === currentStageId ? "in_progress" : "not_started";
   };
@@ -207,6 +210,7 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, ep
   const completedStageCount = orderedStages.filter((stage) => stageStatus(stage.id) === "approved").length;
   const workflowProgress = orderedStages.length ? Math.round((completedStageCount / orderedStages.length) * 100) : 0;
   const currentCanAdvance = !currentRules.length || currentStatus === "approved";
+  const isActiveTrack = (stageId: string) => trackState.some((track) => track.workflowStageId === stageId && ["in_progress", "submitted", "blocked"].includes(track.status));
   const signerForRule = (rule: WorkflowApprovalRule) => {
     const recorded = approvalState.find((approval) => approval.approvalRuleId === rule.id)?.requiredPersonId;
     if (recorded) return episodeTeam.find((person) => person.personId === recorded) ?? null;
@@ -216,19 +220,21 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, ep
   };
   const nextPendingRule = [...currentRules].sort((left, right) => left.approvalOrder - right.approvalOrder).find((rule) => !approvalState.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"));
   const nextSigner = nextPendingRule ? signerForRule(nextPendingRule) : null;
-  const canCurrentUserSignOff = Boolean(nextSigner && currentPersonId === nextSigner.personId);
+  const canCurrentUserSignOff = Boolean(canApproveReviews && nextSigner && currentPersonId === nextSigner.personId);
   const nextStagePosition = currentStage ? currentStage.position + 1 : null;
   const selectedIsNext = selectedStage?.position === nextStagePosition;
   const selectedHasUnassignedSigner = selectedRules.some((rule) => !signerForRule(rule));
-  const selectedCanStart = Boolean(selectedStage && !selectedHasUnassignedSigner && selectedStageId !== currentStageId && stageStatus(selectedStageId) !== "approved" && (selectedStage.canStartEarly || (selectedIsNext && currentCanAdvance)));
+  const selectedCanStart = Boolean(selectedStage && !selectedHasUnassignedSigner && selectedStageId !== currentStageId && !isActiveTrack(selectedStageId) && !(stageStatus(selectedStageId) === "approved" && !selectedIsNext) && ((selectedIsNext && currentCanAdvance) || (selectedStage.canStartEarly && selectedStage.position > (currentStage?.position ?? 0))));
   const selectedExplanation = !selectedStage
     ? "Choose a stage above to see what is required."
     : selectedHasUnassignedSigner
       ? "Choose a workflow signer in Edit episode → Episode team before this stage can start."
       : selectedStageId === currentStageId
       ? "This is the episode’s current stage."
-      : stageStatus(selectedStageId) === "approved"
-        ? "This stage has already been fully signed off."
+      : selectedIsNext && stageStatus(selectedStageId) === "approved"
+        ? "This stage was completed early. Advance the primary workflow into it when the preceding stage is complete."
+        : stageStatus(selectedStageId) === "approved"
+          ? "This stage has already been fully signed off."
         : selectedStage.canStartEarly
           ? "This stage can begin early when your post house needs parallel work."
           : selectedIsNext && currentCanAdvance
@@ -242,17 +248,9 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, ep
   async function save() {
     if (!episodeId || !selectedStageId) return;
     const selected = stages.find((stage) => stage.id === selectedStageId);
-    if (selectedStageId !== currentStageId) {
-      if (!selected?.canStartEarly) {
-        if (currentStage && selected && selected.position !== currentStage.position + 1) {
-          setMessage("Workflow stages normally proceed in order. Enable Allow early start in workflow settings to make an exception.");
-          return;
-        }
-        if (currentRules.length && currentStatus !== "approved") {
-          setMessage("Complete the current sign-off first.");
-          return;
-        }
-      }
+    if (selectedStageId !== currentStageId && currentStage && selected && selected.position === currentStage.position + 1 && currentRules.length && currentStatus !== "approved") {
+      setMessage("Complete the current sign-off first.");
+      return;
     }
     setSaving(true);
     setMessage("");
@@ -263,8 +261,13 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, ep
         setMessage(body?.error ?? "Could not update the workflow stage.");
         return;
       }
-      setCurrentStageId(selectedStageId);
-      setMessage("Workflow stage updated.");
+      if (body?.startedEarly) {
+        setTrackState((items) => items.some((item) => item.workflowStageId === selectedStageId) ? items : [...items, { id: `early-${selectedStageId}`, workflowStageId: selectedStageId, status: "in_progress", startedAt: new Date(), completedAt: null, blockedReason: null }]);
+        setMessage("Early-start work began in parallel with the primary workflow.");
+      } else {
+        setCurrentStageId(selectedStageId);
+        setMessage("Workflow stage updated.");
+      }
       router.refresh();
     } catch {
       setMessage("Could not update the workflow stage.");
@@ -273,22 +276,24 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, ep
     }
   }
 
-  async function signOff() {
-    if (!episodeId || !currentStageId) return;
+  async function signOff(workflowStageId: string) {
+    if (!episodeId) return;
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/episodes/${episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId: currentStageId, action: "sign_off", comment }) });
+      const response = await fetch(`/api/episodes/${episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId, action: "sign_off", comment }) });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
         setMessage(body?.error ?? "Could not record the sign-off.");
         return;
       }
-      const signedRule = currentRules.find((rule) => rule.id === body?.approvalRuleId);
+      const signedRule = rules.find((rule) => rule.id === body?.approvalRuleId);
       if (signedRule) setApprovalState((items) => {
         const existing = items.find((approval) => approval.approvalRuleId === signedRule.id);
-        return existing ? items.map((approval) => approval.approvalRuleId === signedRule.id ? { ...approval, status: "approved", comment, respondedAt: new Date() } : approval) : [...items, { id: `sign-off-${signedRule.id}`, workflowStageId: currentStageId, approvalRuleId: signedRule.id, approverRole: signedRule.approverRole, requiredPersonId: nextSigner?.personId ?? null, status: "approved", comment, submittedAt: new Date(), respondedAt: new Date() }];
+        const signer = signerForRule(signedRule);
+        return existing ? items.map((approval) => approval.approvalRuleId === signedRule.id ? { ...approval, status: "approved", comment, respondedAt: new Date() } : approval) : [...items, { id: `sign-off-${signedRule.id}`, workflowStageId, approvalRuleId: signedRule.id, approverRole: signedRule.approverRole, requiredPersonId: signer?.personId ?? null, status: "approved", comment, submittedAt: new Date(), respondedAt: new Date() }];
       });
+      if (body?.stageComplete) setTrackState((items) => items.map((track) => track.workflowStageId === workflowStageId ? { ...track, status: "approved", completedAt: new Date() } : track));
       setComment("");
       setMessage(body?.stageComplete ? "Stage fully signed off." : "Sign-off recorded.");
       if (!body?.debug) router.refresh();
@@ -312,22 +317,24 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, ep
           {orderedStages.map((stage) => {
             const status = stageStatus(stage.id);
             const isCurrent = stage.id === currentStageId;
+            const isParallel = !isCurrent && isActiveTrack(stage.id);
             const isSelected = stage.id === selectedStageId;
             const stageRules = rules.filter((rule) => rule.workflowStageId === stage.id);
             const isEarlyStart = stage.canStartEarly && !isCurrent && status !== "approved";
             const isNext = stage.position === nextStagePosition;
             const isReadyNext = isNext && currentCanAdvance;
-            const stateLabel = status === "approved" ? "Complete" : isCurrent ? currentRules.length ? "Awaiting sign-off" : "Ready to move on" : isEarlyStart ? "Can start early" : isReadyNext ? "Ready next" : isNext ? "Waiting for sign-off" : stage.position < (currentStage?.position ?? 0) ? "Earlier stage" : "Later stage";
-            const nodeTone = status === "approved" ? "bg-[#5f917a] text-white shadow-[0_0_0_5px_#edf6f0]" : isCurrent ? "bg-[#315f52] text-white shadow-[0_0_0_6px_#dbece3]" : isReadyNext ? "border-2 border-[#5f917a] bg-[#fbfcfa] text-[#4b7664]" : "border border-[#d6ddd8] bg-[#fbfcfa] text-[#849089]";
+            const stateLabel = status === "approved" ? "Complete" : isCurrent ? currentRules.length ? "Awaiting sign-off" : "Ready to move on" : isParallel ? "Running in parallel" : isEarlyStart ? "Can start early" : isReadyNext ? "Ready next" : isNext ? "Waiting for sign-off" : stage.position < (currentStage?.position ?? 0) ? "Earlier stage" : "Later stage";
+            const nodeTone = status === "approved" ? "bg-[#5f917a] text-white shadow-[0_0_0_5px_#edf6f0]" : isCurrent ? "bg-[#315f52] text-white shadow-[0_0_0_6px_#dbece3]" : isParallel ? "bg-[#9a7647] text-white shadow-[0_0_0_5px_#f6eee3]" : isReadyNext ? "border-2 border-[#5f917a] bg-[#fbfcfa] text-[#4b7664]" : "border border-[#d6ddd8] bg-[#fbfcfa] text-[#849089]";
             return <div key={stage.id} className="relative grid grid-cols-[2.25rem_minmax(0,1fr)] gap-3 sm:grid-cols-[2.75rem_minmax(0,1fr)] sm:gap-4">
               <div className="relative z-10 flex justify-center pt-3"><span className={`grid h-6 w-6 place-items-center rounded-full text-[10px] font-bold ${nodeTone}`}>{status === "approved" ? "✓" : stage.position}</span></div>
               <div className="min-w-0 pb-3">
                 <button type="button" aria-label={`Select ${stage.name}`} aria-pressed={isSelected} onClick={() => { setSelectedStageId(stage.id); setMessage(""); }} className={`group flex w-full items-start justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus:ring-2 focus:ring-[#87a89a] focus:ring-offset-2 ${isCurrent ? "bg-[#eef6f1]" : isSelected ? "bg-[#f1f6f3]" : "hover:bg-[#f5f8f5]"}`}>
                   <span className="min-w-0"><span className={`block text-sm font-semibold ${isCurrent ? "text-[#315f52]" : status === "approved" ? "text-[#547866]" : "text-[#48554f]"}`}>{stage.name}</span><span className="mt-1 block text-[11px] text-[#7a8580]">{stageRules.length ? `${stageRules.length} required sign-off${stageRules.length === 1 ? "" : "s"}` : "No sign-off gate"}</span></span>
-                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${isCurrent ? "bg-[#d2e7dc] text-[#356d58]" : isEarlyStart ? "bg-[#f6eee3] text-[#906a3b]" : status === "approved" ? "bg-[#e1eee6] text-[#467460]" : isReadyNext ? "bg-[#e2efe7] text-[#426e5b]" : "bg-[#edf0ed] text-[#77847e]"}`}>{stateLabel}</span>
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${isCurrent ? "bg-[#d2e7dc] text-[#356d58]" : isParallel || isEarlyStart ? "bg-[#f6eee3] text-[#906a3b]" : status === "approved" ? "bg-[#e1eee6] text-[#467460]" : isReadyNext ? "bg-[#e2efe7] text-[#426e5b]" : "bg-[#edf0ed] text-[#77847e]"}`}>{stateLabel}</span>
                 </button>
 
-                {isCurrent && <div className="ml-3 mt-1 border-l-2 border-[#82ab94] pl-4 sm:ml-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs leading-5 text-[#66746d]">{currentStatus === "approved" ? "This stage is complete. Select the next stage in the journey to continue." : currentRules.length ? "Complete each required sign-off before the next ordered stage opens." : "No sign-off is required for this stage; move on when the work is ready."}</p>{currentRules.length > 0 && <span className="rounded-full bg-[#e6efe9] px-2 py-1 text-[10px] font-semibold text-[#557467]">{completedCurrentRules.length}/{currentRules.length} complete</span>}</div>{currentRules.length > 0 && <div className="mt-3 space-y-2">{currentRules.map((rule) => { const signed = approvalState.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"); const signer = signerForRule(rule); return <div key={rule.id} className="flex items-center gap-2 text-xs text-[#55625b]"><span className={`grid h-4 w-4 place-items-center rounded-full text-[9px] font-bold ${signed ? "bg-[#5f917a] text-white" : "border border-[#cfd8d2] bg-white text-transparent"}`}>✓</span><span>{rule.label}{signer ? <span className="text-[#829088]"> · {signer.name}</span> : <span className="text-[#a16941]"> · signer needed</span>}</span></div>; })}</div>}{currentRules.length > 0 && currentStatus !== "approved" && (canCurrentUserSignOff ? <><textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={2} placeholder="Optional sign-off note…" className="mt-3 w-full rounded-lg border border-[#dbe4de] bg-white/80 px-3 py-2 text-xs text-[#49554f] outline-none focus:border-[#87a89a] focus:ring-2 focus:ring-[#dceae3]" /><div className="mt-2"><Button type="button" size="sm" variant="primary" onPress={signOff} isDisabled={saving} className="bg-[#3f7563] text-white">{saving ? "Saving…" : "Sign off"}</Button></div></> : <p className="mt-3 text-xs leading-5 text-[#718079]">{nextSigner ? `Awaiting sign-off from ${nextSigner.name}.` : "Choose a workflow signer in Edit episode → Episode team."}</p>)}</div>}
+                {isCurrent && <div className="ml-3 mt-1 border-l-2 border-[#82ab94] pl-4 sm:ml-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs leading-5 text-[#66746d]">{currentStatus === "approved" ? "This stage is complete. Select the next stage in the journey to continue." : currentRules.length ? "Complete each required sign-off before the next ordered stage opens." : "No sign-off is required for this stage; move on when the work is ready."}</p>{currentRules.length > 0 && <span className="rounded-full bg-[#e6efe9] px-2 py-1 text-[10px] font-semibold text-[#557467]">{completedCurrentRules.length}/{currentRules.length} complete</span>}</div>{currentRules.length > 0 && <div className="mt-3 space-y-2">{currentRules.map((rule) => { const signed = approvalState.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"); const signer = signerForRule(rule); return <div key={rule.id} className="flex items-center gap-2 text-xs text-[#55625b]"><span className={`grid h-4 w-4 place-items-center rounded-full text-[9px] font-bold ${signed ? "bg-[#5f917a] text-white" : "border border-[#cfd8d2] bg-white text-transparent"}`}>✓</span><span>{rule.label}{signer ? <span className="text-[#829088]"> · {signer.name}</span> : <span className="text-[#a16941]"> · signer needed</span>}</span></div>; })}</div>}{currentRules.length > 0 && currentStatus !== "approved" && (canCurrentUserSignOff ? <><textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={2} placeholder="Optional sign-off note…" className="mt-3 w-full rounded-lg border border-[#dbe4de] bg-white/80 px-3 py-2 text-xs text-[#49554f] outline-none focus:border-[#87a89a] focus:ring-2 focus:ring-[#dceae3]" /><div className="mt-2"><Button type="button" size="sm" variant="primary" onPress={() => signOff(currentStageId)} isDisabled={saving} className="bg-[#3f7563] text-white">{saving ? "Saving…" : "Sign off"}</Button></div></> : <p className="mt-3 text-xs leading-5 text-[#718079]">{nextSigner ? canApproveReviews ? `Awaiting sign-off from ${nextSigner.name}.` : "You do not have permission to approve workflow gates." : "Choose a workflow signer in Edit episode → Episode team."}</p>)}</div>}
+                {isParallel && <div className="ml-3 mt-1 border-l-2 border-[#c8a46b] bg-[#fcf8f1] py-3 pl-4 pr-3 text-xs leading-5 text-[#76603d] sm:ml-4">This early-start stage is running in parallel. Its assigned signer can complete the gate from Approvals.</div>}
 
                 {isSelected && !isCurrent && <div className="ml-3 mt-1 border-l-2 border-[#b6d3c1] bg-[#f4f8f5]/70 py-3 pl-4 pr-3 sm:ml-4"><p className="text-xs leading-5 text-[#5c6b63]">{selectedExplanation}</p><p className="mt-3 text-[10px] font-semibold uppercase tracking-[.1em] text-[#718079]">Sign-off requirements</p><p className="mt-1 text-xs leading-5 text-[#59675f]">{selectedRules.map((rule) => rule.label).join(" · ") || "No sign-offs configured"}</p>{selectedCanStart && <Button type="button" size="sm" variant="primary" onPress={save} isDisabled={saving} className="mt-3 bg-[#315f52] text-white">{saving ? "Moving…" : `Move episode to ${stage.name}`}</Button>}</div>}
               </div>

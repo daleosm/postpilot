@@ -3,7 +3,7 @@ import "server-only";
 import { aliasedTable, and, asc, desc, eq, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { activityLog, crmCompanies, episodeTeamAssignments, episodeWorkflowApprovals, episodes, people, postWorkflows, qcIssues, qcReports, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
+import { activityLog, crmCompanies, episodeTeamAssignments, episodeWorkflowApprovals, episodeWorkflowTracks, episodes, people, postWorkflows, qcIssues, qcReports, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
 import { getBudgetData } from "./budget";
 import { listSchedule } from "./schedule";
 import { listEpisodeWorkOrders } from "./work-orders";
@@ -37,7 +37,7 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
   const db = getDb();
   const episode = await getEpisode(organizationId, episodeId);
   if (!episode) return null;
-  const [schedule, budget, activity, stages, approvalRules, approvals, workflowApprovers, workOrders, episodeTeam, qcHistory, qcIssueHistory, vendorOptions] = await Promise.all([
+  const [schedule, budget, activity, stages, approvalRules, approvals, workflowTracks, workflowApprovers, workOrders, episodeTeam, qcHistory, qcIssueHistory, vendorOptions] = await Promise.all([
     listSchedule(organizationId, new Date(Date.now() - 90 * 86_400_000), new Date(Date.now() + 120 * 86_400_000)),
     getBudgetData(organizationId),
     db.select({ id: activityLog.id, action: activityLog.action, entityType: activityLog.entityType, entityId: activityLog.entityId, metadata: activityLog.metadata, createdAt: activityLog.createdAt })
@@ -52,6 +52,8 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
       .where(and(eq(postWorkflows.organizationId, organizationId), eq(workflowStages.organizationId, organizationId), eq(workflowStageApprovalRules.organizationId, organizationId), eq(postWorkflows.isDefault, true))).orderBy(asc(workflowStageApprovalRules.approvalOrder)),
     db.select({ id: episodeWorkflowApprovals.id, workflowStageId: episodeWorkflowApprovals.workflowStageId, approvalRuleId: episodeWorkflowApprovals.approvalRuleId, approverRole: episodeWorkflowApprovals.approverRole, requiredPersonId: episodeWorkflowApprovals.requiredPersonId, status: episodeWorkflowApprovals.status, comment: episodeWorkflowApprovals.comment, submittedAt: episodeWorkflowApprovals.submittedAt, respondedAt: episodeWorkflowApprovals.respondedAt })
       .from(episodeWorkflowApprovals).where(and(eq(episodeWorkflowApprovals.organizationId, organizationId), eq(episodeWorkflowApprovals.episodeId, episodeId))),
+    db.select({ id: episodeWorkflowTracks.id, workflowStageId: episodeWorkflowTracks.workflowStageId, status: episodeWorkflowTracks.status, startedAt: episodeWorkflowTracks.startedAt, completedAt: episodeWorkflowTracks.completedAt, blockedReason: episodeWorkflowTracks.blockedReason })
+      .from(episodeWorkflowTracks).where(and(eq(episodeWorkflowTracks.organizationId, organizationId), eq(episodeWorkflowTracks.episodeId, episodeId))),
     db.select({ id: people.id, name: people.name, role: people.role }).from(people).where(eq(people.organizationId, organizationId)).orderBy(asc(people.name)),
     listEpisodeWorkOrders(organizationId, episodeId),
     db.select({ id: episodeTeamAssignments.id, personId: people.id, name: people.name, role: people.role, responsibility: episodeTeamAssignments.responsibility, isLead: episodeTeamAssignments.isLead }).from(episodeTeamAssignments).innerJoin(people, eq(episodeTeamAssignments.personId, people.id)).where(and(eq(episodeTeamAssignments.organizationId, organizationId), eq(episodeTeamAssignments.episodeId, episodeId), eq(people.organizationId, organizationId))),
@@ -70,6 +72,7 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
     workflowStages: stages,
     workflowApprovalRules: approvalRules,
     workflowApprovals: approvals,
+    workflowTracks,
     workflowApprovers,
     workOrders,
     episodeTeam,

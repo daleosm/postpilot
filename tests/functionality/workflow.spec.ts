@@ -128,6 +128,19 @@ test.describe("Configurable workflow functionality", () => {
     await expect(stages.nth(3)).toContainText("Graphics finishing");
   });
 
+  test("requires the tenant approval permission even when the user is the selected signer", async ({ page }) => {
+    await sql`update episode_team_assignments set is_lead = case when person_id = ${viewerPersonId} then true else false end where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    const assumedViewer = await page.request.post("/api/debug/user", { data: { userId: viewerUserId } });
+    expect(assumedViewer.status()).toBe(200);
+    await activateWorkflowLab(page);
+    const response = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: editorialStageId, action: "sign_off" } });
+    expect(response.status()).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "You do not have permission to approve workflow gates." });
+    await sql`update episode_team_assignments set is_lead = case when person_id = ${mayaPersonId} then true else false end where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    const assumedMaya = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
+    expect(assumedMaya.status()).toBe(200);
+  });
+
   test("enforces normal stage order and blocks the next stage until the current sign-off is complete", async ({ page }) => {
     await openWorkflow(page);
 
@@ -154,7 +167,7 @@ test.describe("Configurable workflow functionality", () => {
     await expect(page.getByRole("button", { name: "Move episode to Creative sign-off", exact: true })).toBeEnabled();
   });
 
-  test("allows an explicitly configured stage to start early", async ({ page }) => {
+  test("preserves completed episode approvals when workflow settings are saved", async ({ page }) => {
     await activateWorkflowLab(page);
     await page.goto("/settings/workflow");
 
@@ -163,11 +176,29 @@ test.describe("Configurable workflow functionality", () => {
     await earlyStartSwitch.check();
     await page.getByRole("button", { name: "Save workflow", exact: true }).click();
     await expect(page.getByRole("status")).toContainText("Workflow saved.");
+    const approvals = await sql`select id from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId} and approval_rule_id = ${editorialRuleId}`;
+    expect(approvals).toHaveLength(1);
+  });
+
+  test("starts an explicitly configured stage as a parallel workflow track", async ({ page }) => {
+    await activateWorkflowLab(page);
+    await page.goto("/settings/workflow");
 
     await openWorkflow(page);
     await page.getByRole("button", { name: "Select Delivery prep", exact: true }).click();
     await page.getByRole("button", { name: "Move episode to Delivery prep", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Workflow stage updated.");
+    await expect(page.getByRole("status")).toContainText("Early-start work began in parallel");
+    const [episode] = await sql`select workflow_stage_id from episodes where id = ${episodeId}`;
+    expect(episode.workflow_stage_id).toBe(editorialStageId);
+    const tracks = await sql`select status from episode_workflow_tracks where organization_id = ${organizationId} and episode_id = ${episodeId} and workflow_stage_id = ${deliveryPrepStageId}`;
+    expect(tracks).toHaveLength(1);
+    expect(tracks[0].status).toBe("in_progress");
+    await page.goto("/review");
+    await expect(page.getByRole("heading", { name: "Delivery prep" })).toBeVisible();
+    await page.getByRole("button", { name: "Sign off", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Delivery prep" })).not.toBeVisible();
+    const [completedTrack] = await sql`select status from episode_workflow_tracks where organization_id = ${organizationId} and episode_id = ${episodeId} and workflow_stage_id = ${deliveryPrepStageId}`;
+    expect(completedTrack.status).toBe("approved");
   });
 
   test("allows a configured early-start stage to begin without a hard-coded workflow dependency", async ({ page }) => {
@@ -175,7 +206,7 @@ test.describe("Configurable workflow functionality", () => {
     const response = await page.request.patch(`/api/episodes/${episodeId}`, { data: { workflowStageId: graphicsStageId } });
 
     expect(response.status()).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ ok: true });
+    await expect(response.json()).resolves.toMatchObject({ ok: true, startedEarly: true });
   });
 
   test("persists renamed stages and early-start settings", async ({ page }) => {
@@ -192,6 +223,12 @@ test.describe("Configurable workflow functionality", () => {
   });
 
   test("sends a shared-role sign-off only to the episode’s selected signer", async ({ page }) => {
+    await sql`
+      insert into organization_role_policies (organization_id, role, label, permissions)
+      values (${organizationId}, 'post_supervisor', 'Post Supervisor', ${JSON.stringify(["approve_reviews"])})
+      on conflict (organization_id, role) do update set permissions = excluded.permissions
+    `;
+    await sql`update episodes set workflow_stage_id = ${graphicsStageId} where id = ${episodeId}`;
     const assumedUser = await page.request.post("/api/debug/user", { data: { userId: viewerUserId } });
     expect(assumedUser.status()).toBe(200);
 
@@ -216,5 +253,16 @@ test.describe("Configurable workflow functionality", () => {
     expect(assumedViewer.status()).toBe(200);
     await openWorkflow(page);
     await expect(page.getByRole("button", { name: "Sign off", exact: true })).toBeVisible();
+  });
+
+  test("allows a no-gate stage to advance without an approval record", async ({ page }) => {
+    await sql`delete from workflow_stage_approval_rules where id = ${deliveryPrepRuleId}`;
+    await sql`update episodes set workflow_stage_id = ${deliveryPrepStageId} where id = ${episodeId}`;
+    const assumedMaya = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
+    expect(assumedMaya.status()).toBe(200);
+    await activateWorkflowLab(page);
+    const response = await page.request.patch(`/api/episodes/${episodeId}`, { data: { workflowStageId: graphicsStageId } });
+    expect(response.status()).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ ok: true, startedEarly: false });
   });
 });

@@ -17,7 +17,7 @@ export default async function ApprovalsPage() {
   ]);
   if (!(mayManage || mayApprove || mayUpdateWork)) redirect(await roleHome());
 
-  const [signOffs, workOrders] = context?.organization ? await Promise.all([listWorkflowSignOffInbox(context.organization.organizationId, context.userId), listWorkOrderInbox(context.organization.organizationId, context.userId)]) : [[], []];
+  const [signOffs, workOrders] = context?.organization ? await Promise.all([mayApprove ? listWorkflowSignOffInbox(context.organization.organizationId, context.userId) : [], listWorkOrderInbox(context.organization.organizationId, context.userId)]) : [[], []];
   const visibleSignOffs = activeShow ? signOffs.filter((item) => item.showId === activeShow.id) : signOffs;
   const visibleWorkOrders = activeShow ? workOrders.filter((item) => item.showId === activeShow.id) : workOrders;
 
@@ -32,7 +32,7 @@ export default async function ApprovalsPage() {
         <span className="inline-flex items-center gap-2 text-xs font-medium text-[#5e746c]"><FileCheck2 size={15} /> {visibleSignOffs.length} sign-offs · {visibleWorkOrders.length} work orders</span>
       </header>
 
-      <WorkflowSignOffQueue signOffs={visibleSignOffs} canOpenEpisodes={mayManage} />
+      <WorkflowSignOffQueue signOffs={visibleSignOffs} canOpenEpisodes={mayManage} canSignOff={mayApprove} />
       <WorkOrderQueue workOrders={visibleWorkOrders} canOpenEpisodes={mayManage || mayUpdateWork} />
     </div>
   );

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getDb } from "@/lib/db";
-import { episodeTeamAssignments, episodes, people } from "@/lib/db/schema";
+import { episodeTeamAssignments, episodeWorkflowApprovals, episodes, people } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { episodeTeamAssignmentSchema } from "@/lib/validations/entities";
@@ -52,7 +52,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ep
   const { episodeId } = await params;
   const org = context.organization.organizationId;
   const db = getDb();
-  const team = await db.select({ id: episodeTeamAssignments.id, role: people.role }).from(episodeTeamAssignments)
+  const team = await db.select({ id: episodeTeamAssignments.id, personId: people.id, role: people.role }).from(episodeTeamAssignments)
     .innerJoin(people, eq(episodeTeamAssignments.personId, people.id))
     .where(and(eq(episodeTeamAssignments.organizationId, org), eq(episodeTeamAssignments.episodeId, episodeId), eq(people.organizationId, org)));
   const selected = team.find((assignment) => assignment.id === parsed.data.assignmentId);
@@ -61,6 +61,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ep
   await db.transaction(async (tx) => {
     await tx.update(episodeTeamAssignments).set({ isLead: false, updatedAt: new Date() }).where(and(eq(episodeTeamAssignments.organizationId, org), inArray(episodeTeamAssignments.id, sameRoleIds)));
     if (parsed.data.isSigner) await tx.update(episodeTeamAssignments).set({ isLead: true, updatedAt: new Date() }).where(and(eq(episodeTeamAssignments.organizationId, org), eq(episodeTeamAssignments.id, selected.id)));
+    await tx.update(episodeWorkflowApprovals).set({ requiredPersonId: parsed.data.isSigner ? selected.personId : null, updatedAt: new Date() }).where(and(eq(episodeWorkflowApprovals.organizationId, org), eq(episodeWorkflowApprovals.episodeId, episodeId), eq(episodeWorkflowApprovals.approverRole, selected.role), eq(episodeWorkflowApprovals.status, "pending")));
   });
   return NextResponse.json({ ok: true });
 }

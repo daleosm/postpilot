@@ -21,9 +21,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
   const db = getDb();
   const [workflow] = await db.select({ id: postWorkflows.id }).from(postWorkflows).where(and(eq(postWorkflows.id, workflowId), eq(postWorkflows.organizationId, organizationId))).limit(1);
   if (!workflow) return NextResponse.json({ error: "Workflow not found." }, { status: 404 });
-  const existingStages = await db.select({ id: workflowStages.id }).from(workflowStages).where(and(eq(workflowStages.workflowId, workflowId), eq(workflowStages.organizationId, organizationId)));
+  const [existingStages, existingRules] = await Promise.all([
+    db.select({ id: workflowStages.id }).from(workflowStages).where(and(eq(workflowStages.workflowId, workflowId), eq(workflowStages.organizationId, organizationId))),
+    db.select({ id: workflowStageApprovalRules.id }).from(workflowStageApprovalRules).innerJoin(workflowStages, eq(workflowStageApprovalRules.workflowStageId, workflowStages.id)).where(and(eq(workflowStageApprovalRules.organizationId, organizationId), eq(workflowStages.organizationId, organizationId), eq(workflowStages.workflowId, workflowId))),
+  ]);
   const stageIds = new Set(existingStages.map((stage) => stage.id));
   if (parsed.data.stages.some((stage) => !stageIds.has(stage.id)) || parsed.data.rules.some((rule) => !stageIds.has(rule.workflowStageId)) || parsed.data.workOrderTemplates.some((template) => !stageIds.has(template.workflowStageId))) return NextResponse.json({ error: "Workflow contains an invalid stage." }, { status: 400 });
+  const existingRuleIds = new Set(existingRules.map((rule) => rule.id));
+  const retainedRules = parsed.data.rules.filter((rule) => rule.id && existingRuleIds.has(rule.id));
+  const newRules = parsed.data.rules.filter((rule) => !rule.id || !existingRuleIds.has(rule.id));
+  const removedRuleIds = existingRules.filter((rule) => !retainedRules.some((candidate) => candidate.id === rule.id)).map((rule) => rule.id);
   await db.transaction(async (tx) => {
     await tx.update(postWorkflows).set({ name: parsed.data.name, description: parsed.data.description ?? null, updatedAt: new Date() }).where(and(eq(postWorkflows.id, workflowId), eq(postWorkflows.organizationId, organizationId)));
     // Stage positions are unique per workflow. Move the whole set out of the
@@ -31,8 +38,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
     // never collides with a still-unmoved row.
     if (existingStages.length) await tx.update(workflowStages).set({ position: sql`${workflowStages.position} + 1000`, updatedAt: new Date() }).where(and(eq(workflowStages.workflowId, workflowId), eq(workflowStages.organizationId, organizationId)));
     for (const stage of parsed.data.stages) await tx.update(workflowStages).set({ name: stage.name, key: stage.key, position: stage.position, color: stage.color, isTerminal: stage.isTerminal, canStartEarly: stage.canStartEarly, updatedAt: new Date() }).where(and(eq(workflowStages.id, stage.id), eq(workflowStages.organizationId, organizationId)));
-    if (existingStages.length) await tx.delete(workflowStageApprovalRules).where(and(eq(workflowStageApprovalRules.organizationId, organizationId), inArray(workflowStageApprovalRules.workflowStageId, existingStages.map((stage) => stage.id))));
-    if (parsed.data.rules.length) await tx.insert(workflowStageApprovalRules).values(parsed.data.rules.map((rule) => ({ organizationId, workflowStageId: rule.workflowStageId, approverRole: rule.approverRole, label: rule.label, approvalOrder: rule.approvalOrder, isRequired: true })));
+    // Keep existing rule IDs so completed and pending episode approvals remain
+    // attached to the workflow configuration that created them. Only explicitly
+    // removed rules cascade their associated approvals.
+    if (existingRules.length) await tx.update(workflowStageApprovalRules).set({ approvalOrder: sql`${workflowStageApprovalRules.approvalOrder} + 1000`, updatedAt: new Date() }).where(and(eq(workflowStageApprovalRules.organizationId, organizationId), inArray(workflowStageApprovalRules.id, existingRules.map((rule) => rule.id))));
+    if (removedRuleIds.length) await tx.delete(workflowStageApprovalRules).where(and(eq(workflowStageApprovalRules.organizationId, organizationId), inArray(workflowStageApprovalRules.id, removedRuleIds)));
+    for (const rule of retainedRules) await tx.update(workflowStageApprovalRules).set({ workflowStageId: rule.workflowStageId, approverRole: rule.approverRole, label: rule.label, approvalOrder: rule.approvalOrder, isRequired: rule.isRequired, updatedAt: new Date() }).where(and(eq(workflowStageApprovalRules.id, rule.id!), eq(workflowStageApprovalRules.organizationId, organizationId)));
+    if (newRules.length) await tx.insert(workflowStageApprovalRules).values(newRules.map((rule) => ({ organizationId, workflowStageId: rule.workflowStageId, approverRole: rule.approverRole, label: rule.label, approvalOrder: rule.approvalOrder, isRequired: rule.isRequired })));
     if (existingStages.length) await tx.delete(workflowStageWorkOrderTemplates).where(and(eq(workflowStageWorkOrderTemplates.organizationId, organizationId), inArray(workflowStageWorkOrderTemplates.workflowStageId, existingStages.map((stage) => stage.id))));
     if (parsed.data.workOrderTemplates.length) await tx.insert(workflowStageWorkOrderTemplates).values(parsed.data.workOrderTemplates.map((template) => ({ organizationId, workflowStageId: template.workflowStageId, title: template.title, description: template.description ?? null, department: template.department ?? null, assigneeRole: template.assigneeRole ?? null, priority: template.priority, isBlocking: template.isBlocking, position: template.position })));
   });
