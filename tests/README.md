@@ -36,8 +36,8 @@ pnpm test:booking-guests
 | Module | UI journey | Tenant isolation | Business rules |
 | --- | --- | --- | --- |
 | Shows | `ui/shows`, `ui/shows-detail` | `tenant-isolation/shows` | `integration/shows` |
-| Episodes | `ui/episodes` | `tenant-isolation/episodes`, `integration/guest-episode-access` | workflow integration, guest episode access |
-| Bookings | `ui/bookings`, `ui/my-time` | `tenant-isolation/bookings` | `integration/booking-guest-accounts` |
+| Episodes | `ui/episodes` | `tenant-isolation/episodes`, `integration/guest-episode-access` | creation, details, team, copied-team, workflow, QC, and guest episode access |
+| Bookings | `ui/bookings`, `ui/my-time` | `tenant-isolation/bookings`, guest scheduling boundary | lifecycle/conflicts, copied sequences, actual-time cost approval, and guest accounts |
 | Approvals | `ui/approvals` | `tenant-isolation/approvals` | workflow integration |
 | Work orders | — | covered through tenant-scoped APIs | `integration/work-orders` |
 | QC | episode QC UI is covered through the episode workspace | `integration/qc-lifecycle` | `integration/qc-lifecycle` |

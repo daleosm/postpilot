@@ -5,13 +5,13 @@ import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { episodeTeamAssignments, episodeWorkflowApprovals, episodes, people } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can, isAssignedToEpisode } from "@/lib/permissions";
+import { canManageEpisodes, isAssignedToEpisode } from "@/lib/permissions";
 import { episodeTeamAssignmentSchema } from "@/lib/validations/entities";
 
 const signerSchema = z.object({ assignmentId: z.string().uuid(), isSigner: z.boolean() });
 
 export async function GET(_request: Request, { params }: { params: Promise<{ episodeId: string }> }) {
-  if (!(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await canManageEpisodes())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -29,7 +29,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ epi
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ episodeId: string }> }) {
-  if (!(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await canManageEpisodes())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const parsed = episodeTeamAssignmentSchema.pick({ personId: true }).safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Check the assignment." }, { status: 400 });
   const context = await getActiveOrganizationContext();
@@ -45,7 +45,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ epi
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ episodeId: string }> }) {
-  if (!(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await canManageEpisodes())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const parsed = signerSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: "Choose an episode-team signer." }, { status: 400 });
   const context = await getActiveOrganizationContext();
@@ -69,7 +69,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ep
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ episodeId: string }> }) {
-  if (!(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await canManageEpisodes())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const id = new URL(request.url).searchParams.get("assignmentId"); if (!id) return NextResponse.json({ error: "Assignment is required." }, { status: 400 });
   const context = await getActiveOrganizationContext(); if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { episodeId } = await params;
@@ -78,6 +78,11 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ e
   const db = getDb();
   const [removed] = await db.select({ id: episodeTeamAssignments.id }).from(episodeTeamAssignments).innerJoin(people, eq(episodeTeamAssignments.personId, people.id)).where(and(eq(episodeTeamAssignments.id, id), eq(episodeTeamAssignments.episodeId, episodeId), eq(episodeTeamAssignments.organizationId, org), eq(people.organizationId, org))).limit(1);
   if (!removed) return NextResponse.json({ error: "Assignment not found." }, { status: 404 });
+  const [pendingSignOff] = await db.select({ id: episodeWorkflowApprovals.id }).from(episodeWorkflowApprovals)
+    .innerJoin(episodeTeamAssignments, eq(episodeWorkflowApprovals.requiredPersonId, episodeTeamAssignments.personId))
+    .where(and(eq(episodeWorkflowApprovals.organizationId, org), eq(episodeWorkflowApprovals.episodeId, episodeId), eq(episodeWorkflowApprovals.status, "pending"), eq(episodeTeamAssignments.id, id), eq(episodeTeamAssignments.organizationId, org)))
+    .limit(1);
+  if (pendingSignOff) return NextResponse.json({ error: "Choose a replacement workflow signer or complete the pending sign-off before removing this person." }, { status: 409 });
   await db.delete(episodeTeamAssignments).where(and(eq(episodeTeamAssignments.id, id), eq(episodeTeamAssignments.episodeId, episodeId), eq(episodeTeamAssignments.organizationId, org)));
   return NextResponse.json({ ok: true });
 }

@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { getDb } from "@/lib/db";
 import { activityLog, episodeWorkflowApprovals, episodeWorkflowTracks, episodes, people, postWorkOrders, postWorkflows, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
-import { can, isAssignedToEpisode } from "@/lib/permissions";
+import { can, canManageEpisodes, isAssignedToEpisode } from "@/lib/permissions";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { createStageWorkOrders } from "@/lib/work-orders";
@@ -14,13 +14,13 @@ const stageUpdateSchema = z.object({ workflowStageId: z.string().min(1) });
 const approvalActionSchema = z.object({ workflowStageId: z.string().min(1), action: z.literal("sign_off"), comment: z.string().trim().max(2000).optional() });
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ episodeId: string }> }) {
-  if (!(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const parsed = stageUpdateSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: "Choose a workflow stage." }, { status: 400 });
   const { episodeId } = await params;
 
   if (isDebugDemoMode) return NextResponse.json({ error: "Workflow configuration requires the database-backed debug environment." }, { status: 503 });
   if (!(await isAssignedToEpisode(episodeId))) return NextResponse.json({ error: "Episode not found." }, { status: 404 });
+  if (!(await canManageEpisodes())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

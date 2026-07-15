@@ -5,12 +5,12 @@ import { addGuestToEpisodeTeam, getGuestAccountForBooking } from "@/lib/booking-
 import { getDb } from "@/lib/db";
 import { bookings } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can } from "@/lib/permissions";
+import { canManageBookings } from "@/lib/permissions";
 import { missingTenantReferences } from "@/lib/tenant-resources";
 import { bookingRequestSchema } from "@/lib/validations/entities";
 
 export async function POST(request: Request) {
-  if (!(await can("manage_bookings"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await canManageBookings())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const parsed = bookingRequestSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: "Check the booking details and try again." }, { status: 400 });
   const context = await getActiveOrganizationContext();

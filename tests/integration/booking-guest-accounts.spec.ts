@@ -69,7 +69,7 @@ test.describe("Booking guest accounts", () => {
     `;
     await sql`
       insert into organization_role_policies (organization_id, role, label, permissions) values
-        (${organizationId}, 'client_reviewer', 'Client reviewer', '[]'::jsonb)
+        (${organizationId}, 'client_reviewer', 'Client reviewer', '["manage_bookings"]'::jsonb)
     `;
     await sql`
       insert into people (id, organization_id, user_id, name, email, role) values
@@ -170,5 +170,17 @@ test.describe("Booking guest accounts", () => {
     await expect(response.json()).resolves.toMatchObject({ error: "Episode not found for this post house." });
     const [person] = await sql`select id from people where organization_id = ${organizationId} and email = 'cross-tenant-guest@postpilot.test'`;
     expect(person).toBeUndefined();
+  });
+
+  test("does not let a guest membership schedule despite a broad tenant policy", async ({ page }) => {
+    const user = await page.request.post("/api/debug/user", { data: { userId: guestUserId } });
+    expect(user.status()).toBe(200);
+    const tenant = await page.request.post("/api/organizations/active", { data: { organizationId, pathname: "/bookings" } });
+    expect(tenant.status()).toBe(200);
+
+    const create = await page.request.post("/api/bookings", { data: bookingPayload(null) });
+    expect(create.status()).toBe(403);
+    const copy = await page.request.post("/api/bookings/copy-episode", { data: { sourceEpisodeId: episodeId, targetEpisodeId: foreignEpisodeId, startsOn: "2034-06-12T09:00:00.000Z" } });
+    expect(copy.status()).toBe(403);
   });
 });

@@ -2,12 +2,12 @@ import { BookingFormDialog } from "@/components/booking-form-dialog";
 import { CopyEpisodeBookingsDialog } from "@/components/copy-episode-bookings-dialog";
 import { ScheduleBoard } from "@/components/schedule-board";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can, roleHome } from "@/lib/permissions";
+import { canApproveBookingTime, canManageBookings, canRecordBookingActuals, roleHome } from "@/lib/permissions";
 import { getScheduleResources, listCateringRequests, listPendingBookingTimeSubmissions, listSchedule } from "@/server/data";
 import { redirect } from "next/navigation";
 
 export default async function SchedulePage() {
-  const [mayManage, mayApproveTime, maySubmitOwnTime] = await Promise.all([can("manage_bookings"), can("approve_time"), can("update_assigned_work")]);
+  const [mayManage, mayApproveTime, maySubmitOwnTime] = await Promise.all([canManageBookings(), canApproveBookingTime(), canRecordBookingActuals()]);
   if (!mayManage) {
     if (maySubmitOwnTime) redirect("/my-time");
     redirect(await roleHome());

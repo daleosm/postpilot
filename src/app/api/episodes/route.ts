@@ -4,14 +4,14 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { episodeTeamAssignments, episodes, people, seasons, shows } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can } from "@/lib/permissions";
+import { canManageEpisodes } from "@/lib/permissions";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { insertEpisodeSchema } from "@/lib/validations/entities";
 import { missingTenantReferences } from "@/lib/tenant-resources";
 import { createStageWorkOrders } from "@/lib/work-orders";
 
 export async function POST(request: Request) {
-  if (!(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await canManageEpisodes())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const parsed = insertEpisodeSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: "Check the episode details and try again." }, { status: 400 });
   if (isDebugDemoMode) return NextResponse.json({ id: "demo-new-episode", debug: true }, { status: 201 });

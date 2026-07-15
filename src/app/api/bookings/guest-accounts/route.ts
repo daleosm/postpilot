@@ -7,13 +7,13 @@ import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { episodeTeamAssignments, organizationMembers, organizationRolePolicies, people, users } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can } from "@/lib/permissions";
+import { canManageBookings } from "@/lib/permissions";
 import { missingTenantReferences } from "@/lib/tenant-resources";
 import { createBookingGuestSchema } from "@/lib/validations/entities";
 
 /** Creates a tenant-local guest account and immediately shares the selected episode with them. */
 export async function POST(request: Request) {
-  if (!(await can("manage_bookings"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await canManageBookings())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const parsed = createBookingGuestSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Check the guest account details." }, { status: 400 });
 

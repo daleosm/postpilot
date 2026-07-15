@@ -5,12 +5,12 @@ import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { bookingTimeSubmissions, bookings } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can } from "@/lib/permissions";
+import { canRecordBookingActuals } from "@/lib/permissions";
 
 const schema = z.object({ actualStartsAt: z.coerce.date(), actualEndsAt: z.coerce.date(), overtimeMinutes: z.coerce.number().int().min(0).max(720).default(0), note: z.string().trim().max(2000).nullable().optional() }).refine((value) => value.actualEndsAt > value.actualStartsAt, { path: ["actualEndsAt"], message: "Actual end must be after actual start." });
 
 export async function POST(request: Request, { params }: { params: Promise<{ bookingId: string }> }) {
-  if (!(await can("update_assigned_work"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await canRecordBookingActuals())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const parsed = schema.safeParse(await request.json()); if (!parsed.success) return NextResponse.json({ error: "Enter valid actual hours." }, { status: 400 });
   const context = await getActiveOrganizationContext(); if (!context?.organization || !context.person) return NextResponse.json({ error: "No active person record." }, { status: 401 });
   const { bookingId } = await params; const db = getDb();

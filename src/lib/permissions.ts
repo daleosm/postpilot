@@ -31,6 +31,32 @@ export async function can(permission: Permission) {
 }
 
 /**
+ * Episode management is reserved for internal memberships. Tenant role policies
+ * remain configurable, but a guest membership never becomes a scheduling or
+ * editorial-management account merely because a broad permission was assigned.
+ */
+export async function canManageEpisodes() {
+  const context = await getActiveOrganizationContext();
+  return context?.organization?.role !== "guest" && await can("manage_shows");
+}
+
+/** Facility scheduling and time-cost controls are internal post-house actions. */
+export async function canManageBookings() {
+  const context = await getActiveOrganizationContext();
+  return context?.organization?.role !== "guest" && await can("manage_bookings");
+}
+
+export async function canRecordBookingActuals() {
+  const context = await getActiveOrganizationContext();
+  return context?.organization?.role !== "guest" && await can("update_assigned_work");
+}
+
+export async function canApproveBookingTime() {
+  const context = await getActiveOrganizationContext();
+  return context?.organization?.role !== "guest" && await can("approve_time");
+}
+
+/**
  * Managers can view every episode, except guest memberships. Guests are always
  * limited to episodes where they are part of the episode team (or hold one of
  * the legacy episode assignment fields).

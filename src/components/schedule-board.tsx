@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { BookingFormDialog, type BookingResources } from "@/components/booking-form-dialog";
+import { BookingConflictFlagDialog } from "@/components/booking-conflict-flag-dialog";
 import { ActualTimeDialog } from "@/components/actual-time-dialog";
 
 export type ScheduleBooking = {
@@ -84,7 +85,7 @@ export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, pe
     </section>
     <aside className="panel max-w-md p-5"><div className="flex items-center gap-2"><Gauge size={16} className="text-[#71817c]" /><div><h2 className="text-sm font-semibold text-[#343c38]">Specialist room utilization</h2><p className="mt-0.5 text-xs text-[#858a87]">Visible period · edit bays excluded</p></div></div><div className="mt-5 space-y-3.5">{utilization.map((room) => { const percent = Math.min(100, Math.round((room.hours / (view === "week" ? 40 : 9)) * 100)); return <div key={room.id}><div className="mb-1.5 flex justify-between gap-2 text-xs"><span className="truncate font-medium text-[#58615d]">{room.name}</span><span className="shrink-0 text-[#858a87]">{room.hours.toFixed(0)}h · {percent}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#ecebe7]"><div className={`h-full rounded-full ${percent > 85 ? "bg-[#bd7650]" : "bg-[#64847e]"}`} style={{ width: `${percent}%` }} /></div></div>; })}{!utilization.length && <p className="text-xs text-[#858a87]">No specialist rooms have been set up.</p>}</div><div className="mt-5 border-t border-[#ecebe7] pt-4 text-xs text-[#7d837f]"><Clock3 className="mr-1 inline" size={13} /> {visible.length} bookings in view</div></aside></> : <StaffDayView people={resources.people} bookings={bookings} cateringRequests={cateringRequests} day={cursor} onSelect={setSelectedBooking} />}
     {canApproveTime && <TimeApprovalQueue items={pendingTimes} />}
-    {selectedBooking && <div className="fixed bottom-5 right-5 z-40 flex gap-2 rounded-lg border border-[#e2e3de] bg-[#fafbf9] p-2 shadow-lg">{canManage && <BookingFormDialog key={selectedBooking.id} resources={resources} initialStart={toInput(cursor)} booking={selectedBooking} onClose={() => setSelectedBooking(null)} />}{canSubmitOwnTime && selectedBooking.personId === currentPersonId && <ActualTimeDialog booking={selectedBooking} />}<Button size="sm" variant="tertiary" onPress={() => setSelectedBooking(null)}>Close</Button></div>}
+    {selectedBooking && <div className="fixed bottom-5 right-5 z-40 flex flex-wrap gap-2 rounded-lg border border-[#e2e3de] bg-[#fafbf9] p-2 shadow-lg">{canManage && <BookingFormDialog key={selectedBooking.id} resources={resources} initialStart={toInput(cursor)} booking={selectedBooking} onClose={() => setSelectedBooking(null)} />}{canSubmitOwnTime && selectedBooking.personId === currentPersonId && <><ActualTimeDialog booking={selectedBooking} /><BookingConflictFlagDialog bookingId={selectedBooking.id} title={selectedBooking.title} /></>}<Button size="sm" variant="tertiary" onPress={() => setSelectedBooking(null)}>Close</Button></div>}
   </div>;
 }
 

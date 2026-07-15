@@ -3,12 +3,12 @@ import { z } from "zod";
 
 import { getBookingSuggestions } from "@/lib/booking-conflicts";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can } from "@/lib/permissions";
+import { canManageBookings } from "@/lib/permissions";
 import { missingTenantReferences } from "@/lib/tenant-resources";
 import { bookingRequestSchema } from "@/lib/validations/entities";
 
 export async function POST(request: Request) {
-  if (!(await can("manage_bookings"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await canManageBookings())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const body = await request.json();
   const parsed = bookingRequestSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "Enter a valid booking window." }, { status: 400 });

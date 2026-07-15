@@ -5,11 +5,11 @@ import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { bookingTimeSubmissions, bookings, budgetLines, episodes, seasons } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can } from "@/lib/permissions";
+import { can, canApproveBookingTime } from "@/lib/permissions";
 import { getBookingCostApprovalProjection } from "@/server/data";
 
 export async function POST(_: Request, { params }: { params: Promise<{ submissionId: string }> }) {
-  if (!(await can("approve_time"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await canApproveBookingTime())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const context = await getActiveOrganizationContext(); if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 }); const organizationId = context.organization.organizationId; const currency = context.organization.currency;
   const { submissionId } = await params; const db = getDb();
   const [submission] = await db.select().from(bookingTimeSubmissions).where(and(eq(bookingTimeSubmissions.id, submissionId), eq(bookingTimeSubmissions.organizationId, organizationId), eq(bookingTimeSubmissions.status, "pending"))).limit(1);

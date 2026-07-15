@@ -1,11 +1,11 @@
 import { MyTimeBoard } from "@/components/my-time-board";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can, roleHome } from "@/lib/permissions";
+import { canRecordBookingActuals, roleHome } from "@/lib/permissions";
 import { listMyTimeBookings } from "@/server/data";
 import { redirect } from "next/navigation";
 
 export default async function MyTimePage() {
-  if (!(await can("update_assigned_work"))) redirect(await roleHome());
+  if (!(await canRecordBookingActuals())) redirect(await roleHome());
   const context = await getActiveOrganizationContext();
   if (!context?.organization || !context.person) redirect(await roleHome());
   const now = new Date();

@@ -117,4 +117,17 @@ test.describe("Guest episode access", () => {
 
     await expect(page.getByRole("heading", { name: "Guest-accessible episode" })).toBeVisible();
   });
+
+  test("does not let an assigned guest use episode-management endpoints", async ({ page }) => {
+    await useGuestSession(page);
+
+    const workflow = await page.request.patch(`/api/episodes/${assignedEpisodeId}`, { data: { workflowStageId: "00000000-0000-4000-8000-000000000001" } });
+    expect(workflow.status()).toBe(403);
+    const details = await page.request.patch(`/api/episodes/${assignedEpisodeId}/details`, { data: { title: "Should not change", productionCode: null, status: "assembly", airDate: null, lockedCutDate: null, deliveryDeadline: null } });
+    expect(details.status()).toBe(403);
+    const team = await page.request.post(`/api/episodes/${assignedEpisodeId}/team`, { data: { personId: guestPersonId } });
+    expect(team.status()).toBe(403);
+    const create = await page.request.post("/api/episodes", { data: {} });
+    expect(create.status()).toBe(403);
+  });
 });
