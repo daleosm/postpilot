@@ -37,7 +37,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
     // requested range before applying the new order so a drag-and-drop swap
     // never collides with a still-unmoved row.
     if (existingStages.length) await tx.update(workflowStages).set({ position: sql`${workflowStages.position} + 1000`, updatedAt: new Date() }).where(and(eq(workflowStages.workflowId, workflowId), eq(workflowStages.organizationId, organizationId)));
-    for (const stage of parsed.data.stages) await tx.update(workflowStages).set({ name: stage.name, key: stage.key, position: stage.position, color: stage.color, isTerminal: stage.isTerminal, canStartEarly: stage.canStartEarly, updatedAt: new Date() }).where(and(eq(workflowStages.id, stage.id), eq(workflowStages.organizationId, organizationId)));
+    for (const stage of parsed.data.stages) await tx.update(workflowStages).set({ name: stage.name, key: stage.key, position: stage.position, color: stage.color, isTerminal: stage.isTerminal, canStartEarly: stage.canStartEarly, requiresQcPass: stage.requiresQcPass, updatedAt: new Date() }).where(and(eq(workflowStages.id, stage.id), eq(workflowStages.organizationId, organizationId)));
     // Keep existing rule IDs so completed and pending episode approvals remain
     // attached to the workflow configuration that created them. Only explicitly
     // removed rules cascade their associated approvals.

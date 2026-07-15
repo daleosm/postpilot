@@ -44,7 +44,7 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
       .from(activityLog)
       .where(and(eq(activityLog.organizationId, organizationId), or(eq(activityLog.entityId, episodeId), sql`${activityLog.metadata}->>'episodeId' = ${episodeId}`)))
       .orderBy(desc(activityLog.createdAt)).limit(30),
-    db.select({ id: workflowStages.id, name: workflowStages.name, key: workflowStages.key, position: workflowStages.position, canStartEarly: workflowStages.canStartEarly })
+    db.select({ id: workflowStages.id, name: workflowStages.name, key: workflowStages.key, position: workflowStages.position, canStartEarly: workflowStages.canStartEarly, requiresQcPass: workflowStages.requiresQcPass })
       .from(workflowStages).innerJoin(postWorkflows, eq(workflowStages.workflowId, postWorkflows.id))
       .where(and(eq(postWorkflows.organizationId, organizationId), eq(workflowStages.organizationId, organizationId), eq(postWorkflows.isDefault, true))).orderBy(asc(workflowStages.position)),
     db.select({ id: workflowStageApprovalRules.id, workflowStageId: workflowStageApprovalRules.workflowStageId, approverRole: workflowStageApprovalRules.approverRole, label: workflowStageApprovalRules.label, approvalOrder: workflowStageApprovalRules.approvalOrder, isRequired: workflowStageApprovalRules.isRequired })

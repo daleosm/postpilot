@@ -114,6 +114,7 @@ export const insertWorkflowStageSchema = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#687a78"),
   isTerminal: z.boolean().default(false),
   canStartEarly: z.boolean().default(false),
+  requiresQcPass: z.boolean().default(false),
 });
 export const updateWorkflowStageSchema = insertWorkflowStageSchema.omit({ workflowId: true }).partial();
 
@@ -128,6 +129,7 @@ export const updateWorkflowTemplateSchema = z.object({
     color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
     isTerminal: z.boolean(),
     canStartEarly: z.boolean(),
+    requiresQcPass: z.boolean(),
   })).min(1)
     .refine((stages) => new Set(stages.map((stage) => stage.key)).size === stages.length, { message: "Workflow stage keys must be unique." })
     .refine((stages) => new Set(stages.map((stage) => stage.position)).size === stages.length, { message: "Workflow stage positions must be unique." }),

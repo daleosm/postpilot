@@ -9,6 +9,8 @@ const organizationId = "92000000-0000-4000-8000-000000000001";
 const crossOrganizationId = "92000000-0000-4000-8000-000000000002";
 const workflowId = "92000000-0000-4000-8000-000000000003";
 const stageId = "92000000-0000-4000-8000-000000000004";
+const deliveryStageId = "92000000-0000-4000-8000-000000000018";
+const qcApprovalRuleId = "92000000-0000-4000-8000-000000000019";
 const showId = "92000000-0000-4000-8000-000000000005";
 const seasonId = "92000000-0000-4000-8000-000000000006";
 const episodeId = "92000000-0000-4000-8000-000000000007";
@@ -61,7 +63,7 @@ test.describe("QC lifecycle integration", () => {
       (${organizationId}, ${managerUserId}, 'member'),
       (${organizationId}, ${waiverUserId}, 'member')`;
     await sql`insert into organization_role_policies (organization_id, role, label, permissions) values
-      (${organizationId}, 'qc_verifier', 'QC verifier', '["manage_qc","verify_qc","update_assigned_work"]'::jsonb),
+      (${organizationId}, 'qc_verifier', 'QC verifier', '["manage_qc","verify_qc","approve_reviews","update_assigned_work"]'::jsonb),
       (${organizationId}, 'qc_recorder', 'QC recorder', '["manage_qc"]'::jsonb),
       (${organizationId}, 'qc_waiver', 'QC waiver', '["manage_qc","waive_qc"]'::jsonb),
       (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb),
@@ -73,7 +75,8 @@ test.describe("QC lifecycle integration", () => {
       (${managerPersonId}, ${organizationId}, ${managerUserId}, 'QC Lifecycle Manager', 'qc-lifecycle-manager@postpilot.test', 'post_manager'),
       (${waiverPersonId}, ${organizationId}, ${waiverUserId}, 'QC Lifecycle Waiver', 'qc-lifecycle-waiver@postpilot.test', 'qc_waiver')`;
     await sql`insert into post_workflows (id, organization_id, name, is_default) values (${workflowId}, ${organizationId}, 'QC lifecycle workflow', true)`;
-    await sql`insert into workflow_stages (id, organization_id, workflow_id, name, key, position, color, is_terminal, can_start_early) values (${stageId}, ${organizationId}, ${workflowId}, 'Quality control', 'quality_control', 1, '#506f68', false, false)`;
+    await sql`insert into workflow_stages (id, organization_id, workflow_id, name, key, position, color, is_terminal, can_start_early, requires_qc_pass) values (${stageId}, ${organizationId}, ${workflowId}, 'Quality control', 'quality_control', 1, '#506f68', false, false, true), (${deliveryStageId}, ${organizationId}, ${workflowId}, 'Delivery', 'delivery', 2, '#506f68', false, false, false)`;
+    await sql`insert into workflow_stage_approval_rules (id, organization_id, workflow_stage_id, approver_role, label, approval_order, is_required) values (${qcApprovalRuleId}, ${organizationId}, ${stageId}, 'qc_verifier', 'QC sign-off', 1, true)`;
     await sql`insert into shows (id, organization_id, title, code, time_zone) values (${showId}, ${organizationId}, 'QC Lifecycle Series', 'QCL', 'Europe/London')`;
     await sql`insert into seasons (id, organization_id, show_id, number) values (${seasonId}, ${organizationId}, ${showId}, 1)`;
     await sql`insert into episodes (id, organization_id, season_id, workflow_stage_id, editor_id, number, title, status, qc_status) values (${episodeId}, ${organizationId}, ${seasonId}, ${stageId}, ${editorPersonId}, 1, 'Re-QC episode', 'online', 'in_progress')`;
@@ -90,8 +93,9 @@ test.describe("QC lifecycle integration", () => {
   test.beforeEach(async () => {
     await sql`delete from post_work_orders where organization_id = ${organizationId} and episode_id = ${episodeId}`;
     await sql`delete from qc_reports where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    await sql`delete from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId}`;
     await sql`delete from activity_log where organization_id = ${organizationId} and entity_id = ${episodeId}`;
-    await sql`update episodes set qc_status = 'in_progress' where id = ${episodeId} and organization_id = ${organizationId}`;
+    await sql`update episodes set qc_status = 'in_progress', workflow_stage_id = ${stageId} where id = ${episodeId} and organization_id = ${organizationId}`;
   });
 
   test.afterAll(async () => {
@@ -110,6 +114,25 @@ test.describe("QC lifecycle integration", () => {
     const passed = await page.request.post("/api/qc-reports", { data: { episodeId, status: "passed", summary: "Recorder cannot verify." } });
     expect(passed.status()).toBe(403);
     await expect(passed.json()).resolves.toMatchObject({ error: expect.stringContaining("QC verification") });
+  });
+
+  test("keeps failed QC in one decision stage and advances only after a passed re-QC", async ({ page }) => {
+    await switchUser(page, qcUserId);
+    const beforeResult = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: stageId, approvalRuleId: qcApprovalRuleId, action: "sign_off" } });
+    expect(beforeResult.status()).toBe(409);
+    await expect(beforeResult.json()).resolves.toMatchObject({ error: expect.stringContaining("passed or authorised-waived QC") });
+
+    const failed = await page.request.post("/api/qc-reports", { data: { episodeId, status: "failed", summary: "A correction is required." } });
+    expect(failed.status()).toBe(201);
+    const afterFailure = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: stageId, approvalRuleId: qcApprovalRuleId, action: "sign_off" } });
+    expect(afterFailure.status()).toBe(409);
+
+    await sql`delete from post_work_orders where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    const passed = await page.request.post("/api/qc-reports", { data: { episodeId, status: "passed", summary: "Correction verified in re-QC." } });
+    expect(passed.status()).toBe(201);
+    const signed = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: stageId, approvalRuleId: qcApprovalRuleId, action: "sign_off" } });
+    expect(signed.status()).toBe(200);
+    await expect(signed.json()).resolves.toMatchObject({ stageComplete: true, advancedTo: { id: deliveryStageId, name: "Delivery" } });
   });
 
   test("keeps another tenant's QC report outside the current post house", async ({ page }) => {

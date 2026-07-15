@@ -173,6 +173,8 @@ export const workflowStages = pgTable("workflow_stages", {
   isTerminal: boolean("is_terminal").default(false).notNull(),
   /** Explicit exception to normal sequential progression; hard dependencies still apply. */
   canStartEarly: boolean("can_start_early").default(false).notNull(),
+  /** A passing or authorised-waived QC report is required before this stage can progress. */
+  requiresQcPass: boolean("requires_qc_pass").default(false).notNull(),
   ...auditColumns,
 }, (table) => [
   uniqueIndex("workflow_stages_workflow_key_idx").on(table.workflowId, table.key),

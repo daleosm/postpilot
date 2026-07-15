@@ -68,7 +68,6 @@ const stages = [
   ["Captions, localisation and accessibility", "captions_localisation_accessibility", "#7c8c78", "post_supervisor"],
   ["Mastering and versioning", "mastering_versioning", "#647c70", "post_supervisor"],
   ["Quality control", "quality_control", "#b56d54", "qc"],
-  ["Corrections and re-QC", "corrections_re_qc", "#bd7650", "qc"],
   ["Delivery", "delivery", "#607b70", "post_supervisor"],
   ["Client or network acceptance", "client_network_acceptance", "#8c719d", "guest"],
   ["Archive and closeout", "archive_closeout", "#6d7671", "post_supervisor"],
@@ -357,7 +356,7 @@ async function seedTenant(tenant: TenantSeed) {
   await db.insert(organizationRolePolicies).values([...new Set(tenantPeople.map((person) => person.role).filter((role) => role !== "guest"))].map((role) => ({ organizationId: tenant.id, role, label: roleLabel(role), permissions: defaultRolePolicies[role] ?? [] })));
 
   await db.insert(postWorkflows).values({ id: workflowId, organizationId: tenant.id, name: tenant.workflowName, description: tenant.workflowDescription, isDefault: true });
-  await db.insert(workflowStages).values(stages.map(([name, key, color], index) => ({ id: stageId(index + 1), organizationId: tenant.id, workflowId, name, key, color, position: index + 1, isTerminal: key === "archive_closeout" })));
+  await db.insert(workflowStages).values(stages.map(([name, key, color], index) => ({ id: stageId(index + 1), organizationId: tenant.id, workflowId, name, key, color, position: index + 1, isTerminal: key === "archive_closeout", requiresQcPass: key === "quality_control" })));
   await db.insert(workflowStageApprovalRules).values(stages.map(([, , , approverRole], index) => ({ id: ruleId(index + 1), organizationId: tenant.id, workflowStageId: stageId(index + 1), approverRole, label: `${approverRole.replaceAll("_", " ")} sign-off`, approvalOrder: 1, isRequired: true })));
   await db.insert(workflowStageWorkOrderTemplates).values([
     { id: id(tenant.number, "37", 1), organizationId: tenant.id, workflowStageId: stageId(12), title: "Confirm VFX, graphics and titles turnover", department: "VFX", assigneeRole: "vfx_coordinator", priority: "normal", isBlocking: false, position: 1 },
@@ -392,7 +391,7 @@ async function seedTenant(tenant: TenantSeed) {
     ["locked", "passed", 10],
     ["online", "needs_attention", 13],
     ["assembly", "not_started", 3],
-    ["delivered", "passed", 21],
+    ["delivered", "passed", 20],
     ["review", "needs_attention", 7],
     ["locked", "in_progress", 10],
   ] as const;
@@ -412,7 +411,7 @@ async function seedTenant(tenant: TenantSeed) {
     if (["locked", "online", "delivered"].includes(episode.status)) roles.push("colorist", "sound_mixer");
     if (index % 3 === 0) roles.push("qc");
     const stagePosition = lifecyclePatterns[index % lifecyclePatterns.length][2];
-    if ([5, 7, 22].includes(stagePosition)) roles.push("guest");
+    if ([5, 7, 21].includes(stagePosition)) roles.push("guest");
     return roles.map((role) => ({ organizationId: tenant.id, episodeId: episode.id, personId: byRole(role), isLead: true }));
   }));
 
