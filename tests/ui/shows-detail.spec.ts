@@ -23,11 +23,11 @@ test.describe("Show detail UI", () => {
     await page.getByRole("button", { name: "Cancel" }).click();
   });
 
-  test.fail("renders one Seasons & episodes and one Episode team panel", async ({ page }) => {
+  test("renders one Seasons & episodes and one Episode team panel", async ({ page }) => {
     await page.goto(`/shows/${CROSSING_POINT_SHOW_ID}`);
 
-    await expect(page.getByRole("heading", { name: "Seasons & episodes" })).toHaveCount(1);
-    await expect(page.getByRole("heading", { name: "Episode team" })).toHaveCount(1);
+    await expect(page.getByText("Seasons & episodes", { exact: true })).toHaveCount(1);
+    await expect(page.getByText("Episode team", { exact: true })).toHaveCount(1);
   });
 
   test("does not render the show workspace for an artist without Shows permission", async ({ context, page }) => {
