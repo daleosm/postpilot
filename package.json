@@ -24,6 +24,7 @@
     "test:approvals-isolation": "playwright test tests/integration/tenant-isolation/approvals.spec.ts",
     "test:workflow": "playwright test tests/integration/workflow.spec.ts",
     "test:work-orders": "playwright test tests/integration/work-orders.spec.ts",
+    "test:budget": "playwright test tests/integration/budget.spec.ts",
     "test:qc": "playwright test tests/integration/qc-lifecycle.spec.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

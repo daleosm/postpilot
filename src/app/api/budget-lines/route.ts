@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
+import { writeAuditEvent } from "@/lib/audit";
 import { budgetLines, episodes, seasons, shows } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
@@ -32,5 +33,6 @@ export async function POST(request: Request) {
     actualAmount: String(parsed.data.actualAmount),
     currency: context.organization.currency,
   }).returning({ id: budgetLines.id });
+  await writeAuditEvent({ organizationId: context.organization.organizationId, actorUserId: context.userId, action: "budget_line.created", entityType: "budget_line", entityId: line.id, metadata: { episodeId: parsed.data.episodeId, category: parsed.data.category } });
   return NextResponse.json(line, { status: 201 });
 }

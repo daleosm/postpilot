@@ -18,6 +18,7 @@ pnpm test:e2e
 pnpm test:ui
 pnpm test:integration
 pnpm test:tenant-isolation
+pnpm test:budget
 pnpm test:qc
 pnpm test:guest-episodes
 pnpm test:booking-guests
@@ -39,6 +40,7 @@ pnpm test:booking-guests
 | Episodes | `ui/episodes` | `tenant-isolation/episodes`, `integration/guest-episode-access` | creation, details, team, copied-team, workflow, QC, and guest episode access |
 | Bookings | `ui/bookings`, `ui/my-time` | `tenant-isolation/bookings`, guest scheduling boundary | lifecycle/conflicts, copied sequences, immediate actual-time cost roll-up, and guest accounts |
 | Approvals | `ui/approvals` | `tenant-isolation/approvals` | workflow integration |
-| Work orders | — | covered through tenant-scoped APIs | `integration/work-orders` |
+| Work orders | episode work-order form and assigned-work queue | covered through tenant-scoped APIs | `integration/work-orders` |
+| Budget | episode budget drill-down and manual-line form | `integration/budget` | manual ledger, service rates, rate inheritance, booking roll-up, and commercial source locks |
 | QC | episode QC UI is covered through the episode workspace | `integration/qc-lifecycle` | `integration/qc-lifecycle` |
 | Users & access | `ui/users` | tenant-local creation exercised in the journey | — |

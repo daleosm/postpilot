@@ -11,6 +11,8 @@ export async function getBudgetData(organizationId: string) {
   const [storedLines, invoices, workOrderCharges] = await Promise.all([
     db.select({
       id: budgetLines.id,
+      workOrderId: budgetLines.workOrderId,
+      vendorInvoiceId: budgetLines.vendorInvoiceId,
       category: budgetLines.category,
       description: budgetLines.description,
       budgetedAmount: budgetLines.budgetedAmount,

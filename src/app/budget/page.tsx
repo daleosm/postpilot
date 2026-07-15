@@ -14,6 +14,8 @@ import { redirect } from "next/navigation";
 
 type Line = {
   id: string;
+  workOrderId: string | null;
+  vendorInvoiceId: string | null;
   episodeId: string | null;
   episodeTitle: string | null;
   episodeNumber: number | null;
@@ -134,13 +136,14 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
     <section className="panel overflow-hidden">
       <div className="border-b border-[#ebeae6] px-5 py-3"><h2 className="text-sm font-semibold text-[#353b39]">Cost lines</h2></div>
       {lines.length === 0 ? <div className="px-5 py-12 text-center text-sm text-[#7d837f]">No episode budget lines match this show. Add the first line to begin tracking spend.</div> : <div className="overflow-x-auto"><div className="min-w-[760px]">
-        <div className="grid grid-cols-[minmax(210px,1.3fr)_190px_140px_110px_110px_90px] gap-3 bg-[#fafaf8] px-5 py-3 text-[10px] font-semibold uppercase tracking-[.08em] text-[#7e837f]"><span>Category</span><span>Episode</span><span>Show</span><span>Estimate</span><span>Actual</span><span>Type</span></div>
-        <div className="divide-y divide-[#efeeea]">{lines.map((line) => <div key={line.id} className="grid grid-cols-[minmax(210px,1.3fr)_190px_140px_110px_110px_90px] gap-3 px-5 py-3 text-sm text-[#4f5753]">
+        <div className="grid grid-cols-[minmax(210px,1.3fr)_190px_140px_110px_110px_90px_80px] gap-3 bg-[#fafaf8] px-5 py-3 text-[10px] font-semibold uppercase tracking-[.08em] text-[#7e837f]"><span>Category</span><span>Episode</span><span>Show</span><span>Estimate</span><span>Actual</span><span>Type</span><span>Action</span></div>
+        <div className="divide-y divide-[#efeeea]">{lines.map((line) => <div key={line.id} className="grid grid-cols-[minmax(210px,1.3fr)_190px_140px_110px_110px_90px_80px] items-center gap-3 px-5 py-3 text-sm text-[#4f5753]">
           <div className="min-w-0"><p className="font-medium text-[#39423e]">{line.category}</p>{line.description && <p className="mt-0.5 truncate text-xs text-[#858a87]">{line.description}</p>}</div>
           <p className="truncate text-xs text-[#626b67]">{episodeLabel(line)}</p>
           <p className="truncate text-xs text-[#626b67]">{line.showTitle ?? "—"}</p>
           <p>{money(Number(line.budgetedAmount), line.currency)}</p><p>{money(Number(line.actualAmount), line.currency)}</p>
           <p className="capitalize text-xs text-[#6d7672]">{line.costType}</p>
+          {line.workOrderId || line.vendorInvoiceId ? <span className="text-xs text-[#858a87]">Linked</span> : <BudgetLineForm episodes={episodes} currency={currency} line={line} />}
         </div>)}</div>
       </div></div>}
     </section>
@@ -351,9 +354,9 @@ async function load(): Promise<BudgetData> {
   if (isDebugDemoMode) {
     const episodes = [{ id: "demo-e1", label: "Signal North · E01 The Quiet Hour", showTitle: "Signal North" }, { id: "demo-e5", label: "Under Current · E01 The Undertow", showTitle: "Under Current" }];
     return { episodes, workOrderCharges: [], lines: [
-      { id: "b1", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "Edit suite", description: "Avid bays", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 48000, actualAmount: 42150, currency: "GBP", costType: "internal" },
-      { id: "b2", episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "VFX", description: "Cleanup and screens", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 78000, actualAmount: 82350, currency: "GBP", costType: "billable" },
-      { id: "b3", episodeId: "demo-e5", episodeTitle: "The Undertow", episodeNumber: 1, category: "Sound", description: "Mix and stems", showId: "demo-s2", showTitle: "Under Current", network: "Eastline", budgetedAmount: 52000, actualAmount: 47120, currency: "GBP", costType: "internal" },
+      { id: "b1", workOrderId: null, vendorInvoiceId: null, episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "Edit suite", description: "Avid bays", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 48000, actualAmount: 42150, currency: "GBP", costType: "internal" },
+      { id: "b2", workOrderId: null, vendorInvoiceId: null, episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "VFX", description: "Cleanup and screens", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 78000, actualAmount: 82350, currency: "GBP", costType: "billable" },
+      { id: "b3", workOrderId: null, vendorInvoiceId: null, episodeId: "demo-e5", episodeTitle: "The Undertow", episodeNumber: 1, category: "Sound", description: "Mix and stems", showId: "demo-s2", showTitle: "Under Current", network: "Eastline", budgetedAmount: 52000, actualAmount: 47120, currency: "GBP", costType: "internal" },
     ] };
   }
   const context = await getActiveOrganizationContext();
