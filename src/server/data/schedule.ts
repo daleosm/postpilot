@@ -3,7 +3,7 @@ import "server-only";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { bookingTimeSubmissions, bookings, episodes, organizationMembers, organizationRolePolicies, people, rooms } from "@/lib/db/schema";
+import { bookingTimeSubmissions, bookings, episodes, organizationMembers, people, rooms } from "@/lib/db/schema";
 import { listEpisodes } from "./episodes";
 
 export async function listSchedule(organizationId: string, from: Date, to: Date, personId?: string) {
@@ -22,14 +22,13 @@ export async function listSchedule(organizationId: string, from: Date, to: Date,
 
 export async function getScheduleResources(organizationId: string) {
   const db = getDb();
-  const [roomRows, peopleRows, episodeRows, guestAccounts, guestRoles] = await Promise.all([
+  const [roomRows, peopleRows, episodeRows, guestAccounts] = await Promise.all([
     db.select({ id: rooms.id, name: rooms.name, type: rooms.type }).from(rooms).where(eq(rooms.organizationId, organizationId)).orderBy(asc(rooms.name)),
     db.select({ id: people.id, name: people.name, role: people.role, availability: people.availability, isFreelancer: people.isFreelancer }).from(people).where(eq(people.organizationId, organizationId)).orderBy(asc(people.name)),
     listEpisodes(organizationId),
     db.select({ id: people.id, name: people.name, role: people.role, email: people.email }).from(people).innerJoin(organizationMembers, and(eq(organizationMembers.organizationId, organizationId), eq(organizationMembers.userId, people.userId))).where(and(eq(people.organizationId, organizationId), eq(people.isActive, true), eq(organizationMembers.role, "guest"))).orderBy(asc(people.name)),
-    db.select({ role: organizationRolePolicies.role, label: organizationRolePolicies.label }).from(organizationRolePolicies).where(eq(organizationRolePolicies.organizationId, organizationId)).orderBy(asc(organizationRolePolicies.label)),
   ]);
-  return { rooms: roomRows, people: peopleRows, guestAccounts, guestRoles, episodes: episodeRows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}` })) };
+  return { rooms: roomRows, people: peopleRows, guestAccounts, episodes: episodeRows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}` })) };
 }
 
 export async function listPendingBookingTimeSubmissions(organizationId: string) {

@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { episodeTeamAssignments, organizationMembers, organizationRolePolicies, people, users } from "@/lib/db/schema";
+import { episodeTeamAssignments, organizationMembers, people, users } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { canManageBookings } from "@/lib/permissions";
 import { missingTenantReferences } from "@/lib/tenant-resources";
@@ -20,14 +20,13 @@ export async function POST(request: Request) {
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "No active post house." }, { status: 401 });
   const organizationId = context.organization.organizationId;
-  const input = { ...parsed.data, email: parsed.data.email.toLowerCase().trim() };
+  // Booking-created accounts are deliberately always external guest accounts.
+  // Their episode assignment limits what they can access; a scheduler cannot
+  // accidentally create an internal post-house role from this compact form.
+  const input = { ...parsed.data, email: parsed.data.email.toLowerCase().trim(), personRole: "guest" };
   if ((await missingTenantReferences(organizationId, { episodeId: input.episodeId })).length) return NextResponse.json({ error: "Episode not found for this post house." }, { status: 404 });
 
   const db = getDb();
-  const [policy] = await db.select({ role: organizationRolePolicies.role }).from(organizationRolePolicies)
-    .where(and(eq(organizationRolePolicies.organizationId, organizationId), eq(organizationRolePolicies.role, input.personRole))).limit(1);
-  if (!policy) return NextResponse.json({ error: "Select a role configured for this post house." }, { status: 400 });
-
   const [existingUser] = await db.select({ id: users.id }).from(users).where(eq(users.email, input.email)).limit(1);
   const userId = existingUser?.id ?? randomUUID();
   const [[membership], [existingPerson]] = await Promise.all([

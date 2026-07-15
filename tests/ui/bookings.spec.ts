@@ -77,6 +77,7 @@ test.describe("Bookings UI", () => {
     await expect(createGuest).toBeEnabled();
     await createGuest.click();
     await expect(page.getByRole("heading", { name: "Create guest account" })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Post-house role" })).toHaveCount(0);
   });
 
   test("opens an existing booking for editing without changing it", async ({ page }) => {

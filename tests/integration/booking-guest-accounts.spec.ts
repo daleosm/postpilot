@@ -127,13 +127,15 @@ test.describe("Booking guest accounts", () => {
         episodeId,
         name: "New Booking Guest",
         email: createdGuestEmail,
-        personRole: "client_reviewer",
+        // The booking form must not be able to turn an external attendee into
+        // an internal post-house role.
+        personRole: "producer",
       },
     });
 
     expect(response.status()).toBe(201);
     const guest = await response.json() as { id: string; name: string; role: string; email: string };
-    expect(guest).toMatchObject({ name: "New Booking Guest", role: "client_reviewer", email: createdGuestEmail });
+    expect(guest).toMatchObject({ name: "New Booking Guest", role: "guest", email: createdGuestEmail });
 
     const [membership] = await sql`
       select organization_members.role
@@ -151,7 +153,7 @@ test.describe("Booking guest accounts", () => {
         and episode_id = ${episodeId}
         and person_id = ${guest.id}
     `;
-    expect(assignment).toMatchObject({ person_id: guest.id, responsibility: "client_reviewer" });
+    expect(assignment).toMatchObject({ person_id: guest.id, responsibility: "guest" });
   });
 
   test("rejects creating a guest account for an episode in another post house", async ({ page }) => {

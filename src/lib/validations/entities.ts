@@ -234,7 +234,6 @@ export const createBookingGuestSchema = z.object({
   episodeId: id,
   name: z.string().trim().min(2, "Enter the guest's name.").max(120),
   email: z.string().email("Enter a valid work email.").max(320),
-  personRole: roleKey,
 });
 
 export const createCateringRequestSchema = z.object({
