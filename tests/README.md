@@ -33,7 +33,7 @@ pnpm test:qc
 
 | Module | UI journey | Tenant isolation | Business rules |
 | --- | --- | --- | --- |
-| Shows | `ui/shows` | `tenant-isolation/shows` | — |
+| Shows | `ui/shows`, `ui/shows-detail` | `tenant-isolation/shows` | `integration/shows` |
 | Episodes | `ui/episodes` | `tenant-isolation/episodes` | workflow integration |
 | Bookings | `ui/bookings`, `ui/my-time` | `tenant-isolation/bookings` | — |
 | Approvals | `ui/approvals` | `tenant-isolation/approvals` | workflow integration |

@@ -11,7 +11,7 @@
     "test:ui": "playwright test tests/ui",
     "test:integration": "playwright test tests/integration",
     "test:tenant-isolation": "playwright test tests/integration/tenant-isolation",
-    "test:shows": "playwright test tests/ui/shows.spec.ts",
+    "test:shows": "playwright test tests/ui/shows.spec.ts tests/ui/shows-detail.spec.ts tests/integration/shows.spec.ts",
     "test:shows-isolation": "playwright test tests/integration/tenant-isolation/shows.spec.ts",
     "test:episodes": "playwright test tests/ui/episodes.spec.ts",
     "test:episodes-isolation": "playwright test tests/integration/tenant-isolation/episodes.spec.ts",
