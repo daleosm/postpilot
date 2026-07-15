@@ -14,7 +14,7 @@ export default async function CateringPage() {
 }
 
 async function load() {
-  if (isDebugDemoMode) return { organizationName: "Northstar Post · Demo workspace", resources: { rooms: [{ id: "room-1", name: "Edit Bay 1", type: "edit bay" }, { id: "room-2", name: "Colour 1", type: "colour suite" }, { id: "room-3", name: "Mix A", type: "mix room" }], bookings: [{ id: "booking-1", title: "SN104 final mix", roomName: "Mix A", episodeTitle: "Borrowed Light" }, { id: "booking-2", title: "SN103 grade pass", roomName: "Colour 1", episodeTitle: "Tin Roof" }] }, requests: demoRequests() }; 
+  if (isDebugDemoMode) return { organizationName: "Northstar Post · Demo workspace", resources: { rooms: [{ id: "room-1", name: "Edit Bay 1", type: "edit bay" }, { id: "room-2", name: "Colour 1", type: "colour suite" }, { id: "room-3", name: "Mix A", type: "mix room" }], bookings: [{ id: "booking-1", roomName: "Mix A" }, { id: "booking-2", roomName: "Colour 1" }] }, requests: demoRequests() };
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return { organizationName: "No workspace", resources: { rooms: [], bookings: [] }, requests: [] };
   const [resources, person, canManage] = await Promise.all([getCateringResources(context.organization.organizationId), getCurrentPerson(), can("manage_catering")]);

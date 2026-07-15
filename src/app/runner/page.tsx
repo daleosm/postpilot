@@ -15,7 +15,7 @@ export default async function RunnerPage() {
 }
 
 async function load() {
-  if (isDebugDemoMode) return demoRequests().map((request, index) => ({ ...request, actualCost: null, billedAmount: null, markupPercent: null, currency: "GBP", bookingTitle: index ? "SN103 grade pass" : "SN104 final mix", episodeTitle: index ? "Tin Roof" : "Borrowed Light", requesterName: index ? "Priya Shah" : "James Liu" }));
+  if (isDebugDemoMode) return demoRequests().map((request, index) => ({ ...request, actualCost: null, billedAmount: null, markupPercent: null, currency: "GBP", requesterName: index ? "Priya Shah" : "James Liu" }));
   const context = await getActiveOrganizationContext();
   return context?.organization ? listCateringRequests(context.organization.organizationId) : [];
 }
