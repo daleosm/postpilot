@@ -305,8 +305,8 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tr
       });
       if (body?.stageComplete) setTrackState((items) => items.map((track) => track.workflowStageId === workflowStageId ? { ...track, status: "approved", completedAt: new Date() } : track));
       setComment("");
-      setMessage(body?.stageComplete ? "Stage fully signed off." : "Sign-off recorded.");
-      if (!body?.debug) router.refresh();
+      setMessage(body?.advancedTo ? `Stage signed off and advanced to ${body.advancedTo.name}.` : body?.advanceBlockedBy ? `Stage signed off. Choose the next stage's ${body.advanceBlockedBy.replaceAll("_", " ")} workflow signer to advance.` : body?.stageComplete ? "Stage fully signed off." : "Sign-off recorded.");
+      router.refresh();
     } catch {
       setMessage("Could not record the sign-off.");
     } finally {
