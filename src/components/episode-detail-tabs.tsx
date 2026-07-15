@@ -18,7 +18,7 @@ type QcReport = { id: string; status: string; reportUrl: string | null; summary:
 type QcIssue = { id: string; qcReportId: string; code: string | null; severity: string; description: string; timecodeSeconds: string | number | null; status: string; resolution: string | null; resolvedAt: Date | string | null; createdAt: Date | string };
 type WorkspaceData = { episode: EpisodeData; schedule: Array<Row & { title: string; startsAt: Date | string; roomName: string | null }>; budget: Array<Row & { category: string; actualAmount: string | number; budgetedAmount: string | number }>; activity: Array<Row & { action: string; createdAt: Date | string }>; workflowStages: readonly WorkflowStage[]; workflowApprovalRules: WorkflowApprovalRule[]; workflowApprovals: WorkflowApproval[]; workflowApprovers: Array<{ id: string; name: string; role: string }>; episodeTeam: Array<{ id: string; personId: string; name: string; role: string; responsibility: string; isLead: boolean }>; workOrders: WorkOrder[]; qcHistory: QcReport[]; qcIssueHistory: QcIssue[]; vendorOptions: Array<{ id: string; name: string }> };
 
-export function EpisodeDetailTabs({ data, canManageWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canWaiveQc }: { data: WorkspaceData; canManageWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canWaiveQc: boolean }) {
+export function EpisodeDetailTabs({ data, canManageWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canWaiveQc, currentWorkflowRole }: { data: WorkspaceData; canManageWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canWaiveQc: boolean; currentWorkflowRole: string | null }) {
   const [tab, setTab] = useState<TabName>("Overview");
   const visibleTabs = canManageCommercial ? tabs : tabs.filter((item) => item !== "Budget");
 
@@ -31,14 +31,14 @@ export function EpisodeDetailTabs({ data, canManageWorkOrders, canUpdateWorkOrde
           </Button>
         ))}
       </div>
-      <div className="p-5"><TabContent tab={tab} data={data} canManageWorkOrders={canManageWorkOrders} canUpdateWorkOrders={canUpdateWorkOrders} canManageCommercial={canManageCommercial} canManageQc={canManageQc} canWaiveQc={canWaiveQc} /></div>
+      <div className="p-5"><TabContent tab={tab} data={data} canManageWorkOrders={canManageWorkOrders} canUpdateWorkOrders={canUpdateWorkOrders} canManageCommercial={canManageCommercial} canManageQc={canManageQc} canWaiveQc={canWaiveQc} currentWorkflowRole={currentWorkflowRole} /></div>
     </section>
   );
 }
 
-function TabContent({ tab, data, canManageWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canWaiveQc }: { tab: TabName; data: WorkspaceData; canManageWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canWaiveQc: boolean }) {
+function TabContent({ tab, data, canManageWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canWaiveQc, currentWorkflowRole }: { tab: TabName; data: WorkspaceData; canManageWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canWaiveQc: boolean; currentWorkflowRole: string | null }) {
   if (tab === "Overview") return <EpisodeOverview data={data} />;
-  if (tab === "Workflow") return <WorkflowPanel episodeId={data.episode.id} initialStageId={data.episode.workflowStageId} stages={data.workflowStages} rules={data.workflowApprovalRules} approvals={data.workflowApprovals} />;
+  if (tab === "Workflow") return <WorkflowPanel episodeId={data.episode.id} initialStageId={data.episode.workflowStageId} stages={data.workflowStages} rules={data.workflowApprovalRules} approvals={data.workflowApprovals} currentWorkflowRole={currentWorkflowRole} />;
   if (tab === "QC") return <QcPanel episodeId={data.episode.id ?? ""} episodeStatus={data.episode.qcStatus} initialHistory={data.qcHistory} initialIssues={data.qcIssueHistory} canManage={canManageQc} canWaive={canWaiveQc} />;
   if (tab === "Work orders") return <EpisodeWorkOrders episodeId={data.episode.id ?? ""} initialWorkOrders={data.workOrders} people={data.workflowApprovers} stages={data.workflowStages} currentStageId={data.episode.workflowStageId} vendors={data.vendorOptions} canManage={canManageWorkOrders} canUpdate={canUpdateWorkOrders} canManageCommercial={canManageCommercial} />;
   if (tab === "Bookings") return <List empty="No scheduled room bookings." items={data.schedule} render={(item) => <><b>{item.title}</b><span>{formatDate(item.startsAt)} · {item.roomName}</span></>} />;
@@ -179,7 +179,7 @@ function OverviewItem({ label, value, tone }: { label: string; value: string; to
   return <div className="rounded-lg border border-[#e7e9e5] bg-white/50 px-3 py-2.5"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#858c88]">{label}</p><p className={`mt-1 text-sm font-medium capitalize ${toneClass}`}>{value}</p></div>;
 }
 
-function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals }: { episodeId?: string; initialStageId: string | null; stages: readonly WorkflowStage[]; rules: WorkflowApprovalRule[]; approvals: WorkflowApproval[] }) {
+function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, currentWorkflowRole }: { episodeId?: string; initialStageId: string | null; stages: readonly WorkflowStage[]; rules: WorkflowApprovalRule[]; approvals: WorkflowApproval[]; currentWorkflowRole: string | null }) {
   const router = useRouter();
   const [currentStageId, setCurrentStageId] = useState(initialStageId ?? stages[0]?.id ?? "");
   const [selectedStageId, setSelectedStageId] = useState(initialStageId ?? stages[0]?.id ?? "");
@@ -202,6 +202,31 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals }: 
   const currentStage = stages.find((stage) => stage.id === currentStageId);
   const selectedStage = stages.find((stage) => stage.id === selectedStageId);
   const selectedRules = rules.filter((rule) => rule.workflowStageId === selectedStageId);
+  const orderedStages = [...stages].sort((left, right) => left.position - right.position);
+  const completedCurrentRules = currentRules.filter((rule) => approvalState.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"));
+  const completedStageCount = orderedStages.filter((stage) => stageStatus(stage.id) === "approved").length;
+  const workflowProgress = orderedStages.length ? Math.round((completedStageCount / orderedStages.length) * 100) : 0;
+  const currentCanAdvance = !currentRules.length || currentStatus === "approved";
+  const nextPendingRule = [...currentRules].sort((left, right) => left.approvalOrder - right.approvalOrder).find((rule) => !approvalState.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"));
+  const canCurrentUserSignOff = Boolean(nextPendingRule && currentWorkflowRole === nextPendingRule.approverRole);
+  const nextStagePosition = currentStage ? currentStage.position + 1 : null;
+  const selectedIsNext = selectedStage?.position === nextStagePosition;
+  const selectedCanStart = Boolean(selectedStage && selectedStageId !== currentStageId && stageStatus(selectedStageId) !== "approved" && (selectedStage.canStartEarly || (selectedIsNext && currentCanAdvance)));
+  const selectedExplanation = !selectedStage
+    ? "Choose a stage above to see what is required."
+    : selectedStageId === currentStageId
+      ? "This is the episode’s current stage."
+      : stageStatus(selectedStageId) === "approved"
+        ? "This stage has already been fully signed off."
+        : selectedStage.canStartEarly
+          ? "This stage can begin early when your post house needs parallel work."
+          : selectedIsNext && currentCanAdvance
+            ? "The current stage is complete. This is the next stage in the workflow."
+            : selectedIsNext
+              ? "This is next in the workflow. Complete the current stage sign-off first."
+              : selectedStage.position > (currentStage?.position ?? 0)
+                ? "This follows later in the workflow and will unlock in order."
+                : "This is an earlier workflow stage.";
 
   async function save() {
     if (!episodeId || !selectedStageId) return;
@@ -212,7 +237,7 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals }: 
           setMessage("Workflow stages normally proceed in order. Enable Allow early start in workflow settings to make an exception.");
           return;
         }
-        if (currentStatus !== "approved") {
+        if (currentRules.length && currentStatus !== "approved") {
           setMessage("Complete the current sign-off first.");
           return;
         }
@@ -263,26 +288,46 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals }: 
     }
   }
 
-  return (
-    <div>
-      <div className="mb-4 rounded-lg border border-[#e4e7e2] bg-[#fafbf9] p-3">
-        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-          <div><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7c837f]">Current stage</p><p className="mt-1 text-sm font-semibold text-[#3e4642]">{currentStage?.name ?? "Not set"}</p></div>
-          <div className="flex gap-2"><select aria-label="Select workflow stage" value={selectedStageId} onChange={(event) => setSelectedStageId(event.target.value)} className="h-9 min-w-0 rounded-md border border-[#dfe1dc] bg-[#fafbf9] px-2 text-xs">{stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.position}. {stage.name}</option>)}</select><button type="button" onClick={save} disabled={saving || selectedStageId === currentStageId} className="h-9 shrink-0 rounded-md bg-[#263130] px-3 text-xs font-semibold text-white disabled:opacity-50">Update stage</button></div>
-        </div>
-        {selectedStageId !== currentStageId && <div className="mt-3 rounded-md border border-[#dce6e1] bg-[#f5f8f6] px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#597169]">Selected-stage sign-off roles · {selectedStage?.name}</p><p className="mt-1 text-xs text-[#58635e]">{selectedRules.map((rule) => rule.label).join(" · ") || "No sign-offs configured"}</p><p className="mt-1 text-[11px] text-[#77817c]">These sign-offs apply after the stage becomes current.</p></div>}
-        <div className="mt-4 border-t border-[#e6e8e3] pt-3">
-          <p className="text-xs font-semibold text-[#4b5651]">Current-stage sign-off · {currentStage?.name ?? "Not set"}</p>
-          <div className="mt-2 space-y-1.5">{currentRules.map((rule) => <p key={rule.id} className="text-xs text-[#5a625e]">{rule.label}</p>)}{!currentRules.length && <p className="text-xs text-[#858a87]">No sign-offs are configured for this stage.</p>}</div>
-          <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={2} placeholder="Optional sign-off note…" className="mt-3 w-full rounded-md border border-[#dfe1dc] p-2 text-xs" />
-          <div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={signOff} disabled={saving || currentStatus === "approved" || !currentRules.length} className="rounded-md bg-[#3f7563] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Sign off"}</button></div>
+  return <div className="space-y-4">
+    <section aria-label="Episode workflow" className="overflow-hidden rounded-2xl border border-[#dde4df] bg-[radial-gradient(circle_at_top_right,_#edf6f1,_transparent_42%),#fbfcfa]">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#e5eae6] px-5 py-4">
+        <div><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#728079]">Episode journey</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-[#314139]">{currentStage?.name ?? "Workflow not set"}</h2><p className="mt-1 text-xs text-[#75817a]">{currentStage ? `Now at stage ${currentStage.position} of ${orderedStages.length}` : "Choose a stage to begin."}</p></div>
+        <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-full" style={{ background: `conic-gradient(#4e806d ${workflowProgress}%, #e5ebe6 0)` }}><div className="grid h-8 w-8 place-items-center rounded-full bg-[#fbfcfa] text-[10px] font-bold text-[#49675b]">{workflowProgress}%</div></div><div><p className="text-sm font-semibold text-[#405149]">{completedStageCount} complete</p><p className="text-[11px] text-[#7b8781]">of {orderedStages.length} stages</p></div></div>
+      </div>
+
+      <div className="relative px-5 py-5 sm:px-7">
+        <span aria-hidden="true" className="absolute bottom-8 left-[2.52rem] top-8 w-px bg-gradient-to-b from-[#8cb09d] via-[#d7e1db] to-[#e4e8e4] sm:left-[3.02rem]" />
+        <div className="space-y-1">
+          {orderedStages.map((stage) => {
+            const status = stageStatus(stage.id);
+            const isCurrent = stage.id === currentStageId;
+            const isSelected = stage.id === selectedStageId;
+            const stageRules = rules.filter((rule) => rule.workflowStageId === stage.id);
+            const isEarlyStart = stage.canStartEarly && !isCurrent && status !== "approved";
+            const isNext = stage.position === nextStagePosition;
+            const isReadyNext = isNext && currentCanAdvance;
+            const stateLabel = status === "approved" ? "Complete" : isCurrent ? currentRules.length ? "Awaiting sign-off" : "Ready to move on" : isEarlyStart ? "Can start early" : isReadyNext ? "Ready next" : isNext ? "Waiting for sign-off" : stage.position < (currentStage?.position ?? 0) ? "Earlier stage" : "Later stage";
+            const nodeTone = status === "approved" ? "bg-[#5f917a] text-white shadow-[0_0_0_5px_#edf6f0]" : isCurrent ? "bg-[#315f52] text-white shadow-[0_0_0_6px_#dbece3]" : isReadyNext ? "border-2 border-[#5f917a] bg-[#fbfcfa] text-[#4b7664]" : "border border-[#d6ddd8] bg-[#fbfcfa] text-[#849089]";
+            return <div key={stage.id} className="relative grid grid-cols-[2.25rem_minmax(0,1fr)] gap-3 sm:grid-cols-[2.75rem_minmax(0,1fr)] sm:gap-4">
+              <div className="relative z-10 flex justify-center pt-3"><span className={`grid h-6 w-6 place-items-center rounded-full text-[10px] font-bold ${nodeTone}`}>{status === "approved" ? "✓" : stage.position}</span></div>
+              <div className="min-w-0 pb-3">
+                <button type="button" aria-label={`Select ${stage.name}`} aria-pressed={isSelected} onClick={() => { setSelectedStageId(stage.id); setMessage(""); }} className={`group flex w-full items-start justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus:ring-2 focus:ring-[#87a89a] focus:ring-offset-2 ${isCurrent ? "bg-[#eef6f1]" : isSelected ? "bg-[#f1f6f3]" : "hover:bg-[#f5f8f5]"}`}>
+                  <span className="min-w-0"><span className={`block text-sm font-semibold ${isCurrent ? "text-[#315f52]" : status === "approved" ? "text-[#547866]" : "text-[#48554f]"}`}>{stage.name}</span><span className="mt-1 block text-[11px] text-[#7a8580]">{stageRules.length ? `${stageRules.length} required sign-off${stageRules.length === 1 ? "" : "s"}` : "No sign-off gate"}</span></span>
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${isCurrent ? "bg-[#d2e7dc] text-[#356d58]" : isEarlyStart ? "bg-[#f6eee3] text-[#906a3b]" : status === "approved" ? "bg-[#e1eee6] text-[#467460]" : isReadyNext ? "bg-[#e2efe7] text-[#426e5b]" : "bg-[#edf0ed] text-[#77847e]"}`}>{stateLabel}</span>
+                </button>
+
+                {isCurrent && <div className="ml-3 mt-1 border-l-2 border-[#82ab94] pl-4 sm:ml-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs leading-5 text-[#66746d]">{currentStatus === "approved" ? "This stage is complete. Select the next stage in the journey to continue." : currentRules.length ? "Complete each required sign-off before the next ordered stage opens." : "No sign-off is required for this stage; move on when the work is ready."}</p>{currentRules.length > 0 && <span className="rounded-full bg-[#e6efe9] px-2 py-1 text-[10px] font-semibold text-[#557467]">{completedCurrentRules.length}/{currentRules.length} complete</span>}</div>{currentRules.length > 0 && <div className="mt-3 space-y-2">{currentRules.map((rule) => { const signed = approvalState.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"); return <div key={rule.id} className="flex items-center gap-2 text-xs text-[#55625b]"><span className={`grid h-4 w-4 place-items-center rounded-full text-[9px] font-bold ${signed ? "bg-[#5f917a] text-white" : "border border-[#cfd8d2] bg-white text-transparent"}`}>✓</span>{rule.label}</div>; })}</div>}{currentRules.length > 0 && currentStatus !== "approved" && (canCurrentUserSignOff ? <><textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={2} placeholder="Optional sign-off note…" className="mt-3 w-full rounded-lg border border-[#dbe4de] bg-white/80 px-3 py-2 text-xs text-[#49554f] outline-none focus:border-[#87a89a] focus:ring-2 focus:ring-[#dceae3]" /><div className="mt-2"><Button type="button" size="sm" variant="primary" onPress={signOff} isDisabled={saving} className="bg-[#3f7563] text-white">{saving ? "Saving…" : "Sign off"}</Button></div></> : <p className="mt-3 text-xs leading-5 text-[#718079]">Awaiting sign-off from {nextPendingRule?.label ?? "the configured approver"}.</p>)}</div>}
+
+                {isSelected && !isCurrent && <div className="ml-3 mt-1 border-l-2 border-[#b6d3c1] bg-[#f4f8f5]/70 py-3 pl-4 pr-3 sm:ml-4"><p className="text-xs leading-5 text-[#5c6b63]">{selectedExplanation}</p><p className="mt-3 text-[10px] font-semibold uppercase tracking-[.1em] text-[#718079]">Sign-off requirements</p><p className="mt-1 text-xs leading-5 text-[#59675f]">{selectedRules.map((rule) => rule.label).join(" · ") || "No sign-offs configured"}</p>{selectedCanStart && <Button type="button" size="sm" variant="primary" onPress={save} isDisabled={saving} className="mt-3 bg-[#315f52] text-white">{saving ? "Moving…" : `Move episode to ${stage.name}`}</Button>}</div>}
+              </div>
+            </div>;
+          })}
         </div>
       </div>
-      <p className="mb-4 rounded-lg bg-[#f4f6f3] px-3 py-2 text-xs leading-5 text-[#66706b]">Stages progress in the order configured by your post house. Stages marked Allow early start may begin out of sequence. Green indicates every configured sign-off is complete.</p>
-      <div className="space-y-3">{stages.map((stage) => { const status = stageStatus(stage.id); const stageRules = rules.filter((rule) => rule.workflowStageId === stage.id); return <div key={stage.id} className="flex items-start gap-3"><span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${status === "approved" ? "bg-[#dfeae6] text-[#467367]" : "bg-[#f0efec] text-[#8a8e8c]"}`}>{status === "approved" ? "✓" : stage.position}</span><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className={`text-sm ${status === "approved" ? "font-medium text-[#3f635a]" : "text-[#4b5350]"}`}>{stage.name}</span><span className="rounded bg-[#edf0ed] px-1.5 py-0.5 text-[10px] font-semibold text-[#65736e]">{status.replaceAll("_", " ")}</span>{stage.id === currentStageId && <span className="text-[10px] font-semibold text-[#536f67]">Current</span>}</div><p className="mt-1 text-xs text-[#858a87]">{stageRules.map((rule) => rule.label).join(" · ") || "No sign-offs configured"}</p></div></div>; })}</div>
-      {message && <p role="status" className={`mt-4 text-xs ${message.includes("Could not") || message.includes("Complete") ? "text-[#a35e41]" : "text-[#3f7563]"}`}>{message}</p>}
-    </div>
-  );
+    </section>
+    <div className="flex flex-wrap gap-x-4 gap-y-1 px-1 text-[11px] text-[#718079]"><span><b className="font-semibold text-[#527d69]">●</b> Complete</span><span><b className="font-semibold text-[#315f52]">●</b> Current stage</span><span><b className="font-semibold text-[#5a8a72]">○</b> Ready next</span><span><b className="font-semibold text-[#8c6739]">●</b> Can start early</span></div>
+    {message && <p role="status" className={`text-xs ${message.includes("Could not") || message.includes("Complete") ? "text-[#a35e41]" : "text-[#3f7563]"}`}>{message}</p>}
+  </div>;
 }
 
 function List<T extends Row>({ items, empty, render }: { items: T[]; empty: string; render: (item: T) => React.ReactNode }) {

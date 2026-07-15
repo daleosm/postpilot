@@ -15,6 +15,8 @@ const showId = "90000000-0000-4000-8000-000000000003";
 const seasonId = "90000000-0000-4000-8000-000000000004";
 const episodeId = "90000000-0000-4000-8000-000000000005";
 const mayaPersonId = "90000000-0000-4000-8000-000000000006";
+const viewerUserId = "workflow-function-viewer";
+const viewerPersonId = "90000000-0000-4000-8000-000000000015";
 const editorialStageId = "90000000-0000-4000-8000-000000000007";
 const lockStageId = "90000000-0000-4000-8000-000000000008";
 const graphicsStageId = "90000000-0000-4000-8000-000000000009";
@@ -51,8 +53,21 @@ test.describe("Configurable workflow functionality", () => {
       values (${organizationId}, 'user_maya', 'admin')
     `;
     await sql`
+      insert into users (id, name, email)
+      values (${viewerUserId}, 'Workflow Viewer', 'workflow-viewer@postpilot.test')
+      on conflict (id) do update set name = excluded.name, email = excluded.email
+    `;
+    await sql`
+      insert into organization_members (organization_id, user_id, role)
+      values (${organizationId}, ${viewerUserId}, 'member')
+    `;
+    await sql`
       insert into people (id, organization_id, user_id, name, email, role)
       values (${mayaPersonId}, ${organizationId}, 'user_maya', 'Maya Ortiz', 'maya@postpilot.debug', 'post_supervisor')
+    `;
+    await sql`
+      insert into people (id, organization_id, user_id, name, email, role)
+      values (${viewerPersonId}, ${organizationId}, ${viewerUserId}, 'Workflow Viewer', 'workflow-viewer@postpilot.test', 'editor')
     `;
     await sql`
       insert into post_workflows (id, organization_id, name, description, is_default)
@@ -90,15 +105,16 @@ test.describe("Configurable workflow functionality", () => {
 
   test.afterAll(async () => {
     await sql`delete from organizations where id = ${organizationId}`;
+    await sql`delete from users where id = ${viewerUserId}`;
     await sql.end();
   });
 
   test("renders the saved custom stage labels and their configured order", async ({ page }) => {
     await openWorkflow(page);
 
-    await expect(page.getByText("Stages progress in the order configured by your post house. Stages marked Allow early start may begin out of sequence.")).toBeVisible();
+    await expect(page.getByText("Episode journey", { exact: true })).toBeVisible();
 
-    const stages = page.locator(".space-y-3 > div").filter({ hasText: /Editorial handoff|Creative sign-off|Delivery prep|Graphics finishing/ });
+    const stages = page.locator('[aria-label="Episode workflow"] button[aria-pressed]');
     await expect(stages).toHaveCount(4);
     await expect(stages.nth(0)).toContainText("Editorial handoff");
     await expect(stages.nth(1)).toContainText("Creative sign-off");
@@ -109,17 +125,14 @@ test.describe("Configurable workflow functionality", () => {
   test("enforces normal stage order and blocks the next stage until the current sign-off is complete", async ({ page }) => {
     await openWorkflow(page);
 
-    await page.getByLabel("Select workflow stage").selectOption(deliveryPrepStageId);
-    await page.getByRole("button", { name: "Update stage", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Workflow stages normally proceed in order.");
+    await page.getByRole("button", { name: "Select Delivery prep", exact: true }).click();
+    await expect(page.getByText("This follows later in the workflow and will unlock in order.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Move episode to Delivery prep", exact: true })).toHaveCount(0);
 
-    await page.getByLabel("Select workflow stage").selectOption(lockStageId);
-    const policyPreview = page.getByText("Selected-stage sign-off roles · Creative sign-off").locator("..");
-    await expect(policyPreview).toBeVisible();
-    await expect(policyPreview.getByText("Creative gate approval", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Update stage", exact: true }).click();
-
-    await expect(page.getByRole("status")).toContainText("Complete the current sign-off first.");
+    await page.getByRole("button", { name: "Select Creative sign-off", exact: true }).click();
+    await expect(page.getByText("This is next in the workflow. Complete the current stage sign-off first.")).toBeVisible();
+    await expect(page.getByText("Creative gate approval", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Move episode to Creative sign-off", exact: true })).toHaveCount(0);
   });
 
   test("shows the current workflow on Review when it is this user's turn to sign off", async ({ page }) => {
@@ -131,8 +144,8 @@ test.describe("Configurable workflow functionality", () => {
     await expect(page.getByRole("heading", { name: "Editorial handoff" })).not.toBeVisible();
 
     await openWorkflow(page);
-    await page.getByLabel("Select workflow stage").selectOption(lockStageId);
-    await expect(page.getByRole("button", { name: "Update stage", exact: true })).toBeEnabled();
+    await page.getByRole("button", { name: "Select Creative sign-off", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Move episode to Creative sign-off", exact: true })).toBeEnabled();
   });
 
   test("allows an explicitly configured stage to start early", async ({ page }) => {
@@ -146,8 +159,8 @@ test.describe("Configurable workflow functionality", () => {
     await expect(page.getByRole("status")).toContainText("Workflow saved.");
 
     await openWorkflow(page);
-    await page.getByLabel("Select workflow stage").selectOption(deliveryPrepStageId);
-    await page.getByRole("button", { name: "Update stage", exact: true }).click();
+    await page.getByRole("button", { name: "Select Delivery prep", exact: true }).click();
+    await page.getByRole("button", { name: "Move episode to Delivery prep", exact: true }).click();
     await expect(page.getByRole("status")).toContainText("Workflow stage updated.");
   });
 
@@ -170,5 +183,14 @@ test.describe("Configurable workflow functionality", () => {
     await page.reload();
     await expect(page.getByLabel("Stage name").nth(0)).toHaveValue("Offline editorial review");
     await expect(page.getByRole("switch", { name: "Allow Delivery prep to start early" })).toBeChecked();
+  });
+
+  test("shows the sign-off form only to the user with the next configured sign-off role", async ({ page }) => {
+    const assumedUser = await page.request.post("/api/debug/user", { data: { userId: viewerUserId } });
+    expect(assumedUser.status()).toBe(200);
+
+    await openWorkflow(page);
+    await expect(page.getByRole("button", { name: "Sign off", exact: true })).toHaveCount(0);
+    await expect(page.getByText("Awaiting sign-off from Graphics lead approval.")).toBeVisible();
   });
 });
