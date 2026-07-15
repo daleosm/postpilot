@@ -13,14 +13,13 @@ async function openBookings(page: Page) {
 }
 
 test.describe("Bookings UI", () => {
-  test("shows the active tenant's room calendar and utilization", async ({ page }) => {
+  test("shows the active tenant's room calendar", async ({ page }) => {
     await openBookings(page);
 
     await expect(page.getByRole("heading", { name: "Bookings" })).toBeVisible();
     await expect(page.getByText("Post floor calendar · Copperline Editorial")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Room utilization" })).toBeVisible();
     await expect(page.getByText("Copper Cut 1", { exact: true }).first()).toBeVisible();
-    await expect(bookingCount(page)).toBeVisible();
+    await expect(bookingBars(page).first()).toBeVisible();
   });
 
   test("switches between week and day calendar views", async ({ page }) => {
@@ -92,12 +91,10 @@ test.describe("Bookings UI", () => {
   });
 });
 
-function bookingCount(page: Page) {
-  return page.getByText(/bookings in view/);
+async function visibleBookingCount(page: Page) {
+  return bookingBars(page).count();
 }
 
-async function visibleBookingCount(page: Page) {
-  const label = bookingCount(page);
-  await expect(label).toBeVisible();
-  return Number((await label.textContent())?.match(/(\d+) bookings in view/)?.[1]);
+function bookingBars(page: Page) {
+  return page.getByRole("button", { name: /^Edit / });
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { ChevronLeft, ChevronRight, Clock3, Coffee, Gauge, UsersRound } from "lucide-react";
+import { ChevronLeft, ChevronRight, Coffee, UsersRound } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
@@ -55,7 +55,6 @@ export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, pe
   const rangeEnd = useMemo(() => addDays(cursor, days.length), [cursor, days.length]);
   const visible = useMemo(() => bookings.filter((booking) => overlaps(operationalStart(booking), operationalEnd(booking), cursor, rangeEnd)), [bookings, cursor, rangeEnd]);
   const ganttRows = useMemo(() => buildGanttRows(rooms, visible, cursor, days.length), [rooms, visible, cursor, days.length]);
-  const utilization = rooms.filter((room) => room.type !== "edit_bay").map((room) => ({ ...room, hours: visible.filter((booking) => booking.roomId === room.id).reduce((sum, booking) => sum + visibleHours(booking, cursor, rangeEnd), 0) })).sort((a, b) => b.hours - a.hours);
   const move = (direction: number) => setCursor((current) => addDays(current, direction * (mode === "staff" ? 1 : days.length)));
 
   return <div className="space-y-4">
@@ -83,7 +82,7 @@ export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, pe
         </div>
       </div>
     </section>
-    <aside className="panel max-w-md p-5"><div className="flex items-center gap-2"><Gauge size={16} className="text-[#71817c]" /><div><h2 className="text-sm font-semibold text-[#343c38]">Specialist room utilization</h2><p className="mt-0.5 text-xs text-[#858a87]">Visible period · edit bays excluded</p></div></div><div className="mt-5 space-y-3.5">{utilization.map((room) => { const percent = Math.min(100, Math.round((room.hours / (view === "week" ? 40 : 9)) * 100)); return <div key={room.id}><div className="mb-1.5 flex justify-between gap-2 text-xs"><span className="truncate font-medium text-[#58615d]">{room.name}</span><span className="shrink-0 text-[#858a87]">{room.hours.toFixed(0)}h · {percent}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#ecebe7]"><div className={`h-full rounded-full ${percent > 85 ? "bg-[#bd7650]" : "bg-[#64847e]"}`} style={{ width: `${percent}%` }} /></div></div>; })}{!utilization.length && <p className="text-xs text-[#858a87]">No specialist rooms have been set up.</p>}</div><div className="mt-5 border-t border-[#ecebe7] pt-4 text-xs text-[#7d837f]"><Clock3 className="mr-1 inline" size={13} /> {visible.length} bookings in view</div></aside></> : <StaffDayView people={resources.people} bookings={bookings} cateringRequests={cateringRequests} day={cursor} onSelect={setSelectedBooking} />}
+    </> : <StaffDayView people={resources.people} bookings={bookings} cateringRequests={cateringRequests} day={cursor} onSelect={setSelectedBooking} />}
     {canApproveTime && <TimeApprovalQueue items={pendingTimes} />}
     {selectedBooking && <div className="fixed bottom-5 right-5 z-40 flex flex-wrap gap-2 rounded-lg border border-[#e2e3de] bg-[#fafbf9] p-2 shadow-lg">{canManage && <BookingFormDialog key={selectedBooking.id} resources={resources} initialStart={toInput(cursor)} booking={selectedBooking} onClose={() => setSelectedBooking(null)} />}{canSubmitOwnTime && selectedBooking.personId === currentPersonId && <><ActualTimeDialog booking={selectedBooking} /><BookingConflictFlagDialog bookingId={selectedBooking.id} title={selectedBooking.title} /></>}<Button size="sm" variant="tertiary" onPress={() => setSelectedBooking(null)}>Close</Button></div>}
   </div>;
@@ -168,7 +167,6 @@ function isPersonnelAvailabilityBooking(type: string) { return ["leave", "traini
 function startOfDay(date: Date) { const value = new Date(date); value.setHours(0, 0, 0, 0); return value; }
 function addDays(date: Date, count: number) { const value = new Date(date); value.setDate(value.getDate() + count); return value; }
 function overlaps(start: Date, end: Date, rangeStart: Date, rangeEnd: Date) { return start < rangeEnd && end > rangeStart; }
-function visibleHours(booking: ScheduleBooking, rangeStart: Date, rangeEnd: Date) { return Math.max(0, (Math.min(operationalEnd(booking).getTime(), rangeEnd.getTime()) - Math.max(operationalStart(booking).getTime(), rangeStart.getTime())) / 3_600_000); }
 function operationalStart(booking: ScheduleBooking) { return new Date(booking.startsAt.getTime() - booking.setupMinutes * 60_000); }
 function operationalEnd(booking: ScheduleBooking) { return new Date(booking.endsAt.getTime() + (booking.handoverMinutes + booking.strikeMinutes) * 60_000); }
 function calendarDayDistance(rangeStart: Date, value: Date) { return Math.floor((startOfDay(value).getTime() - rangeStart.getTime()) / 86_400_000); }
