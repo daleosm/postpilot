@@ -107,7 +107,7 @@ const defaultRolePolicies: Record<string, string[]> = {
   finance: ["manage_budget", "approve_time", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "view_assigned"],
   runner: ["request_catering", "manage_catering", "view_assigned"],
   qc: ["update_assigned_work", "manage_qc", "verify_qc", "request_catering", "view_assigned"],
-  editor: ["update_assigned_work", "request_catering", "view_assigned"],
+  editor: ["approve_reviews", "update_assigned_work", "request_catering", "view_assigned"],
   assistant_editor: ["update_assigned_work", "request_catering", "view_assigned"],
   online_editor: ["update_assigned_work", "request_catering", "view_assigned"],
   colorist: ["update_assigned_work", "request_catering", "view_assigned"],
