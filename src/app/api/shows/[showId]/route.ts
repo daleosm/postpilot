@@ -6,6 +6,7 @@ import { shows } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { can } from "@/lib/permissions";
+import { missingTenantReferences } from "@/lib/tenant-resources";
 import { showFormSchema } from "@/lib/validations/entities";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ showId: string }> }) {
@@ -19,6 +20,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ sh
   const organizationId = context.organization.organizationId;
   const { showId } = await params;
   const db = getDb();
+  const missing = (await Promise.all([
+    missingTenantReferences(organizationId, { companyId: parsed.data.clientCompanyId ?? null }),
+    missingTenantReferences(organizationId, { companyId: parsed.data.productionCompanyId ?? null }),
+  ])).flat();
+  if (missing.length) return NextResponse.json({ error: "CRM company not found for this post house." }, { status: 404 });
   const [show] = await db.update(shows).set({ ...parsed.data, updatedAt: new Date() })
     .where(and(eq(shows.id, showId), eq(shows.organizationId, organizationId))).returning({ id: shows.id });
   if (!show) return NextResponse.json({ error: "Show not found." }, { status: 404 });

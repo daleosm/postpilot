@@ -89,11 +89,18 @@ test.describe("Shows integration", () => {
     expect(update.status()).toBe(403);
   });
 
-  test.fail("rejects CRM companies from another tenant", async ({ page }) => {
+  test("rejects CRM companies from another tenant on create and edit", async ({ page }) => {
     await switchUser(page, managerUserId);
-    const response = await page.request.post("/api/shows", { data: { title: "Cross-tenant account attempt", code: "XTA", clientCompanyId: foreignCompanyId } });
-    expect(response.status()).toBe(404);
-    const [show] = await sql`select id from shows where organization_id = ${organizationId} and code = 'XTA'`;
-    expect(show).toBeUndefined();
+    const create = await page.request.post("/api/shows", { data: { title: "Cross-tenant account attempt", code: "XTA", clientCompanyId: foreignCompanyId } });
+    expect(create.status()).toBe(404);
+    await expect(create.json()).resolves.toMatchObject({ error: "CRM company not found for this post house." });
+    const [rejected] = await sql`select id from shows where organization_id = ${organizationId} and code = 'XTA'`;
+    expect(rejected).toBeUndefined();
+
+    const [show] = await sql`select id, production_company_id from shows where organization_id = ${organizationId} and code = 'SLF'`;
+    const update = await page.request.patch(`/api/shows/${show.id}`, { data: { productionCompanyId: foreignCompanyId } });
+    expect(update.status()).toBe(404);
+    const [saved] = await sql`select production_company_id from shows where id = ${show.id}`;
+    expect(saved.production_company_id).toBe(productionCompanyId);
   });
 });

@@ -5,6 +5,7 @@ import { shows } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { can } from "@/lib/permissions";
+import { missingTenantReferences } from "@/lib/tenant-resources";
 import { showFormSchema } from "@/lib/validations/entities";
 
 export async function POST(request: Request) {
@@ -16,6 +17,11 @@ export async function POST(request: Request) {
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const organizationId = context.organization.organizationId;
+  const missing = (await Promise.all([
+    missingTenantReferences(organizationId, { companyId: parsed.data.clientCompanyId ?? null }),
+    missingTenantReferences(organizationId, { companyId: parsed.data.productionCompanyId ?? null }),
+  ])).flat();
+  if (missing.length) return NextResponse.json({ error: "CRM company not found for this post house." }, { status: 404 });
   const db = getDb();
   const [show] = await db.insert(shows).values({ ...parsed.data, organizationId }).returning({ id: shows.id });
   return NextResponse.json(show, { status: 201 });
