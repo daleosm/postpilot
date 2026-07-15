@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import postgres from "postgres";
 
 const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) throw new Error("DATABASE_URL is required for workflow functionality tests.");
+if (!databaseUrl) throw new Error("DATABASE_URL is required for workflow integration tests.");
 
 const sql = postgres(databaseUrl, { prepare: false });
 
@@ -39,7 +39,7 @@ async function openWorkflow(page: Page) {
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
 }
 
-test.describe("Configurable workflow functionality", () => {
+test.describe("Configurable workflow integration", () => {
   test.describe.configure({ mode: "serial" });
 
   test.beforeAll(async () => {

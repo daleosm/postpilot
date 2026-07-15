@@ -1,17 +1,15 @@
 import { expect, test } from "@playwright/test";
 import postgres from "postgres";
+import { useDebugSession } from "../fixtures/debug-session";
 
 const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) throw new Error("DATABASE_URL is required for user-access usability tests.");
+if (!databaseUrl) throw new Error("DATABASE_URL is required for user-access UI tests.");
 const sql = postgres(databaseUrl, { prepare: false });
 const COPPERLINE_ORGANIZATION_ID = "10000000-0000-4000-8000-000000000005";
 const testEmail = "user-access-lab@postpilot.test";
 
 test.beforeEach(async ({ context }) => {
-  await context.addCookies([
-    { name: "postpilot.debugUser", value: "user_maya", url: "http://localhost:5001" },
-    { name: "posthouse.activeOrganizationId", value: COPPERLINE_ORGANIZATION_ID, url: "http://localhost:5001" },
-  ]);
+  await useDebugSession(context, "user_maya", COPPERLINE_ORGANIZATION_ID);
 });
 
 test.afterAll(async () => {
@@ -21,7 +19,7 @@ test.afterAll(async () => {
   await sql.end();
 });
 
-test.describe("User access settings", () => {
+test.describe("User access UI", () => {
   test("adds tenant-local access using a configured post-house role", async ({ page }) => {
     await page.goto("/settings/users");
     await expect(page.getByRole("heading", { name: "Users & access" })).toBeVisible();

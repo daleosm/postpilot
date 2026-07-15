@@ -7,7 +7,7 @@ async function openShows(page: Page) {
   await page.waitForTimeout(400);
 }
 
-test.describe("Shows usability", () => {
+test.describe("Shows UI", () => {
   test("lists the active tenant's portfolio", async ({ page }) => {
     await openShows(page);
 

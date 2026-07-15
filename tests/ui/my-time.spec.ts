@@ -1,15 +1,13 @@
 import { expect, test } from "@playwright/test";
+import { useDebugSession } from "../fixtures/debug-session";
 
 const COPPERLINE_ORGANIZATION_ID = "10000000-0000-4000-8000-000000000005";
 
 test.beforeEach(async ({ context }) => {
-  await context.addCookies([
-    { name: "postpilot.debugUser", value: "user_copper_editor", url: "http://localhost:5001" },
-    { name: "posthouse.activeOrganizationId", value: COPPERLINE_ORGANIZATION_ID, url: "http://localhost:5001" },
-  ]);
+  await useDebugSession(context, "user_copper_editor", COPPERLINE_ORGANIZATION_ID);
 });
 
-test.describe("My time usability", () => {
+test.describe("My time UI", () => {
   test("gives an artist a personal time-confirmation workspace without the facility calendar", async ({ page }) => {
     await page.goto("/my-time");
 

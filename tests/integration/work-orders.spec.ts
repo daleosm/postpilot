@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import postgres from "postgres";
 
 const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) throw new Error("DATABASE_URL is required for work-order functionality tests.");
+if (!databaseUrl) throw new Error("DATABASE_URL is required for work-order integration tests.");
 const sql = postgres(databaseUrl, { prepare: false });
 
 const organizationId = "91000000-0000-4000-8000-000000000001";
@@ -26,7 +26,7 @@ async function activateLab(page: Page) {
   expect(response.status()).toBe(200);
 }
 
-test.describe("Post work orders", () => {
+test.describe("Post work orders integration", () => {
   test.describe.configure({ mode: "serial" });
 
   test.beforeAll(async () => {

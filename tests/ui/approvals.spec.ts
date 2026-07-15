@@ -5,7 +5,7 @@ async function openReview(page: Page) {
   await page.waitForTimeout(400);
 }
 
-test.describe("Review usability", () => {
+test.describe("Approvals UI", () => {
   test("shows the signer-specific workflow approval inbox", async ({ page }) => {
     await openReview(page);
 
@@ -14,10 +14,11 @@ test.describe("Review usability", () => {
     await expect(page.getByText("Current workflow stages that have reached your configured sign-off role.")).toBeVisible();
   });
 
-  test("uses workflow-only sign-off language", async ({ page }) => {
+  test("explains the workflow and assigned-work approval inbox", async ({ page }) => {
     await openReview(page);
 
-    await expect(page.getByText("Workflow stages awaiting the next configured sign-off.")).toBeVisible();
+    await expect(page.getByText("Workflow gates awaiting sign-off and practical post work assigned to you.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "My assigned work" })).toBeVisible();
   });
 
   test("does not expose retired media-review controls", async ({ page }) => {

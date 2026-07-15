@@ -1,12 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
+import { useDebugSession } from "../fixtures/debug-session";
 
 const COPPERLINE_ORGANIZATION_ID = "10000000-0000-4000-8000-000000000005";
 
 test.beforeEach(async ({ context }) => {
-  await context.addCookies([
-    { name: "postpilot.debugUser", value: "user_maya", url: "http://localhost:5001" },
-    { name: "posthouse.activeOrganizationId", value: COPPERLINE_ORGANIZATION_ID, url: "http://localhost:5001" },
-  ]);
+  await useDebugSession(context, "user_maya", COPPERLINE_ORGANIZATION_ID);
 });
 
 async function openBookings(page: Page) {
@@ -14,7 +12,7 @@ async function openBookings(page: Page) {
   await page.waitForTimeout(400);
 }
 
-test.describe("Bookings usability", () => {
+test.describe("Bookings UI", () => {
   test("shows the active tenant's room calendar and utilization", async ({ page }) => {
     await openBookings(page);
 

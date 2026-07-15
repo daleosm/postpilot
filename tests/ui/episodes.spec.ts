@@ -5,7 +5,7 @@ async function openEpisodes(page: Page) {
   await page.waitForTimeout(400);
 }
 
-test.describe("Episodes usability", () => {
+test.describe("Episodes UI", () => {
   test("lists the active tenant's episode pipeline", async ({ page }) => {
     await openEpisodes(page);
 
