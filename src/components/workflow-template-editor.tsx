@@ -120,11 +120,12 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
                 {stage.canStartEarly && <p className="mt-2 text-xs leading-5 text-[#68716d]">This stage may start out of sequence.</p>}
                 <div className="mt-4 rounded-lg bg-[#fafaf8] p-3">
                   <div className="flex items-center justify-between gap-3"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7d837f]">Sign-off roles</p><Button size="sm" variant="tertiary" onClick={() => addApprovalRule(stage.id)} className="h-7 border border-[#dfe5e1] bg-white px-2 text-xs text-[#45685e]"><Plus size={13} /> Add sign-off</Button></div>
-                  <p className="mt-1 text-xs text-[#858a87]">The matching role records its own sign-off directly when this stage is current.</p>
+                  <p className="mt-1 text-xs text-[#858a87]">Required sign-offs hold the next ordered stage. Optional sign-offs are recorded when useful but do not hold the workflow.</p>
                   {stageRules.map((rule, index) => (
-                    <div key={rule.id} className="mt-2 grid gap-2 sm:grid-cols-[28px_minmax(170px,1fr)_28px] sm:items-center">
+                    <div key={rule.id} className="mt-2 grid gap-2 sm:grid-cols-[28px_minmax(170px,1fr)_100px_28px] sm:items-center">
                       <span className="text-center text-xs font-semibold text-[#7c837f]">{index + 1}</span>
                       <select aria-label={`Sign-off role ${index + 1}`} value={rule.approverRole} onChange={(event) => { const role = roles.find((item) => item.role === event.target.value); updateRule(rule.id, { approverRole: event.target.value, label: `${role?.label ?? event.target.value.replaceAll("_", " ")} sign-off` }); }} className="h-8 rounded-md border border-[#dedfda] bg-white px-2 text-xs">{roles.map((role) => <option key={role.role} value={role.role}>{role.label}</option>)}</select>
+                      <label className="flex h-8 items-center gap-2 whitespace-nowrap text-xs font-medium text-[#59615e]"><input type="checkbox" aria-label={`Require sign-off ${index + 1}`} checked={rule.isRequired} onChange={(event) => updateRule(rule.id, { isRequired: event.target.checked })} /> Required</label>
                       <button type="button" onClick={() => removeApprovalRule(rule.id, stage.id)} className="rounded p-1 text-[#8b918e] hover:bg-[#f3e9e4] hover:text-[#a35e41]" aria-label={`Remove sign-off ${index + 1}`}><Trash2 size={14} /></button>
                     </div>
                   ))}

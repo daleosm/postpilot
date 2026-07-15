@@ -23,6 +23,7 @@ export async function listWorkflowSignOffInbox(organizationId: string, userId: s
     signOffLabel: workflowStageApprovalRules.label,
     approverRole: workflowStageApprovalRules.approverRole,
     approvalOrder: workflowStageApprovalRules.approvalOrder,
+    isRequired: workflowStageApprovalRules.isRequired,
     passedAt: episodes.updatedAt,
     showTitle: shows.title,
     episodeTitle: episodes.title,
@@ -49,6 +50,7 @@ export async function listWorkflowSignOffInbox(organizationId: string, userId: s
     signOffLabel: workflowStageApprovalRules.label,
     approverRole: workflowStageApprovalRules.approverRole,
     approvalOrder: workflowStageApprovalRules.approvalOrder,
+    isRequired: workflowStageApprovalRules.isRequired,
     passedAt: episodeWorkflowTracks.startedAt,
     showTitle: shows.title,
     episodeTitle: episodes.title,
@@ -89,12 +91,12 @@ export async function listWorkflowSignOffInbox(organizationId: string, userId: s
 
   return (await Promise.all([...byStage.entries()].map(async ([, rules]) => {
     const approved = approvalsByStage.get(`${rules[0].episodeId}:${rules[0].workflowStageId}`) ?? new Set<string>();
-    const nextRule = rules.find((rule) => !approved.has(rule.ruleId));
-    if (!nextRule) return [];
-    const approval = approvals.find((item) => item.episodeId === nextRule.episodeId && item.workflowStageId === nextRule.workflowStageId && item.approvalRuleId === nextRule.ruleId);
-    const fallback = approval?.requiredPersonId ? null : (await resolveEpisodeWorkflowSigners(organizationId, nextRule.episodeId, [{ id: nextRule.ruleId, approverRole: nextRule.approverRole }]))[0]?.signer;
-    const requiredPersonId = approval?.requiredPersonId ?? fallback?.personId ?? null;
-    if (requiredPersonId !== person.id) return [];
-    return [{ ...nextRule, id: `${nextRule.episodeId}:${nextRule.ruleId}` }];
+    const readyRules = rules.filter((rule) => !approved.has(rule.ruleId) && !rules.some((previous) => previous.isRequired && previous.approvalOrder < rule.approvalOrder && !approved.has(previous.ruleId)));
+    return (await Promise.all(readyRules.map(async (rule) => {
+      const approval = approvals.find((item) => item.episodeId === rule.episodeId && item.workflowStageId === rule.workflowStageId && item.approvalRuleId === rule.ruleId);
+      const fallback = approval?.requiredPersonId ? null : (await resolveEpisodeWorkflowSigners(organizationId, rule.episodeId, [{ id: rule.ruleId, approverRole: rule.approverRole }]))[0]?.signer;
+      const requiredPersonId = approval?.requiredPersonId ?? fallback?.personId ?? null;
+      return requiredPersonId === person.id ? { ...rule, id: `${rule.episodeId}:${rule.ruleId}`, approvalRuleId: rule.ruleId } : null;
+    }))).filter((item) => item !== null);
   }))).flat();
 }

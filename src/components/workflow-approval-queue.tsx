@@ -8,6 +8,7 @@ import { useState } from "react";
 
 export type WorkflowSignOffItem = {
   id: string;
+  approvalRuleId: string;
   episodeId: string;
   showId: string;
   workflowStageId: string;
@@ -16,6 +17,7 @@ export type WorkflowSignOffItem = {
   signOffLabel: string;
   approverRole: string;
   approvalOrder: number;
+  isRequired: boolean;
   passedAt: Date | null;
   showTitle: string;
   episodeTitle: string;
@@ -43,7 +45,7 @@ function SignOffRow({ signOff: item, canOpenEpisodes, canSignOff }: { signOff: W
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/episodes/${item.episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId: item.workflowStageId, action: "sign_off" }) });
+      const response = await fetch(`/api/episodes/${item.episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId: item.workflowStageId, approvalRuleId: item.approvalRuleId, action: "sign_off" }) });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
         setMessage(body?.error ?? "Could not record your decision.");
@@ -64,7 +66,7 @@ function SignOffRow({ signOff: item, canOpenEpisodes, canSignOff }: { signOff: W
         <div className="min-w-0">
           <p className="text-xs font-medium text-[#617b75]">{item.showTitle} · E{String(item.episodeNumber).padStart(2, "0")} {item.episodeTitle}</p>
           <h3 className="mt-1 text-sm font-semibold text-[#3c4440]">{item.stageName}</h3>
-          <p className="mt-1 text-xs text-[#6e7772]">{item.signOffLabel} · Step {item.approvalOrder} · Current since {formatDate(item.passedAt)}</p>
+          <p className="mt-1 text-xs text-[#6e7772]">{item.signOffLabel} · Step {item.approvalOrder}{item.isRequired ? " · Required" : " · Optional"} · Current since {formatDate(item.passedAt)}</p>
           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
             {canOpenEpisodes && <Link href={`/episodes/${item.episodeId}`} className="font-medium text-[#54776d] hover:underline">Open workflow</Link>}
           </div>
