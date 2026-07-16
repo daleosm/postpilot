@@ -26,6 +26,7 @@ export const bookingStatus = pgEnum("booking_status", ["tentative", "confirmed",
 export const bookingType = pgEnum("booking_type", ["edit", "color", "mix", "qc", "client_review", "ingest", "conform", "leave", "training", "sick", "unavailable"]);
 export const approvalStatus = pgEnum("approval_status", ["pending", "approved", "changes_requested"]);
 export const billableStatus = pgEnum("billable_status", ["draft", "approved", "invoiced", "paid", "void"]);
+export const clientInvoiceStatus = pgEnum("client_invoice_status", ["issued", "paid", "void"]);
 export const costType = pgEnum("cost_type", ["billable", "internal"]);
 export const availabilityStatus = pgEnum("availability_status", ["available", "limited", "booked_out", "away"]);
 export const workflowTrackStatus = pgEnum("workflow_track_status", ["not_started", "in_progress", "submitted", "approved", "changes_requested", "blocked"]);
@@ -117,6 +118,24 @@ export const crmContactType = pgEnum("crm_contact_type", ["general", "creative_a
 export const crmContacts = pgTable("crm_contacts", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), companyId: uuid("company_id").notNull().references(() => crmCompanies.id, { onDelete: "cascade" }), name: text("name").notNull(), title: text("title"), email: text("email"), phone: text("phone"), contactType: crmContactType("contact_type").default("general").notNull(), isPrimary: boolean("is_primary").default(false).notNull(), notes: text("notes"), ...auditColumns }, (table) => [index("crm_contacts_company_idx").on(table.companyId), index("crm_contacts_org_idx").on(table.organizationId), index("crm_contacts_org_type_idx").on(table.organizationId, table.contactType)]);
 
 export const cateringSettings = pgTable("catering_settings", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), markupPercent: numeric("markup_percent", { precision: 7, scale: 2 }).default("0").notNull(), ...auditColumns }, (table) => [uniqueIndex("catering_settings_org_idx").on(table.organizationId)]);
+
+/**
+ * A tenant's statutory billing profile. Issued invoices copy these values so
+ * a later settings change can never alter an already issued document.
+ */
+export const invoiceSettings = pgTable("invoice_settings", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  legalName: text("legal_name"),
+  legalAddress: text("legal_address"),
+  billingEmail: text("billing_email"),
+  taxName: text("tax_name").default("VAT").notNull(),
+  taxRegistrationNumber: text("tax_registration_number"),
+  taxRatePercent: numeric("tax_rate_percent", { precision: 7, scale: 3 }).default("0").notNull(),
+  paymentTermsDays: integer("payment_terms_days").default(30).notNull(),
+  paymentInstructions: text("payment_instructions"),
+  ...auditColumns,
+}, (table) => [uniqueIndex("invoice_settings_org_idx").on(table.organizationId)]);
 
 export const shows = pgTable("shows", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -495,11 +514,46 @@ export const serviceRates = pgTable("service_rates", {
 export const rateCards = pgTable("rate_cards", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), clientCompanyId: uuid("client_company_id").references(() => crmCompanies.id, { onDelete: "cascade" }), network: text("network"), showId: uuid("show_id").references(() => shows.id, { onDelete: "cascade" }), episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "cascade" }), name: text("name").notNull(), currency: text("currency").default("USD").notNull(), effectiveFrom: date("effective_from"), effectiveTo: date("effective_to"), isActive: boolean("is_active").default(true).notNull(), ...auditColumns }, (table) => [index("rate_cards_org_client_idx").on(table.organizationId, table.clientCompanyId), index("rate_cards_org_network_idx").on(table.organizationId, table.network), index("rate_cards_org_show_idx").on(table.organizationId, table.showId), index("rate_cards_org_episode_idx").on(table.organizationId, table.episodeId)]);
 export const rateCardItems = pgTable("rate_card_items", { id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }), rateCardId: uuid("rate_card_id").notNull().references(() => rateCards.id, { onDelete: "cascade" }), serviceRateId: uuid("service_rate_id").references(() => serviceRates.id, { onDelete: "set null" }), category: text("category").notNull(), unit: text("unit").notNull(), rate: numeric("rate", { precision: 14, scale: 2 }).notNull(), ...auditColumns }, (table) => [uniqueIndex("rate_card_items_card_category_unit_idx").on(table.rateCardId, table.category, table.unit), index("rate_card_items_org_idx").on(table.organizationId)]);
 
+/** Client-facing invoice header. Financial identity and payment terms are snapshotted at issue time. */
+export const clientInvoices = pgTable("client_invoices", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  sequence: integer("sequence").notNull(),
+  invoiceNumber: text("invoice_number").notNull(),
+  clientCompanyId: uuid("client_company_id").references(() => crmCompanies.id, { onDelete: "set null" }),
+  showId: uuid("show_id").references(() => shows.id, { onDelete: "set null" }),
+  episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "set null" }),
+  status: clientInvoiceStatus("status").default("issued").notNull(),
+  invoiceDate: date("invoice_date").notNull(),
+  dueDate: date("due_date").notNull(),
+  currency: text("currency").notNull(),
+  subtotalAmount: numeric("subtotal_amount", { precision: 14, scale: 2 }).notNull(),
+  taxName: text("tax_name").notNull(),
+  taxRatePercent: numeric("tax_rate_percent", { precision: 7, scale: 3 }).notNull(),
+  taxAmount: numeric("tax_amount", { precision: 14, scale: 2 }).notNull(),
+  totalAmount: numeric("total_amount", { precision: 14, scale: 2 }).notNull(),
+  issuerName: text("issuer_name").notNull(),
+  issuerAddress: text("issuer_address"),
+  issuerEmail: text("issuer_email"),
+  issuerTaxRegistrationNumber: text("issuer_tax_registration_number"),
+  clientName: text("client_name").notNull(),
+  clientAddress: text("client_address"),
+  clientEmail: text("client_email"),
+  paymentInstructions: text("payment_instructions"),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("client_invoices_org_sequence_idx").on(table.organizationId, table.sequence),
+  uniqueIndex("client_invoices_org_number_idx").on(table.organizationId, table.invoiceNumber),
+  index("client_invoices_org_episode_idx").on(table.organizationId, table.episodeId),
+  index("client_invoices_org_client_idx").on(table.organizationId, table.clientCompanyId),
+]);
+
 export const billables = pgTable("billables", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   showId: uuid("show_id").references(() => shows.id, { onDelete: "cascade" }),
   episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "cascade" }),
+  clientInvoiceId: uuid("client_invoice_id").references(() => clientInvoices.id, { onDelete: "set null" }),
   vendor: text("vendor").notNull(),
   reference: text("reference"),
   description: text("description"),
@@ -512,7 +566,24 @@ export const billables = pgTable("billables", {
   rateSnapshot: jsonb("rate_snapshot").$type<Record<string, unknown>>(),
   overrideReason: text("override_reason"),
   ...auditColumns,
-}, (table) => [index("billables_organization_status_idx").on(table.organizationId, table.status)]);
+}, (table) => [index("billables_organization_status_idx").on(table.organizationId, table.status), index("billables_client_invoice_idx").on(table.clientInvoiceId)]);
+
+/** Immutable issued-invoice line snapshots, linked back to their originating client charges where possible. */
+export const clientInvoiceItems = pgTable("client_invoice_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  clientInvoiceId: uuid("client_invoice_id").notNull().references(() => clientInvoices.id, { onDelete: "cascade" }),
+  billableId: uuid("billable_id").references(() => billables.id, { onDelete: "set null" }),
+  description: text("description").notNull(),
+  reference: text("reference"),
+  quantity: numeric("quantity", { precision: 12, scale: 3 }).default("1").notNull(),
+  unitAmount: numeric("unit_amount", { precision: 14, scale: 2 }).notNull(),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  ...auditColumns,
+}, (table) => [
+  index("client_invoice_items_org_invoice_idx").on(table.organizationId, table.clientInvoiceId),
+  uniqueIndex("client_invoice_items_billable_idx").on(table.billableId),
+]);
 
 /** Supplier invoice register. It is kept distinct from client billables and creates one linked internal-cost line when posted. */
 export const vendorInvoices = pgTable("vendor_invoices", {

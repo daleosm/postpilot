@@ -8,10 +8,13 @@ import {
   bookings,
   budgetLines,
   cateringRequests,
+  clientInvoiceItems,
+  clientInvoices,
   crmCompanies,
   crmContacts,
   episodeTeamAssignments,
   episodes,
+  invoiceSettings,
   organizationMembers,
   organizations,
   organizationRolePolicies,
@@ -347,6 +350,12 @@ async function seedTenant(tenant: TenantSeed) {
   const secondaryNetwork = tenant.networks[1] ?? primaryNetwork;
 
   await db.insert(organizations).values({ id: tenant.id, name: tenant.name, slug: tenant.slug, currency: tenant.budgetProfile.currency });
+  await db.insert(invoiceSettings).values({
+    id: id(tenant.number, "48", 99), organizationId: tenant.id,
+    legalName: `${tenant.name} Limited`, legalAddress: "18 Post House Lane, London, E1 6AB",
+    billingEmail: `accounts@${tenant.slug}.test`, taxName: "VAT", taxRegistrationNumber: `GB ${String(100000000 + tenant.number * 1010101).replace(/(\d{3})(?=\d)/g, "$1 ")}`,
+    taxRatePercent: "20", paymentTermsDays: 30, paymentInstructions: `Please pay by bank transfer, quoting the invoice number. Remittance advice: accounts@${tenant.slug}.test.`,
+  });
   await db.insert(users).values(tenantPeople.map((person) => ({ id: person.userId, name: person.name, email: person.email }))).onConflictDoUpdate({ target: users.id, set: { name: sql`excluded.name`, email: sql`excluded.email` } });
   await db.insert(organizationMembers).values(tenantPeople.map((person) => ({ organizationId: tenant.id, userId: person.userId, role: person.membershipRole })));
   await db.insert(people).values(tenantPeople.map((person, index) => ({
@@ -405,6 +414,9 @@ async function seedTenant(tenant: TenantSeed) {
       airDate: day(25 + position * 7), lockedCutDate: day(-4 + position * 2), deliveryDeadline: at(3 + position * 2, 17),
     };
   }));
+  // One completed episode per post house makes the issued-invoice flow visible
+  // in the debug workspace without weakening the workflow/time export gate.
+  if (episodeRows[5]) episodeRows[5].workflowStageId = stageId(22);
   await db.insert(episodes).values(episodeRows);
   await db.insert(episodeTeamAssignments).values(episodeRows.flatMap((episode, index) => {
     const roles = ["producer", "editor", "assistant_editor"];
@@ -463,12 +475,37 @@ async function seedTenant(tenant: TenantSeed) {
   await db.insert(rateCards).values([{ id: id(tenant.number, "45", 1), organizationId: tenant.id, clientCompanyId: companyId(1), network: primaryNetwork, name: `${primaryNetwork} network rate card`, currency: tenant.budgetProfile.currency, isActive: true }, { id: id(tenant.number, "45", 2), organizationId: tenant.id, showId: showId(1), name: `${tenant.shows[0].title} show override`, currency: tenant.budgetProfile.currency, isActive: true }, { id: id(tenant.number, "45", 3), organizationId: tenant.id, episodeId: episodeId(1), name: `${episodeRows[0].productionCode} episode override`, currency: tenant.budgetProfile.currency, isActive: true }]);
   await db.insert(rateCardItems).values([{ id: id(tenant.number, "46", 1), organizationId: tenant.id, rateCardId: id(tenant.number, "45", 1), serviceRateId: id(tenant.number, "36", 3), category: "Colour", unit: "day", rate: (930 * tenant.budgetProfile.multiplier).toFixed(2) }, { id: id(tenant.number, "46", 2), organizationId: tenant.id, rateCardId: id(tenant.number, "45", 2), serviceRateId: id(tenant.number, "36", 1), category: "Edit suite", unit: "day", rate: (720 * tenant.budgetProfile.multiplier).toFixed(2) }, { id: id(tenant.number, "46", 3), organizationId: tenant.id, rateCardId: id(tenant.number, "45", 3), serviceRateId: id(tenant.number, "36", 5), category: "QC", unit: "episode", rate: (525 * tenant.budgetProfile.multiplier).toFixed(2) }]);
   const clientBillableAmount = 18400 * tenant.budgetProfile.multiplier;
-  await db.insert(billables).values([{ id: id(tenant.number, "31", 1), organizationId: tenant.id, showId: showId(1), episodeId: episodeId(4), vendor: tenant.budgetProfile.vendor, reference: `${tenant.shows[0].code}-CHANGE-021`, description: "Finishing and clearance support", amount: clientBillableAmount.toFixed(2), currency: tenant.budgetProfile.currency, status: "approved", invoiceDate: day(-5), dueDate: day(18) }]);
+  const issuedLineOne = 5250 * tenant.budgetProfile.multiplier;
+  const issuedLineTwo = 2000 * tenant.budgetProfile.multiplier;
+  const issuedSubtotal = issuedLineOne + issuedLineTwo;
+  const issuedTax = issuedSubtotal * 0.2;
+  const issuedInvoiceId = id(tenant.number, "48", 1);
+  const issuedEpisodeId = episodeId(6);
+  const issuedShowId = showId(2);
+  const issuedInvoiceDate = day(-14);
+  const issuedDueDate = day(16);
+  await db.insert(clientInvoices).values({
+    id: issuedInvoiceId, organizationId: tenant.id, sequence: 1, invoiceNumber: `${tenant.slug.toUpperCase()}-2026-0001`, clientCompanyId: companyId(1), showId: issuedShowId, episodeId: issuedEpisodeId,
+    status: "issued", invoiceDate: issuedInvoiceDate, dueDate: issuedDueDate, currency: tenant.budgetProfile.currency,
+    subtotalAmount: issuedSubtotal.toFixed(2), taxName: "VAT", taxRatePercent: "20", taxAmount: issuedTax.toFixed(2), totalAmount: (issuedSubtotal + issuedTax).toFixed(2),
+    issuerName: `${tenant.name} Limited`, issuerAddress: "18 Post House Lane, London, E1 6AB", issuerEmail: `accounts@${tenant.slug}.test`, issuerTaxRegistrationNumber: `GB ${String(100000000 + tenant.number * 1010101).replace(/(\d{3})(?=\d)/g, "$1 ")}`,
+    clientName: primaryNetwork, clientAddress: "1 Broadcast Square, London", clientEmail: `finance@${tenant.slug}.client.test`, paymentInstructions: `Please pay by bank transfer, quoting ${tenant.slug.toUpperCase()}-2026-0001.`,
+  });
+  await db.insert(billables).values([
+    { id: id(tenant.number, "31", 1), organizationId: tenant.id, showId: showId(1), episodeId: episodeId(4), vendor: tenant.budgetProfile.vendor, reference: `${tenant.shows[0].code}-CHANGE-021`, description: "Finishing and clearance support", amount: clientBillableAmount.toFixed(2), currency: tenant.budgetProfile.currency, status: "approved", invoiceDate: day(-5), dueDate: day(18) },
+    { id: id(tenant.number, "31", 2), organizationId: tenant.id, showId: issuedShowId, episodeId: issuedEpisodeId, clientInvoiceId: issuedInvoiceId, vendor: "Client change", reference: `${tenant.shows[1]?.code ?? tenant.shows[0]?.code}-CO-014`, description: "Approved editorial change and conform", amount: issuedLineOne.toFixed(2), currency: tenant.budgetProfile.currency, status: "invoiced", invoiceDate: issuedInvoiceDate, dueDate: issuedDueDate },
+    { id: id(tenant.number, "31", 3), organizationId: tenant.id, showId: issuedShowId, episodeId: issuedEpisodeId, clientInvoiceId: issuedInvoiceId, vendor: "Client change", reference: `${tenant.shows[1]?.code ?? tenant.shows[0]?.code}-CO-015`, description: "Client-attended colour grade session", amount: issuedLineTwo.toFixed(2), currency: tenant.budgetProfile.currency, status: "invoiced", invoiceDate: issuedInvoiceDate, dueDate: issuedDueDate },
+  ]);
+  await db.insert(clientInvoiceItems).values([
+    { id: id(tenant.number, "49", 1), organizationId: tenant.id, clientInvoiceId: issuedInvoiceId, billableId: id(tenant.number, "31", 2), description: "Approved editorial change and conform", reference: `${tenant.shows[1]?.code ?? tenant.shows[0]?.code}-CO-014`, quantity: "1", unitAmount: issuedLineOne.toFixed(2), amount: issuedLineOne.toFixed(2) },
+    { id: id(tenant.number, "49", 2), organizationId: tenant.id, clientInvoiceId: issuedInvoiceId, billableId: id(tenant.number, "31", 3), description: "Client-attended colour grade session", reference: `${tenant.shows[1]?.code ?? tenant.shows[0]?.code}-CO-015`, quantity: "1", unitAmount: issuedLineTwo.toFixed(2), amount: issuedLineTwo.toFixed(2) },
+  ]);
   await db.insert(activityLog).values([
     { id: id(tenant.number, "32", 1), organizationId: tenant.id, actorUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId, action: "episode.picture_lock_approved", entityType: "episode", entityId: episodeId(3), metadata: { workflow: tenant.workflowName, status: "approved" } },
     { id: id(tenant.number, "32", 2), organizationId: tenant.id, actorUserId: tenantPeople.find((person) => person.role === "qc")?.userId, action: "qc.issue_created", entityType: "episode", entityId: episodeId(4), metadata: { issueCount: 1, risk: "high" } },
     { id: id(tenant.number, "32", 3), organizationId: tenant.id, actorUserId: tenantPeople.find((person) => person.role === "producer")?.userId, action: "workflow.changes_requested", entityType: "episode", entityId: episodeId(7), metadata: { network: secondaryNetwork } },
     { id: id(tenant.number, "32", 4), organizationId: tenant.id, actorUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId, action: "workflow.finalised", entityType: "episode", entityId: episodeId(6), metadata: { destination: secondaryNetwork } },
+    { id: id(tenant.number, "32", 5), organizationId: tenant.id, actorUserId: tenantPeople.find((person) => person.role === "finance")?.userId, action: "client_invoice.issued", entityType: "client_invoice", entityId: issuedInvoiceId, metadata: { episodeId: issuedEpisodeId, invoiceNumber: `${tenant.slug.toUpperCase()}-2026-0001`, currency: tenant.budgetProfile.currency } },
   ]);
 }
 

@@ -2,6 +2,7 @@ import { AlertTriangle, ArrowRight, CircleDollarSign, ReceiptText, TrendingUp } 
 import Link from "next/link";
 
 import { BudgetLineForm } from "@/components/budget-line-form";
+import { EpisodeInvoicePanel } from "@/components/episode-invoice-panel";
 import { RateCardDialog } from "@/components/rate-card-dialog";
 import { RateOverrideCard } from "@/components/rate-override-card";
 import type { ServiceRate } from "@/components/service-rate-card";
@@ -9,7 +10,7 @@ import { WorkOrderChargeQueue } from "@/components/work-order-charge-queue";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { can } from "@/lib/permissions";
-import { getBudgetData, listEpisodeBookingCosts, listEpisodes, listServiceRates } from "@/server/data";
+import { getBudgetData, getEpisodeInvoiceReadiness, listEpisodeBookingCosts, listEpisodes, listServiceRates } from "@/server/data";
 import { redirect } from "next/navigation";
 
 type Line = {
@@ -75,6 +76,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
   const selectedEpisode = data.episodes.find((episode) => episode.id === selectedEpisodeId && episode.showTitle === activeShow);
   if (!selectedEpisode) redirect(`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`);
   const bookingCosts = await loadBookingCosts(selectedEpisodeId);
+  const invoiceReadiness = await loadInvoiceReadiness(selectedEpisodeId);
   const episodes = [selectedEpisode];
   const lines = data.lines.filter((line) => line.episodeId === selectedEpisodeId && line.showTitle === activeShow);
   const currency = lines[0]?.currency ?? "USD";
@@ -108,6 +110,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
     </section>
 
     <RateOverrideCard rates={serviceRates} scope={{ type: "episode", episodeId: selectedEpisodeId }} title="Episode service rate card" />
+    <EpisodeInvoicePanel episodeId={selectedEpisodeId} readiness={invoiceReadiness} />
     <BookingCostBasis entries={bookingCosts} fallbackCurrency={currency} />
     <WorkOrderChargeQueue charges={activeShow ? data.workOrderCharges.filter((charge) => charge.showTitle === activeShow) : data.workOrderCharges} />
 
@@ -160,6 +163,12 @@ async function loadBookingCosts(episodeId: string): Promise<BookingCost[]> {
   if (isDebugDemoMode) return [];
   const context = await getActiveOrganizationContext();
   return context?.organization ? listEpisodeBookingCosts(context.organization.organizationId, episodeId) : [];
+}
+
+async function loadInvoiceReadiness(episodeId: string) {
+  if (isDebugDemoMode) return null;
+  const context = await getActiveOrganizationContext();
+  return context?.organization ? getEpisodeInvoiceReadiness(context.organization.organizationId, episodeId) : null;
 }
 
 function Metric({ icon, label, value, detail, warning = false }: { icon: React.ReactNode; label: string; value: string; detail: string; warning?: boolean }) {

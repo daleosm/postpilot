@@ -463,6 +463,13 @@
       "when": 1784125648686,
       "tag": "0065_reconcile_completed_workflow_stages",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1784125648687,
+      "tag": "0066_client_invoices",
+      "breakpoints": true
     }
   ]
 }

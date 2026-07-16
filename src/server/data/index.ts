@@ -1,6 +1,7 @@
 export { getBookingCostProjection, getBudgetData, listEpisodeBookingCosts, listServiceRates } from "./budget";
 export { getCrmData, listCrmCompanyOptions } from "./crm";
 export { getCateringResources, listCateringRequests } from "./catering";
+export { getEpisodeInvoiceReadiness, getInvoiceSettings } from "./client-invoices";
 export { getDashboardData } from "./dashboard";
 export { getDemoCommandCenterData } from "./demo-dashboard";
 export { getEpisode, getEpisodeWorkspace, listEpisodes } from "./episodes";
