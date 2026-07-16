@@ -10,7 +10,7 @@ const metadata = z.record(z.string(), z.unknown()).default({});
 const episodeStatuses = ["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"] as const;
 const qcStatuses = ["not_started", "in_progress", "passed", "needs_attention", "waived"] as const;
 const workOrderPriorities = ["blocker", "high", "normal", "low"] as const;
-const workOrderStatuses = ["open", "in_progress", "ready_for_review", "complete", "cancelled"] as const;
+const workOrderStatuses = ["open", "awaiting_approval", "in_progress", "ready_for_review", "complete", "rejected", "cancelled"] as const;
 const workOrderBillingScopes = ["included", "billable_change", "internal"] as const;
 const roleKey = z.string().trim().min(2).max(80).regex(/^[a-z0-9_]+$/, "Use lowercase letters, numbers, and underscores.");
 
@@ -320,6 +320,7 @@ export const updatePostWorkOrderSchema = z.object({
   billingNotes: z.string().trim().max(2000).nullable().optional(),
   externalUrl: z.string().url().max(2000).nullable().optional(),
   dueAt: optionalTimestamp.nullable(),
+  approvalNote: z.string().trim().max(2000).nullable().optional(),
 }).refine((value) => Object.keys(value).length > 0, "Provide at least one change.");
 
 export const postWorkOrderChargeSchema = z.object({

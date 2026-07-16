@@ -29,6 +29,7 @@ export async function POST(request: Request) {
     workflowStageId: report.workflowStageId,
     qcIssueId: issue.id,
     kind: "qc_exception",
+    status: "in_progress",
     title: `QC ${issue.severity} — ${issue.code ?? "correction required"}`,
     description: issue.description,
     department: "QC",

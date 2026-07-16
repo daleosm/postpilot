@@ -40,6 +40,12 @@ async function activateLab(page: Page) {
   expect(response.status()).toBe(200);
 }
 
+async function switchDebugUser(page: Page, userId: string) {
+  const response = await page.request.post("/api/debug/user", { data: { userId } });
+  expect(response.status()).toBe(200);
+  await activateLab(page);
+}
+
 test.describe("Post work orders integration", () => {
   test.describe.configure({ mode: "serial" });
 
@@ -52,7 +58,7 @@ test.describe("Post work orders integration", () => {
     await sql`insert into post_workflows (id, organization_id, name, is_default) values (${workflowId}, ${organizationId}, 'Work order test workflow', true), (${alternateWorkflowId}, ${organizationId}, 'Alternate work order workflow', false), (${foreignWorkflowId}, ${foreignOrganizationId}, 'Foreign work order workflow', true)`;
     await sql`insert into workflow_stages (id, organization_id, workflow_id, name, key, position, color, is_terminal, can_start_early) values (${stageId}, ${organizationId}, ${workflowId}, 'QC verification', 'quality_control', 1, '#506f68', false, false), (${laterStageId}, ${organizationId}, ${workflowId}, 'Delivery handoff', 'delivery_handoff', 2, '#506f68', false, false), (${alternateStageId}, ${organizationId}, ${alternateWorkflowId}, 'Alternate stage', 'alternate_stage', 1, '#506f68', false, false), (${foreignStageId}, ${foreignOrganizationId}, ${foreignWorkflowId}, 'Foreign stage', 'foreign_stage', 1, '#506f68', false, false)`;
     await sql`insert into workflow_stage_approval_rules (id, organization_id, workflow_stage_id, approver_role, label, approval_order, is_required) values (${ruleId}, ${organizationId}, ${stageId}, 'post_supervisor', 'Post Supervisor sign-off', 1, true)`;
-    await sql`insert into organization_role_policies (organization_id, role, label, permissions) values (${organizationId}, 'post_supervisor', 'Post supervisor', '["manage_work_orders","approve_reviews","manage_shows","manage_budget"]'::jsonb), (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb), (${organizationId}, 'quality_verifier', 'QC verifier', '["update_assigned_work","verify_qc"]'::jsonb), (${organizationId}, 'operations_coordinator', 'Operations coordinator', '["manage_work_orders"]'::jsonb)`;
+    await sql`insert into organization_role_policies (organization_id, role, label, permissions) values (${organizationId}, 'post_supervisor', 'Post supervisor', '["manage_work_orders","approve_work_orders","approve_reviews","manage_shows","manage_budget"]'::jsonb), (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb), (${organizationId}, 'quality_verifier', 'QC verifier', '["update_assigned_work","verify_qc","approve_work_orders"]'::jsonb), (${organizationId}, 'operations_coordinator', 'Operations coordinator', '["manage_work_orders"]'::jsonb)`;
     await sql`insert into crm_companies (id, organization_id, name, type, currency) values (${vendorCompanyId}, ${organizationId}, 'Lab Finishing Vendor', 'vendor', 'GBP'), (${clientCompanyId}, ${organizationId}, 'Lab Network Client', 'client', 'GBP')`;
     await sql`insert into shows (id, organization_id, title, code, time_zone) values (${showId}, ${organizationId}, 'Work Order Lab Series', 'WOL', 'Europe/London'), (${foreignShowId}, ${foreignOrganizationId}, 'Foreign Work Order Series', 'FWOL', 'Europe/London')`;
     await sql`insert into seasons (id, organization_id, show_id, number) values (${seasonId}, ${organizationId}, ${showId}, 1), (${foreignSeasonId}, ${foreignOrganizationId}, ${foreignShowId}, 1)`;
@@ -82,6 +88,7 @@ test.describe("Post work orders integration", () => {
   });
 
   test("makes stage-linked work orders blocking by default", async ({ page }) => {
+    await switchDebugUser(page, "user_maya");
     await activateLab(page);
     const create = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Resolve legal burn-in", priority: "blocker" } });
     expect(create.status()).toBe(201);
@@ -93,6 +100,10 @@ test.describe("Post work orders integration", () => {
     expect(signOff.status()).toBe(409);
     await expect(signOff.json()).resolves.toMatchObject({ error: expect.stringContaining("blocking work order") });
 
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "awaiting_approval" } })).status()).toBe(200);
+    await switchDebugUser(page, qcUserId);
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "in_progress" } })).status()).toBe(200);
+    await switchDebugUser(page, "user_maya");
     const complete = await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "complete" } });
     expect(complete.status()).toBe(200);
     const permittedSignOff = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: stageId, action: "sign_off" } });
@@ -130,6 +141,10 @@ test.describe("Post work orders integration", () => {
     const beforeCompletion = await page.request.post(`/api/work-orders/${workOrderId}/charge`, { data: { actualAmount: 800, category: "Graphics" } });
     expect(beforeCompletion.status()).toBe(409);
 
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "awaiting_approval" } })).status()).toBe(200);
+    await switchDebugUser(page, qcUserId);
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "in_progress" } })).status()).toBe(200);
+    await switchDebugUser(page, "user_maya");
     const complete = await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "complete" } });
     expect(complete.status()).toBe(200);
     const postCharge = await page.request.post(`/api/work-orders/${workOrderId}/charge`, { data: { actualAmount: 800, category: "Graphics", reference: "CO-104" } });
@@ -155,7 +170,7 @@ test.describe("Post work orders integration", () => {
     expect(workOrder).toMatchObject({ estimated_amount: "450.00", currency: "GBP", client_quote_amount: "900.00", client_quote_currency: "GBP" });
   });
 
-  test("keeps commercial fields out of an operational work-order manager's authority", async ({ page }) => {
+  test("lets an operational manager flag a client change but keeps its price with Budget", async ({ page }) => {
     const switchUser = await page.request.post("/api/debug/user", { data: { userId: coordinatorUserId } });
     expect(switchUser.status()).toBe(200);
     await activateLab(page);
@@ -169,8 +184,7 @@ test.describe("Post work orders integration", () => {
     const workOrderId = (await operationalCreate.json()).id as string;
 
     const commercialUpdate = await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { billingScope: "billable_change" } });
-    expect(commercialUpdate.status()).toBe(403);
-    await expect(commercialUpdate.json()).resolves.toMatchObject({ error: expect.stringContaining("Budget permission") });
+    expect(commercialUpdate.status()).toBe(200);
   });
 
   test("rejects cross-tenant work-order routes and referenced resources", async ({ page }) => {
@@ -205,7 +219,7 @@ test.describe("Post work orders integration", () => {
     await expect(wrongWorkflow.json()).resolves.toMatchObject({ error: "Workflow stage does not belong to this episode's workflow." });
   });
 
-  test("requires management approval before an assigned artist can complete draft work", async ({ page }) => {
+  test("requires independent approval before an assigned artist can start work", async ({ page }) => {
     const switchManager = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
     expect(switchManager.status()).toBe(200);
     await activateLab(page);
@@ -221,7 +235,12 @@ test.describe("Post work orders integration", () => {
     const restoreManager = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
     expect(restoreManager.status()).toBe(200);
     await activateLab(page);
-    const approve = await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "in_progress" } });
+    const submit = await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "awaiting_approval" } });
+    expect(submit.status()).toBe(200);
+    const selfApproval = await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "in_progress" } });
+    expect(selfApproval.status()).toBe(403);
+    await switchDebugUser(page, qcUserId);
+    const approve = await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "in_progress", approvalNote: "Approved for editorial turnover." } });
     expect(approve.status()).toBe(200);
     const restoreEditor = await page.request.post("/api/debug/user", { data: { userId: editorUserId } });
     expect(restoreEditor.status()).toBe(200);
@@ -229,6 +248,26 @@ test.describe("Post work orders integration", () => {
     expect(completion.status()).toBe(200);
     const [audit] = await sql`select action from activity_log where organization_id = ${organizationId} and entity_id = ${workOrderId} and action = 'work_order.completed'`;
     expect(audit).toBeTruthy();
+    const [approvalAudit] = await sql`select action from activity_log where organization_id = ${organizationId} and entity_id = ${workOrderId} and action = 'work_order.approved'`;
+    expect(approvalAudit).toBeTruthy();
+  });
+
+  test("lets an approver return a submitted work order for revision and resubmission", async ({ page }) => {
+    await switchDebugUser(page, coordinatorUserId);
+    await activateLab(page);
+    const create = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Clarify network graphics request" } });
+    expect(create.status()).toBe(201);
+    const workOrderId = (await create.json()).id as string;
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "awaiting_approval" } })).status()).toBe(200);
+
+    await switchDebugUser(page, "user_maya");
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "rejected", approvalNote: "Add the network reference before release." } })).status()).toBe(200);
+    const [returned] = await sql`select status, approval_note from post_work_orders where id = ${workOrderId}`;
+    expect(returned).toMatchObject({ status: "rejected", approval_note: "Add the network reference before release." });
+
+    await switchDebugUser(page, coordinatorUserId);
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { title: "Clarify network graphics request — reference added" } })).status()).toBe(200);
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "awaiting_approval" } })).status()).toBe(200);
   });
 
   test("keeps creation and updates out of unassigned artists' authority", async ({ page }) => {
@@ -254,6 +293,10 @@ test.describe("Post work orders integration", () => {
     const create = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Client title revision", billingScope: "billable_change", clientQuoteAmount: 750 } });
     expect(create.status()).toBe(201);
     const workOrderId = (await create.json()).id as string;
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "awaiting_approval" } })).status()).toBe(200);
+    await switchDebugUser(page, qcUserId);
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "in_progress" } })).status()).toBe(200);
+    await switchDebugUser(page, "user_maya");
     expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "complete" } })).status()).toBe(200);
 
     const switchCoordinator = await page.request.post("/api/debug/user", { data: { userId: coordinatorUserId } });
@@ -286,6 +329,8 @@ test.describe("Post work orders integration", () => {
     const create = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, assigneeRole: "editor", title: "Role-assigned editorial check" } });
     expect(create.status()).toBe(201);
     const workOrderId = (await create.json()).id as string;
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "awaiting_approval" } })).status()).toBe(200);
+    await switchDebugUser(page, qcUserId);
     expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "in_progress" } })).status()).toBe(200);
 
     const switchEditor = await page.request.post("/api/debug/user", { data: { userId: editorUserId } });
@@ -314,8 +359,8 @@ test.describe("Post work orders integration", () => {
     await page.getByLabel("Title").fill("UI-created work order");
     await page.getByLabel("Estimated vendor cost").fill("240");
     await page.getByLabel("Quoted client change").fill("480");
-    await page.getByRole("button", { name: "Create draft", exact: true }).click();
-    await expect(page.getByText("Work order created as draft.", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Save draft", exact: true }).click();
+    await expect(page.getByText("Work order saved as draft.", { exact: true })).toBeVisible();
     await expect(page.getByText("UI-created work order", { exact: true })).toBeVisible();
   });
 
@@ -326,7 +371,10 @@ test.describe("Post work orders integration", () => {
     const create = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, vendorCompanyId, estimatedAmount: 450, title: "External subtitle conform" } });
     expect(create.status()).toBe(201);
     const workOrderId = (await create.json()).id as string;
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "awaiting_approval" } })).status()).toBe(200);
+    await switchDebugUser(page, qcUserId);
     expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "in_progress" } })).status()).toBe(200);
+    await switchDebugUser(page, "user_maya");
     const invoice = await page.request.post("/api/vendor-invoices", { data: { vendorCompanyId, episodeId, workOrderId, invoiceNumber: "LFS-104", amount: 512.4, status: "received" } });
     expect(invoice.status()).toBe(201);
     const [workOrder] = await sql`select actual_amount from post_work_orders where organization_id = ${organizationId} and id = ${workOrderId}`;

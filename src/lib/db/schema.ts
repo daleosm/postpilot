@@ -32,7 +32,7 @@ export const availabilityStatus = pgEnum("availability_status", ["available", "l
 export const workflowTrackStatus = pgEnum("workflow_track_status", ["not_started", "in_progress", "submitted", "approved", "changes_requested", "blocked"]);
 export const qcReportStatus = pgEnum("qc_report_status", ["draft", "in_progress", "passed", "failed", "waived"]);
 export const qcIssueStatus = pgEnum("qc_issue_status", ["open", "resolved", "waived"]);
-export const workOrderStatus = pgEnum("work_order_status", ["open", "in_progress", "ready_for_review", "complete", "cancelled"]);
+export const workOrderStatus = pgEnum("work_order_status", ["open", "awaiting_approval", "in_progress", "ready_for_review", "complete", "rejected", "cancelled"]);
 export const workOrderPriority = pgEnum("work_order_priority", ["blocker", "high", "normal", "low"]);
 export const workOrderKind = pgEnum("work_order_kind", ["work_order", "qc_exception"]);
 export const workOrderBillingScope = pgEnum("work_order_billing_scope", ["included", "billable_change", "internal"]);
@@ -462,6 +462,9 @@ export const postWorkOrders = pgTable("post_work_orders", {
   externalUrl: text("external_url"),
   dueAt: timestamp("due_at", { withTimezone: true }),
   createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  approvedByPersonId: uuid("approved_by_person_id").references(() => people.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  approvalNote: text("approval_note"),
   completedByPersonId: uuid("completed_by_person_id").references(() => people.id, { onDelete: "set null" }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   ...auditColumns,

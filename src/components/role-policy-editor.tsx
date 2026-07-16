@@ -13,6 +13,7 @@ const permissionLabels: Record<string, string> = {
   manage_reviews: "Approval administration",
   approve_reviews: "Approve workflow gates",
   manage_work_orders: "Manage work orders",
+  approve_work_orders: "Approve work orders",
   update_assigned_work: "Update assigned work",
   approve_budget_overruns: "Approve budget overruns",
   manage_rates: "Manage service rate cards",

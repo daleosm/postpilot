@@ -6,6 +6,7 @@ import { getDb } from "@/lib/db";
 import { budgetLines, episodes, people, postWorkOrders, seasons, shows, workflowStages } from "@/lib/db/schema";
 
 const assignees = aliasedTable(people, "work_order_assignees");
+const approvers = aliasedTable(people, "work_order_approvers");
 const workOrderBudgetLines = aliasedTable(budgetLines, "work_order_budget_lines");
 
 export async function listEpisodeWorkOrders(organizationId: string, episodeId: string) {
@@ -16,10 +17,12 @@ export async function listEpisodeWorkOrders(organizationId: string, episodeId: s
     assigneePersonId: postWorkOrders.assigneePersonId, assigneeName: assignees.name, assigneeRole: postWorkOrders.assigneeRole, vendorCompanyId: postWorkOrders.vendorCompanyId,
     priority: postWorkOrders.priority, isBlocking: postWorkOrders.isBlocking, status: postWorkOrders.status, externalUrl: postWorkOrders.externalUrl,
     billingScope: postWorkOrders.billingScope, billingStatus: postWorkOrders.billingStatus, estimatedAmount: postWorkOrders.estimatedAmount, clientQuoteAmount: postWorkOrders.clientQuoteAmount, actualAmount: postWorkOrders.actualAmount, currency: postWorkOrders.currency, clientQuoteCurrency: postWorkOrders.clientQuoteCurrency, billingNotes: postWorkOrders.billingNotes, budgetLineId: workOrderBudgetLines.id,
+    approvedByPersonId: postWorkOrders.approvedByPersonId, approvedByName: approvers.name, approvedAt: postWorkOrders.approvedAt, approvalNote: postWorkOrders.approvalNote,
     dueAt: postWorkOrders.dueAt, completedAt: postWorkOrders.completedAt, createdAt: postWorkOrders.createdAt,
   }).from(postWorkOrders)
     .leftJoin(workflowStages, and(eq(postWorkOrders.workflowStageId, workflowStages.id), eq(workflowStages.organizationId, organizationId)))
     .leftJoin(assignees, and(eq(postWorkOrders.assigneePersonId, assignees.id), eq(assignees.organizationId, organizationId)))
+    .leftJoin(approvers, and(eq(postWorkOrders.approvedByPersonId, approvers.id), eq(approvers.organizationId, organizationId)))
     .leftJoin(workOrderBudgetLines, and(eq(workOrderBudgetLines.workOrderId, postWorkOrders.id), eq(workOrderBudgetLines.organizationId, organizationId)))
     .where(and(eq(postWorkOrders.organizationId, organizationId), eq(postWorkOrders.episodeId, episodeId)))
     .orderBy(asc(postWorkOrders.status), asc(postWorkOrders.dueAt), asc(postWorkOrders.createdAt));

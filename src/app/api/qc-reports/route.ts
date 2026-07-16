@@ -64,6 +64,7 @@ export async function POST(request: Request) {
       episodeId: episode.id,
       workflowStageId: episode.workflowStageId,
       kind: "qc_exception",
+      status: "in_progress",
       title: "QC failure — assign and resolve corrections",
       description: parsed.data.summary ?? "A QC report has failed. Review the external report and log each correction before re-QC.",
       department: "QC",

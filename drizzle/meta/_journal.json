@@ -470,6 +470,20 @@
       "when": 1784125648687,
       "tag": "0066_client_invoices",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1784125648688,
+      "tag": "0067_work_order_approval_statuses",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1784125648689,
+      "tag": "0068_work_order_approval_audit",
+      "breakpoints": true
     }
   ]
 }
