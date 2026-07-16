@@ -63,7 +63,7 @@ test.describe("QC lifecycle integration", () => {
       (${organizationId}, ${managerUserId}, 'member'),
       (${organizationId}, ${waiverUserId}, 'member')`;
     await sql`insert into organization_role_policies (organization_id, role, label, permissions) values
-      (${organizationId}, 'qc_verifier', 'QC verifier', '["manage_qc","verify_qc","approve_reviews","update_assigned_work"]'::jsonb),
+      (${organizationId}, 'qc_verifier', 'QC verifier', '["manage_qc","verify_qc","update_assigned_work"]'::jsonb),
       (${organizationId}, 'qc_recorder', 'QC recorder', '["manage_qc"]'::jsonb),
       (${organizationId}, 'qc_waiver', 'QC waiver', '["manage_qc","waive_qc"]'::jsonb),
       (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb),

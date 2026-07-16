@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { getDb } from "@/lib/db";
 import { activityLog, episodeWorkflowApprovals, episodeWorkflowTracks, episodes, people, postWorkOrders, postWorkflows, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
-import { can, canManageEpisodes, isAssignedToEpisode } from "@/lib/permissions";
+import { canManageEpisodes, isAssignedToEpisode } from "@/lib/permissions";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { createStageWorkOrders } from "@/lib/work-orders";
@@ -66,7 +66,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ep
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ episodeId: string }> }) {
-  if (!(await can("approve_reviews"))) return NextResponse.json({ error: "You do not have permission to approve workflow gates." }, { status: 403 });
   const parsed = approvalActionSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: "Choose a valid workflow sign-off action." }, { status: 400 });
   const { episodeId } = await params;

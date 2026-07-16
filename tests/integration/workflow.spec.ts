@@ -128,14 +128,17 @@ test.describe("Configurable workflow integration", () => {
     await expect(stages.nth(3)).toContainText("Graphics finishing");
   });
 
-  test("requires the tenant approval permission even when the user is the selected signer", async ({ page }) => {
+  test("allows the selected episode signer without a separate role permission", async ({ page }) => {
     await sql`update episode_team_assignments set is_lead = case when person_id = ${viewerPersonId} then true else false end where organization_id = ${organizationId} and episode_id = ${episodeId}`;
     const assumedViewer = await page.request.post("/api/debug/user", { data: { userId: viewerUserId } });
     expect(assumedViewer.status()).toBe(200);
     await activateWorkflowLab(page);
     const response = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: editorialStageId, action: "sign_off" } });
-    expect(response.status()).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "You do not have permission to approve workflow gates." });
+    expect(response.status()).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ stageComplete: true });
+    await sql`delete from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    await sql`delete from episode_workflow_tracks where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    await sql`update episodes set workflow_stage_id = ${editorialStageId} where id = ${episodeId}`;
     await sql`update episode_team_assignments set is_lead = case when person_id = ${mayaPersonId} then true else false end where organization_id = ${organizationId} and episode_id = ${episodeId}`;
     const assumedMaya = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
     expect(assumedMaya.status()).toBe(200);
@@ -163,11 +166,6 @@ test.describe("Configurable workflow integration", () => {
     await sql`delete from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId}`;
     await sql`delete from episode_workflow_tracks where organization_id = ${organizationId} and episode_id = ${episodeId}`;
     await sql`update episodes set workflow_stage_id = ${editorialStageId} where id = ${episodeId}`;
-    await sql`
-      insert into organization_role_policies (organization_id, role, label, permissions)
-      values (${organizationId}, 'post_supervisor', 'Post Supervisor', ${JSON.stringify(["approve_reviews"])})
-      on conflict (organization_id, role) do update set permissions = excluded.permissions
-    `;
     await sql`update episode_team_assignments set is_lead = case when person_id = ${viewerPersonId} then true else false end where organization_id = ${organizationId} and episode_id = ${episodeId}`;
 
     const assumedViewer = await page.request.post("/api/debug/user", { data: { userId: viewerUserId } });
@@ -269,11 +267,6 @@ test.describe("Configurable workflow integration", () => {
   });
 
   test("sends a shared-role sign-off only to the episode’s selected signer", async ({ page }) => {
-    await sql`
-      insert into organization_role_policies (organization_id, role, label, permissions)
-      values (${organizationId}, 'post_supervisor', 'Post Supervisor', ${JSON.stringify(["approve_reviews"])})
-      on conflict (organization_id, role) do update set permissions = excluded.permissions
-    `;
     await sql`update episodes set workflow_stage_id = ${graphicsStageId} where id = ${episodeId}`;
     const assumedUser = await page.request.post("/api/debug/user", { data: { userId: viewerUserId } });
     expect(assumedUser.status()).toBe(200);

@@ -4,10 +4,10 @@ import { db } from "@/lib/db";
 import { episodeTeamAssignments, episodes, organizationRolePolicies } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 
-export const permissions = ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "manage_work_orders", "approve_work_orders", "update_assigned_work", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "manage_qc", "verify_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "manage_catering", "view_assigned"] as const;
+export const permissions = ["manage_shows", "manage_bookings", "manage_reviews", "manage_work_orders", "approve_work_orders", "update_assigned_work", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "manage_qc", "verify_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "manage_catering", "view_assigned"] as const;
 export type Permission = (typeof permissions)[number];
 export type TenantRolePolicy = { role: string; label: string; permissions: Permission[] };
-export const guestRolePolicy: TenantRolePolicy = { role: "guest", label: "Guest", permissions: ["approve_reviews", "view_assigned"] };
+export const guestRolePolicy: TenantRolePolicy = { role: "guest", label: "Guest", permissions: ["view_assigned"] };
 export const isFixedRole = (role: string) => role === guestRolePolicy.role;
 
 /** Roles are tenant data, apart from the fixed external Guest role. */
@@ -90,6 +90,6 @@ export async function isAssignedToEpisode(episodeId: string) {
 export async function roleHome() {
   if (await can("manage_catering")) return "/runner";
   if (await can("manage_budget")) return "/budget";
-  if ((await can("approve_reviews")) || (await can("update_assigned_work"))) return "/review";
+  if (await can("update_assigned_work")) return "/review";
   return "/episodes";
 }

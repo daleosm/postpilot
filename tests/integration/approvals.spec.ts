@@ -69,9 +69,9 @@ test.describe("Approvals integration", () => {
     `;
     await sql`
       insert into organization_role_policies (organization_id, role, label, permissions) values
-        (${organizationId}, 'editor', 'Editor', ${JSON.stringify(["approve_reviews"])}),
-        (${organizationId}, 'producer', 'Producer', ${JSON.stringify(["approve_reviews"])}),
-        (${organizationId}, 'post_supervisor', 'Post Supervisor', ${JSON.stringify(["manage_shows", "approve_reviews"])})
+        (${organizationId}, 'editor', 'Editor', ${JSON.stringify([])}),
+        (${organizationId}, 'producer', 'Producer', ${JSON.stringify([])}),
+        (${organizationId}, 'post_supervisor', 'Post Supervisor', ${JSON.stringify(["manage_shows"])})
     `;
     await sql`
       insert into people (id, organization_id, user_id, name, email, role) values

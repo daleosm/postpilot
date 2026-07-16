@@ -491,6 +491,13 @@
       "when": 1784125648690,
       "tag": "0069_online_editor_show_access",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1784125648691,
+      "tag": "0070_remove_workflow_gate_permission",
+      "breakpoints": true
     }
   ]
 }

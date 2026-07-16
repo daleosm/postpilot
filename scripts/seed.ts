@@ -103,14 +103,14 @@ const specialistRoleSeeds: Array<{ role: PersonRole; title: string }> = [
 ];
 
 const defaultRolePolicies: Record<string, string[]> = {
-  guest: ["approve_reviews", "view_assigned"],
-  post_supervisor: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "view_assigned"],
-  producer: ["manage_shows", "manage_bookings", "manage_reviews", "approve_reviews", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "view_assigned"],
+  guest: ["view_assigned"],
+  post_supervisor: ["manage_shows", "manage_bookings", "manage_reviews", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "view_assigned"],
+  producer: ["manage_shows", "manage_bookings", "manage_reviews", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "view_assigned"],
   head_of_production: ["manage_shows", "manage_bookings", "manage_work_orders", "manage_budget", "request_catering", "view_assigned"],
   finance: ["manage_budget", "approve_time", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "view_assigned"],
   runner: ["request_catering", "manage_catering", "view_assigned"],
   qc: ["update_assigned_work", "manage_qc", "verify_qc", "request_catering", "view_assigned"],
-  editor: ["approve_reviews", "update_assigned_work", "request_catering", "view_assigned"],
+  editor: ["update_assigned_work", "request_catering", "view_assigned"],
   assistant_editor: ["update_assigned_work", "request_catering", "view_assigned"],
   online_editor: ["manage_shows", "update_assigned_work", "request_catering", "view_assigned"],
   colorist: ["update_assigned_work", "request_catering", "view_assigned"],
@@ -119,10 +119,10 @@ const defaultRolePolicies: Record<string, string[]> = {
   rerecording_mixer: ["update_assigned_work", "request_catering", "view_assigned"],
   vfx_coordinator: ["update_assigned_work", "request_catering", "view_assigned"],
   vfx_supervisor: ["update_assigned_work", "request_catering", "view_assigned"],
-  director: ["approve_reviews", "view_assigned"],
-  network_client_executive: ["approve_reviews", "view_assigned"],
-  network_client_representative: ["approve_reviews", "view_assigned"],
-  client: ["approve_reviews", "view_assigned"],
+  director: ["view_assigned"],
+  network_client_executive: ["view_assigned"],
+  network_client_representative: ["view_assigned"],
+  client: ["view_assigned"],
 };
 
 function roleLabel(role: string) { return role.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }

@@ -37,7 +37,7 @@ function formatMoney(value: number, currency: string) {
 }
 
 export default async function DashboardPage() {
-  const [organizationContext, mayManageShows, mayViewAssigned, mayApproveReviews, mayUpdateAssigned, mayManageBudget, mayManageCatering] = await Promise.all([getActiveOrganizationContext(), can("manage_shows"), can("view_assigned"), can("approve_reviews"), can("update_assigned_work"), can("manage_budget"), can("manage_catering")]);
+  const [organizationContext, mayManageShows, mayViewAssigned, mayUpdateAssigned, mayManageBudget, mayManageCatering] = await Promise.all([getActiveOrganizationContext(), can("manage_shows"), can("view_assigned"), can("update_assigned_work"), can("manage_budget"), can("manage_catering")]);
   if (!organizationContext?.organization && !isDebugDemoMode) {
     return (
       <div className="panel mx-auto mt-20 max-w-lg p-8 text-center">
@@ -53,7 +53,7 @@ export default async function DashboardPage() {
   }
   if (!mayManageShows && mayManageCatering) redirect("/runner");
   if (!mayManageShows && mayManageBudget) redirect("/budget");
-  if (!mayManageShows && (mayApproveReviews || mayUpdateAssigned)) redirect("/review");
+  if (!mayManageShows && mayUpdateAssigned) redirect("/review");
   const screen = await getCommandCenterData();
 
   if (!screen) {

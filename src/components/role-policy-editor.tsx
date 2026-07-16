@@ -11,7 +11,6 @@ const permissionLabels: Record<string, string> = {
   manage_shows: "Shows & episodes",
   manage_bookings: "Bookings",
   manage_reviews: "Approval administration",
-  approve_reviews: "Approve workflow gates",
   manage_work_orders: "Manage work orders",
   approve_work_orders: "Approve work orders",
   update_assigned_work: "Update assigned work",
