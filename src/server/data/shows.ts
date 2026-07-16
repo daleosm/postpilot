@@ -1,10 +1,9 @@
 import "server-only";
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { crmCompanies, crmContacts, episodeTeamAssignments, episodes, people, seasons, showContacts, shows } from "@/lib/db/schema";
-import { getDashboardData } from "./dashboard";
+import { activityLog, crmCompanies, crmContacts, episodeTeamAssignments, episodes, people, seasons, showContacts, shows } from "@/lib/db/schema";
 import { listEpisodes } from "./episodes";
 
 export async function listShows(organizationId: string) {
@@ -68,15 +67,20 @@ export async function listShowEpisodeTeam(organizationId: string, showId: string
 }
 
 export async function getShowWorkspace(organizationId: string, showId: string) {
-  const [show, episodeRows, team, dashboard, showRows, peopleRows, contactAssignments, contactOptions] = await Promise.all([
+  const [show, episodeRows, team, showRows, peopleRows, contactAssignments, contactOptions, workflowActivity] = await Promise.all([
     getShow(organizationId, showId),
     listEpisodes(organizationId, showId),
     listShowEpisodeTeam(organizationId, showId),
-    getDashboardData(organizationId),
     listShows(organizationId),
     getDb().select({ id: people.id, name: people.name, role: people.role }).from(people).where(and(eq(people.organizationId, organizationId), eq(people.isActive, true))).orderBy(asc(people.name)),
     getDb().select({ responsibility: showContacts.responsibility, name: crmContacts.name, title: crmContacts.title, email: crmContacts.email, phone: crmContacts.phone, companyName: crmCompanies.name }).from(showContacts).innerJoin(crmContacts, eq(showContacts.contactId, crmContacts.id)).innerJoin(crmCompanies, eq(crmContacts.companyId, crmCompanies.id)).where(and(eq(showContacts.organizationId, organizationId), eq(showContacts.showId, showId), eq(crmContacts.organizationId, organizationId), eq(crmCompanies.organizationId, organizationId))),
     getDb().select({ id: crmContacts.id, name: crmContacts.name, contactType: crmContacts.contactType, companyName: crmCompanies.name }).from(crmContacts).innerJoin(crmCompanies, eq(crmContacts.companyId, crmCompanies.id)).where(and(eq(crmContacts.organizationId, organizationId), eq(crmCompanies.organizationId, organizationId))).orderBy(asc(crmContacts.name)),
+    getDb().select({ id: activityLog.id, action: activityLog.action, metadata: activityLog.metadata, createdAt: activityLog.createdAt, episodeId: episodes.id, episodeNumber: episodes.number, episodeTitle: episodes.title, seasonNumber: seasons.number }).from(activityLog)
+      .innerJoin(episodes, sql`${activityLog.entityId} = CAST(${episodes.id} AS text)`)
+      .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+      .innerJoin(shows, eq(seasons.showId, shows.id))
+      .where(and(eq(activityLog.organizationId, organizationId), eq(activityLog.entityType, "episode"), eq(activityLog.action, "workflow.stage_completed"), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.id, showId), eq(shows.organizationId, organizationId)))
+      .orderBy(desc(activityLog.createdAt)).limit(8),
   ]);
   if (!show) return null;
 
@@ -88,6 +92,6 @@ export async function getShowWorkspace(organizationId: string, showId: string) {
     people: peopleRows,
     contacts: contactAssignments,
     contactOptions,
-    activity: dashboard.activity,
+    activity: workflowActivity,
   };
 }

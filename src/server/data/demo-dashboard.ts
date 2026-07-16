@@ -21,7 +21,7 @@ export function getDemoCommandCenterData() {
       activity: [
         { id: "a1", action: "episode.status_updated", entityType: "episode", entityId: "demo-e4", metadata: { from: "review", to: "locked" }, createdAt: hoursFromNow(-1) },
         { id: "a2", action: "qc.issue_created", entityType: "episode", entityId: "demo-e7", metadata: { issueCount: 2 }, createdAt: hoursFromNow(-2) },
-        { id: "a3", action: "workflow.sign_off_recorded", entityType: "episode", entityId: "demo-e4", metadata: { stage: "Picture lock" }, createdAt: hoursFromNow(-4) },
+        { id: "a3", action: "workflow.stage_completed", entityType: "episode", entityId: "demo-e4", metadata: { stage: "Picture lock" }, createdAt: hoursFromNow(-4) },
         { id: "a4", action: "booking.confirmed", entityType: "booking", entityId: "b1", metadata: { suite: "Color Suite 1" }, createdAt: hoursFromNow(-7) },
         { id: "a5", action: "budget.line_updated", entityType: "budget_line", entityId: "bl3", metadata: { category: "VFX" }, createdAt: hoursFromNow(-10) },
       ],

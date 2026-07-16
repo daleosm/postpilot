@@ -149,5 +149,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ epi
     }
   }
   await db.insert(activityLog).values({ organizationId: context.organization.organizationId, actorUserId: context.userId, action: "workflow.signed_off", entityType: "episode", entityId: episodeId, metadata: { stage: stage.name, approvalRuleId: candidate.id, approverRole: candidate.approverRole, isRequired: candidate.isRequired, comment: parsed.data.comment || null, advancedTo: advancedTo?.name ?? null, advanceBlockedBy } });
+  if (stageWillBeApproved) await db.insert(activityLog).values({ organizationId: context.organization.organizationId, actorUserId: context.userId, action: "workflow.stage_completed", entityType: "episode", entityId: episodeId, metadata: { stage: stage.name, advancedTo: advancedTo?.name ?? null, advanceBlockedBy } });
   return NextResponse.json({ ok: true, status: "approved", approvalRuleId: candidate.id, stageComplete: stageWillBeApproved, advancedTo, advanceBlockedBy });
 }
