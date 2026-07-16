@@ -144,6 +144,22 @@ test.describe("Configurable workflow integration", () => {
     expect(assumedMaya.status()).toBe(200);
   });
 
+  test("keeps Approvals available to episode-team members without a pending sign-off", async ({ page }) => {
+    await sql`delete from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    await sql`update episodes set workflow_stage_id = ${editorialStageId} where id = ${episodeId}`;
+    await sql`update episode_team_assignments set is_lead = case when person_id = ${mayaPersonId} then true else false end where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    const assumedViewer = await page.request.post("/api/debug/user", { data: { userId: viewerUserId } });
+    expect(assumedViewer.status()).toBe(200);
+    await activateWorkflowLab(page);
+    await page.goto(`/episodes/${episodeId}`);
+    await expect(page.getByRole("link", { name: "Approvals" })).toBeVisible();
+    await page.goto("/review");
+    await expect(page.getByRole("heading", { name: "Approvals", exact: true })).toBeVisible();
+    await expect(page.getByText("No workflow stages are waiting for your sign-off.")).toBeVisible();
+    const assumedMaya = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
+    expect(assumedMaya.status()).toBe(200);
+  });
+
   test("requires an explicit workflow signer even when only one person has the role", async ({ page }) => {
     await sql`update episodes set workflow_stage_id = ${editorialStageId} where id = ${episodeId}`;
     await sql`update episode_team_assignments set is_lead = false where organization_id = ${organizationId} and episode_id = ${episodeId}`;

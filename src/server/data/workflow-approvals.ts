@@ -1,10 +1,27 @@
 import "server-only";
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, notInArray, or } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { episodeWorkflowApprovals, episodeWorkflowTracks, episodes, people, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
+import { episodeTeamAssignments, episodeWorkflowApprovals, episodeWorkflowTracks, episodes, people, postWorkOrders, seasons, shows, workflowStageApprovalRules, workflowStages } from "@/lib/db/schema";
 import { resolveEpisodeWorkflowSigners } from "@/lib/workflow-signoffs";
+
+/** Whether the user has an episode-team or active work-order connection to this post house. */
+export async function hasApprovalWorkspace(organizationId: string, userId: string) {
+  const db = getDb();
+  const [person] = await db.select({ id: people.id, role: people.role }).from(people)
+    .where(and(eq(people.organizationId, organizationId), eq(people.userId, userId))).limit(1);
+  if (!person) return false;
+
+  const [teamAssignment, workOrder] = await Promise.all([
+    db.select({ id: episodeTeamAssignments.id }).from(episodeTeamAssignments)
+      .innerJoin(episodes, eq(episodeTeamAssignments.episodeId, episodes.id))
+      .where(and(eq(episodeTeamAssignments.organizationId, organizationId), eq(episodeTeamAssignments.personId, person.id), eq(episodes.organizationId, organizationId))).limit(1),
+    db.select({ id: postWorkOrders.id }).from(postWorkOrders)
+      .where(and(eq(postWorkOrders.organizationId, organizationId), notInArray(postWorkOrders.status, ["complete", "cancelled"]), or(eq(postWorkOrders.assigneePersonId, person.id), eq(postWorkOrders.assigneeRole, person.role)))).limit(1),
+  ]);
+  return Boolean(teamAssignment[0] || workOrder[0]);
+}
 
 /** Current workflow stages for which this user is the next configured sign-off. */
 export async function listWorkflowSignOffInbox(organizationId: string, userId: string) {

@@ -5,7 +5,7 @@ export { getEpisodeInvoiceReadiness, getInvoiceSettings } from "./client-invoice
 export { getDashboardData } from "./dashboard";
 export { getDemoCommandCenterData } from "./demo-dashboard";
 export { getEpisode, getEpisodeWorkspace, listEpisodes } from "./episodes";
-export { listWorkflowSignOffInbox } from "./workflow-approvals";
+export { hasApprovalWorkspace, listWorkflowSignOffInbox } from "./workflow-approvals";
 export { listEpisodeWorkOrders, listWorkOrderInbox } from "./work-orders";
 export { getScheduleResources, listMyTimeBookings, listRooms, listSchedule } from "./schedule";
 export { getShow, getShowWorkspace, listShowEpisodeTeam, listShows } from "./shows";

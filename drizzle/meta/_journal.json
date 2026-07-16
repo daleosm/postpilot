@@ -498,6 +498,13 @@
       "when": 1784125648691,
       "tag": "0070_remove_workflow_gate_permission",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1784125648692,
+      "tag": "0071_remove_approval_administration_permission",
+      "breakpoints": true
     }
   ]
 }
