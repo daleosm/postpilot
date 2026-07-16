@@ -484,6 +484,13 @@
       "when": 1784125648689,
       "tag": "0068_work_order_approval_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1784125648690,
+      "tag": "0069_online_editor_show_access",
+      "breakpoints": true
     }
   ]
 }

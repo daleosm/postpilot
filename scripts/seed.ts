@@ -112,7 +112,7 @@ const defaultRolePolicies: Record<string, string[]> = {
   qc: ["update_assigned_work", "manage_qc", "verify_qc", "request_catering", "view_assigned"],
   editor: ["approve_reviews", "update_assigned_work", "request_catering", "view_assigned"],
   assistant_editor: ["update_assigned_work", "request_catering", "view_assigned"],
-  online_editor: ["update_assigned_work", "request_catering", "view_assigned"],
+  online_editor: ["manage_shows", "update_assigned_work", "request_catering", "view_assigned"],
   colorist: ["update_assigned_work", "request_catering", "view_assigned"],
   sound_mixer: ["update_assigned_work", "request_catering", "view_assigned"],
   supervising_sound_editor: ["update_assigned_work", "request_catering", "view_assigned"],
