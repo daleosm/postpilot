@@ -1,4 +1,4 @@
-import { and, eq, notInArray } from "drizzle-orm";
+import { and, desc, eq, notInArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { writeAuditEvent } from "@/lib/audit";
@@ -24,6 +24,18 @@ export async function POST(request: Request) {
     .where(and(eq(people.organizationId, context.organization.organizationId), eq(people.userId, context.userId))).limit(1);
   if (parsed.data.status === "waived" && !(await can("waive_qc"))) return NextResponse.json({ error: "Your role needs the QC waiver permission." }, { status: 403 });
   if (parsed.data.status === "passed" && !(await can("verify_qc"))) return NextResponse.json({ error: "Your role needs the QC verification permission to record a passed result." }, { status: 403 });
+  const [latestReport] = await db.select({ id: qcReports.id, status: qcReports.status })
+    .from(qcReports)
+    .where(and(eq(qcReports.organizationId, context.organization.organizationId), eq(qcReports.episodeId, episode.id)))
+    .orderBy(desc(qcReports.createdAt))
+    .limit(1);
+
+  if (["passed", "waived"].includes(latestReport?.status ?? "")) {
+    return NextResponse.json({ error: "QC is already final. No further QC result can be recorded for this episode." }, { status: 409 });
+  }
+  if (latestReport?.status === "failed" && !["draft", "in_progress", "waived"].includes(parsed.data.status)) {
+    return NextResponse.json({ error: "Start a new re-QC run before recording another QC decision." }, { status: 409 });
+  }
   if (parsed.data.status === "passed") {
     const [openIssues, openExceptions] = await Promise.all([
       db.select({ id: qcIssues.id }).from(qcIssues).innerJoin(qcReports, eq(qcIssues.qcReportId, qcReports.id)).where(and(eq(qcIssues.organizationId, context.organization.organizationId), eq(qcReports.organizationId, context.organization.organizationId), eq(qcReports.episodeId, episode.id), eq(qcIssues.status, "open"))).limit(1),
@@ -32,12 +44,20 @@ export async function POST(request: Request) {
     if (openIssues.length || openExceptions.length) return NextResponse.json({ error: "Resolve or waive every open QC issue and correction work order before recording a passed re-QC result." }, { status: 409 });
   }
   const qcStatus = parsed.data.status === "passed" ? "passed" : parsed.data.status === "waived" ? "waived" : parsed.data.status === "failed" ? "needs_attention" : "in_progress";
-  const [report] = await db.insert(qcReports).values({
-    ...parsed.data,
-    organizationId: context.organization.organizationId,
+  const reportValues = {
+    status: parsed.data.status,
+    reportUrl: parsed.data.reportUrl ?? null,
+    checksum: parsed.data.checksum ?? null,
+    summary: parsed.data.summary ?? null,
+    waiverReason: parsed.data.waiverReason ?? null,
     waivedByPersonId: parsed.data.status === "waived" ? actor?.id ?? null : null,
     completedAt: ["passed", "failed", "waived"].includes(parsed.data.status) ? new Date() : null,
-  }).returning({ id: qcReports.id });
+    updatedAt: new Date(),
+  };
+  const activeRun = latestReport && ["draft", "in_progress"].includes(latestReport.status) ? latestReport : null;
+  const [report] = activeRun
+    ? await db.update(qcReports).set(reportValues).where(and(eq(qcReports.id, activeRun.id), eq(qcReports.organizationId, context.organization.organizationId))).returning({ id: qcReports.id })
+    : await db.insert(qcReports).values({ ...reportValues, organizationId: context.organization.organizationId, episodeId: episode.id }).returning({ id: qcReports.id });
   if (parsed.data.status === "failed") {
     await db.insert(postWorkOrders).values({
       organizationId: context.organization.organizationId,
@@ -54,7 +74,7 @@ export async function POST(request: Request) {
       createdByUserId: context.userId,
     });
   }
-  await db.update(episodes).set({ qcStatus, updatedAt: new Date() }).where(eq(episodes.id, episode.id));
+  await db.update(episodes).set({ qcStatus, updatedAt: new Date() }).where(and(eq(episodes.id, episode.id), eq(episodes.organizationId, context.organization.organizationId)));
   await writeAuditEvent({ organizationId: context.organization.organizationId, actorUserId: context.userId, action: `qc.${parsed.data.status}`, entityType: "qc_report", entityId: report.id, metadata: { episodeId: episode.id } });
-  return NextResponse.json({ ...report, qcStatus }, { status: 201 });
+  return NextResponse.json({ ...report, status: parsed.data.status, qcStatus, updated: Boolean(activeRun) }, { status: activeRun ? 200 : 201 });
 }

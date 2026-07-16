@@ -11,6 +11,7 @@ export async function getBudgetData(organizationId: string) {
   const [storedLines, invoices, workOrderCharges] = await Promise.all([
     db.select({
       id: budgetLines.id,
+      code: budgetLines.code,
       workOrderId: budgetLines.workOrderId,
       vendorInvoiceId: budgetLines.vendorInvoiceId,
       category: budgetLines.category,
@@ -144,7 +145,11 @@ async function listBookingCosts(organizationId: string, episodeId?: string, actu
   }));
 }
 
-function applyBookingCostRollups<T extends { episodeId: string | null; category: string; budgetedAmount: string | number; actualAmount: string | number }>(lines: T[], bookingCosts: Awaited<ReturnType<typeof listBookingCosts>>) {
+function bookingBudgetCode(category: string) {
+  return `BOOKING-${category.toUpperCase().replaceAll(/[^A-Z0-9]+/g, "-")}`;
+}
+
+function applyBookingCostRollups<T extends { code?: string | null; episodeId: string | null; category: string; budgetedAmount: string | number; actualAmount: string | number }>(lines: T[], bookingCosts: Awaited<ReturnType<typeof listBookingCosts>>) {
   const rollups = new Map<string, { planned: number; actual: number }>();
   for (const booking of bookingCosts) {
     if (!booking.category || booking.plannedCost === null) continue;
@@ -155,7 +160,10 @@ function applyBookingCostRollups<T extends { episodeId: string | null; category:
     rollups.set(key, rollup);
   }
   return lines.map((line) => {
-    const rollup = line.episodeId ? rollups.get(`${line.episodeId}:${line.category}`) : undefined;
+    // Manual estimates and booking-derived costs can share a category. Only the
+    // generated booking line is live, otherwise a time confirmation would
+    // replace a producer's separate manual estimate or double-count it on read.
+    const rollup = line.episodeId && line.code === bookingBudgetCode(line.category) ? rollups.get(`${line.episodeId}:${line.category}`) : undefined;
     return rollup ? { ...line, budgetedAmount: rollup.planned, actualAmount: rollup.actual } : line;
   });
 }

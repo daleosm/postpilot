@@ -7,7 +7,7 @@ import { useState } from "react";
 import { RateOverrideCard } from "@/components/rate-override-card";
 import type { ServiceRate } from "@/components/service-rate-card";
 
-type Scope = { type: "network"; network: string } | { type: "show"; showId: string };
+type Scope = { type: "network"; network: string } | { type: "show"; showId: string } | { type: "episode"; episodeId: string };
 
 /** Keeps rate maintenance intentional instead of expanding it into every budget row. */
 export function RateCardDialog({ rates, scope, title }: { rates: ServiceRate[]; scope: Scope; title: string }) {

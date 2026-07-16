@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -10,6 +10,8 @@ import { can } from "@/lib/permissions";
 import { getEpisodeInvoiceReadiness, getInvoiceSettings } from "@/server/data";
 
 const requestSchema = z.object({ episodeId: z.string().uuid() });
+
+class InvoiceIssueConflict extends Error {}
 
 /** Issues an immutable client invoice from approved, uninvoiced episode charges. */
 export async function POST(request: Request) {
@@ -38,9 +40,14 @@ export async function POST(request: Request) {
   const issuerName = settings?.legalName?.trim() || organization.organizationName;
   const billingIds = readiness.billables.map((item) => item.id);
 
-  const invoice = await getDb().transaction(async (tx) => {
+  let invoice: { id: string; invoiceNumber: string };
+  try {
+    invoice = await getDb().transaction(async (tx) => {
     // A tenant-scoped transaction lock preserves the legal sequential invoice number under concurrent issue requests.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`postpilot-client-invoices:${organizationId}`}))`);
+    const claimable = await tx.select({ id: billables.id }).from(billables)
+      .where(and(eq(billables.organizationId, organizationId), inArray(billables.id, billingIds), eq(billables.status, "approved"), isNull(billables.clientInvoiceId)));
+    if (claimable.length !== billingIds.length) throw new InvoiceIssueConflict("One or more client charges were already invoiced.");
     const [latest] = await tx.select({ sequence: sql<number>`coalesce(max(${clientInvoices.sequence}), 0)` }).from(clientInvoices)
       .where(eq(clientInvoices.organizationId, organizationId));
     const sequence = Number(latest?.sequence ?? 0) + 1;
@@ -81,10 +88,16 @@ export async function POST(request: Request) {
       unitAmount: item.amount,
       amount: item.amount,
     })));
-    await tx.update(billables).set({ clientInvoiceId: created.id, status: "invoiced", invoiceDate, dueDate, updatedAt: new Date() })
-      .where(and(eq(billables.organizationId, organizationId), inArray(billables.id, billingIds)));
+    const linked = await tx.update(billables).set({ clientInvoiceId: created.id, status: "invoiced", invoiceDate, dueDate, updatedAt: new Date() })
+      .where(and(eq(billables.organizationId, organizationId), inArray(billables.id, billingIds), eq(billables.status, "approved"), isNull(billables.clientInvoiceId)))
+      .returning({ id: billables.id });
+    if (linked.length !== billingIds.length) throw new InvoiceIssueConflict("One or more client charges were already invoiced.");
     return created;
-  });
+    });
+  } catch (error) {
+    if (error instanceof InvoiceIssueConflict) return NextResponse.json({ error: error.message }, { status: 409 });
+    throw error;
+  }
 
   await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "client_invoice.issued", entityType: "client_invoice", entityId: invoice.id, metadata: { episodeId: readiness.episode.id, invoiceNumber: invoice.invoiceNumber, subtotal, taxAmount, totalAmount, currency } });
   return NextResponse.json(invoice, { status: 201 });

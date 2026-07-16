@@ -23,8 +23,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
   const projection = booking.episodeId ? await getBookingCostProjection(organizationId, booking.episodeId, { bookingId: booking.id, actualStartsAt: parsed.data.actualStartsAt, actualEndsAt: parsed.data.actualEndsAt, overtimeMinutes: parsed.data.overtimeMinutes }) : null;
   let budgetLine: { id: string; actualAmount: string | number } | null = null;
   if (projection && booking.episodeId) {
+    const bookingCode = `BOOKING-${projection.category.toUpperCase().replaceAll(/[^A-Z0-9]+/g, "-")}`;
     const [existing] = await db.select({ id: budgetLines.id, actualAmount: budgetLines.actualAmount }).from(budgetLines)
-      .where(and(eq(budgetLines.organizationId, organizationId), eq(budgetLines.episodeId, booking.episodeId), eq(budgetLines.category, projection.category))).limit(1);
+      .where(and(eq(budgetLines.organizationId, organizationId), eq(budgetLines.episodeId, booking.episodeId), eq(budgetLines.code, bookingCode))).limit(1);
     budgetLine = existing ?? null;
   }
   if (projection && booking.episodeId && !budgetLine) {

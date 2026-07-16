@@ -28,6 +28,13 @@ const foreignSeasonId = "94000000-0000-4000-8000-000000000016";
 const foreignEpisodeId = "94000000-0000-4000-8000-000000000017";
 const foreignRateId = "94000000-0000-4000-8000-000000000018";
 const foreignLineId = "94000000-0000-4000-8000-000000000019";
+const crossShowId = "94000000-0000-4000-8000-000000000020";
+const crossSeasonId = "94000000-0000-4000-8000-000000000021";
+const crossEpisodeId = "94000000-0000-4000-8000-000000000022";
+const secondBookingId = "94000000-0000-4000-8000-000000000023";
+const partialBookingId = "94000000-0000-4000-8000-000000000024";
+const multiDayBookingId = "94000000-0000-4000-8000-000000000025";
+const cancelledBookingId = "94000000-0000-4000-8000-000000000026";
 
 function linePayload(overrides: Record<string, unknown> = {}) {
   return { episodeId, category: "editor", description: "Editorial support", budgetedAmount: 100, actualAmount: 25, costType: "internal", ...overrides };
@@ -51,15 +58,16 @@ test.describe("Budget integration", () => {
     await sql`insert into organization_role_policies (organization_id, role, label, permissions) values (${organizationId}, 'finance', 'Finance', '["manage_budget"]'::jsonb), (${organizationId}, 'rate_manager', 'Rate manager', '["manage_rates"]'::jsonb), (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb)`;
     await sql`insert into people (id, organization_id, user_id, name, email, role) values (${managerPersonId}, ${organizationId}, ${managerUserId}, 'Budget Lab Manager', 'budget-manager@postpilot.test', 'producer'), (${financePersonId}, ${organizationId}, ${financeUserId}, 'Budget Lab Finance', 'budget-finance@postpilot.test', 'finance'), (${ratePersonId}, ${organizationId}, ${rateUserId}, 'Budget Lab Rates', 'budget-rates@postpilot.test', 'rate_manager'), (${artistPersonId}, ${organizationId}, ${artistUserId}, 'Budget Lab Artist', 'budget-artist@postpilot.test', 'editor')`;
     await sql`insert into rooms (id, organization_id, name, type) values (${roomId}, ${organizationId}, 'Budget Edit 1', 'edit_bay')`;
-    await sql`insert into shows (id, organization_id, title, code, network, time_zone) values (${showId}, ${organizationId}, 'Budget Series', 'BUD', 'Budget Network', 'Europe/London'), (${foreignShowId}, ${foreignOrganizationId}, 'Foreign Budget Series', 'FBUD', 'Foreign Network', 'Europe/London')`;
-    await sql`insert into seasons (id, organization_id, show_id, number) values (${seasonId}, ${organizationId}, ${showId}, 1), (${foreignSeasonId}, ${foreignOrganizationId}, ${foreignShowId}, 1)`;
-    await sql`insert into episodes (id, organization_id, season_id, number, title, status, qc_status) values (${episodeId}, ${organizationId}, ${seasonId}, 1, 'Budget episode', 'assembly', 'not_started'), (${otherEpisodeId}, ${organizationId}, ${seasonId}, 2, 'Other budget episode', 'assembly', 'not_started'), (${foreignEpisodeId}, ${foreignOrganizationId}, ${foreignSeasonId}, 1, 'Foreign budget episode', 'assembly', 'not_started')`;
+    await sql`insert into shows (id, organization_id, title, code, network, time_zone) values (${showId}, ${organizationId}, 'Budget Series', 'BUD', 'Budget Network', 'Europe/London'), (${crossShowId}, ${organizationId}, 'No-cost Series', 'EMPTY', 'No-cost Network', 'Europe/London'), (${foreignShowId}, ${foreignOrganizationId}, 'Foreign Budget Series', 'FBUD', 'Foreign Network', 'Europe/London')`;
+    await sql`insert into seasons (id, organization_id, show_id, number) values (${seasonId}, ${organizationId}, ${showId}, 1), (${crossSeasonId}, ${organizationId}, ${crossShowId}, 1), (${foreignSeasonId}, ${foreignOrganizationId}, ${foreignShowId}, 1)`;
+    await sql`insert into episodes (id, organization_id, season_id, number, title, status, qc_status) values (${episodeId}, ${organizationId}, ${seasonId}, 1, 'Budget episode', 'assembly', 'not_started'), (${otherEpisodeId}, ${organizationId}, ${seasonId}, 2, 'Other budget episode', 'assembly', 'not_started'), (${crossEpisodeId}, ${organizationId}, ${crossSeasonId}, 1, 'No-cost episode', 'assembly', 'not_started'), (${foreignEpisodeId}, ${foreignOrganizationId}, ${foreignSeasonId}, 1, 'Foreign budget episode', 'assembly', 'not_started')`;
     await sql`insert into bookings (id, organization_id, room_id, episode_id, person_id, title, starts_at, ends_at, status, booking_type) values (${bookingId}, ${organizationId}, ${roomId}, ${episodeId}, ${artistPersonId}, 'Budget edit day', '2035-07-10T09:00:00.000Z', '2035-07-10T18:00:00.000Z', 'confirmed', 'edit')`;
     await sql`insert into service_rates (id, organization_id, name, category, unit, rate, currency) values (${facilityRateId}, ${organizationId}, 'Edit suite day', 'Edit suite', 'day', '100.00', 'GBP'), (${foreignRateId}, ${foreignOrganizationId}, 'Foreign edit suite day', 'Edit suite', 'day', '300.00', 'GBP')`;
     await sql`insert into budget_lines (id, organization_id, show_id, season_id, episode_id, category, budgeted_amount, actual_amount, currency, cost_type) values (${foreignLineId}, ${foreignOrganizationId}, ${foreignShowId}, ${foreignSeasonId}, ${foreignEpisodeId}, 'editor', '100.00', '10.00', 'GBP', 'internal')`;
   });
 
   test.beforeEach(async () => {
+    await sql`delete from bookings where organization_id = ${organizationId} and id <> ${bookingId}`;
     await sql`delete from activity_log where organization_id = ${organizationId} and entity_type = 'budget_line'`;
     await sql`delete from budget_lines where organization_id = ${organizationId}`;
     await sql`delete from post_work_orders where organization_id = ${organizationId}`;
@@ -94,6 +102,16 @@ test.describe("Budget integration", () => {
     expect(gone).toBeUndefined();
     const events = await sql`select action from activity_log where organization_id = ${organizationId} and entity_type = 'budget_line' order by created_at`;
     expect(events.map((event) => event.action)).toEqual(["budget_line.created", "budget_line.updated", "budget_line.deleted"]);
+  });
+
+  test("derives show and season from a cross-show episode move instead of trusting client scope", async ({ page }) => {
+    await useSession(page, financeUserId);
+    const create = await page.request.post("/api/budget-lines", { data: linePayload({ showId: foreignShowId, seasonId: foreignSeasonId }) });
+    expect(create.status()).toBe(201);
+    const lineId = (await create.json()).id as string;
+    expect((await page.request.patch(`/api/budget-lines/${lineId}`, { data: { episodeId: crossEpisodeId, showId, seasonId } })).status()).toBe(200);
+    const [line] = await sql`select organization_id, show_id, season_id, episode_id from budget_lines where id = ${lineId}`;
+    expect(line).toMatchObject({ organization_id: organizationId, show_id: crossShowId, season_id: crossSeasonId, episode_id: crossEpisodeId });
   });
 
   test("rejects invalid, foreign, and source-managed budget line mutations", async ({ page }) => {
@@ -161,6 +179,69 @@ test.describe("Budget integration", () => {
     expect(actual.status()).toBe(201);
     const [line] = await sql`select budgeted_amount, actual_amount, currency from budget_lines where organization_id = ${organizationId} and episode_id = ${episodeId} and category = 'Edit suite'`;
     expect(line).toMatchObject({ budgeted_amount: "180.00", actual_amount: "180.00", currency: "GBP" });
+  });
+
+  test("keeps manual and booking-derived costs separate while rolling up multiple actual-time submissions", async ({ page }) => {
+    await useSession(page, financeUserId);
+    const manual = await page.request.post("/api/budget-lines", { data: linePayload({ category: "Edit suite", description: "Manual kit allowance", budgetedAmount: 75, actualAmount: 20 }) });
+    expect(manual.status()).toBe(201);
+
+    await sql`insert into bookings (id, organization_id, room_id, episode_id, person_id, title, starts_at, ends_at, status, booking_type) values (${secondBookingId}, ${organizationId}, ${roomId}, ${episodeId}, ${artistPersonId}, 'Second budget edit day', '2035-07-11T09:00:00.000Z', '2035-07-11T18:00:00.000Z', 'confirmed', 'edit')`;
+    await useSession(page, artistUserId);
+    expect((await page.request.post(`/api/bookings/${bookingId}/time-submissions`, { data: { actualStartsAt: "2035-07-10T09:00:00.000Z", actualEndsAt: "2035-07-10T18:00:00.000Z", overtimeMinutes: 0 } })).status()).toBe(201);
+    expect((await page.request.post(`/api/bookings/${secondBookingId}/time-submissions`, { data: { actualStartsAt: "2035-07-11T09:00:00.000Z", actualEndsAt: "2035-07-11T18:00:00.000Z", overtimeMinutes: 0 } })).status()).toBe(201);
+
+    const lines = await sql`select code, description, budgeted_amount, actual_amount from budget_lines where organization_id = ${organizationId} and episode_id = ${episodeId} and category = 'Edit suite' order by code nulls first`;
+    expect(lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: null, description: "Manual kit allowance", budgeted_amount: "75.00", actual_amount: "20.00" }),
+      expect.objectContaining({ code: "BOOKING-EDIT-SUITE", budgeted_amount: "200.00", actual_amount: "200.00" }),
+    ]));
+  });
+
+  test("uses facility-day arithmetic for partial and multi-day bookings and excludes cancelled time", async ({ page }) => {
+    await sql`insert into bookings (id, organization_id, room_id, episode_id, person_id, title, starts_at, ends_at, status, booking_type) values
+      (${partialBookingId}, ${organizationId}, ${roomId}, ${episodeId}, ${artistPersonId}, 'Half day edit', '2035-07-12T09:00:00.000Z', '2035-07-12T13:30:00.000Z', 'confirmed', 'edit'),
+      (${multiDayBookingId}, ${organizationId}, ${roomId}, ${episodeId}, ${artistPersonId}, 'Two day edit', '2035-07-14T09:00:00.000Z', '2035-07-15T18:00:00.000Z', 'confirmed', 'edit'),
+      (${cancelledBookingId}, ${organizationId}, ${roomId}, ${episodeId}, ${artistPersonId}, 'Cancelled edit', '2035-07-16T09:00:00.000Z', '2035-07-16T18:00:00.000Z', 'cancelled', 'edit')`;
+    await useSession(page, artistUserId);
+    expect((await page.request.post(`/api/bookings/${partialBookingId}/time-submissions`, { data: { actualStartsAt: "2035-07-12T09:00:00.000Z", actualEndsAt: "2035-07-12T13:30:00.000Z", overtimeMinutes: 0 } })).status()).toBe(201);
+    expect((await page.request.post(`/api/bookings/${multiDayBookingId}/time-submissions`, { data: { actualStartsAt: "2035-07-14T09:00:00.000Z", actualEndsAt: "2035-07-15T18:00:00.000Z", overtimeMinutes: 60 } })).status()).toBe(201);
+    const [line] = await sql`select budgeted_amount, actual_amount from budget_lines where organization_id = ${organizationId} and episode_id = ${episodeId} and code = 'BOOKING-EDIT-SUITE'`;
+    // The original booked day remains planned; actuals are 4.5h plus 19h.
+    expect(line).toMatchObject({ budgeted_amount: "350.00", actual_amount: "261.11" });
+  });
+
+  test("does not disclose foreign budget scopes and enforces read permissions", async ({ page }) => {
+    await useSession(page, artistUserId);
+    expect((await page.request.get(`/api/rate-card-overrides?type=episode&episodeId=${episodeId}`)).status()).toBe(403);
+
+    await useSession(page, managerUserId);
+    expect((await page.request.get(`/api/rate-card-overrides?type=episode&episodeId=${foreignEpisodeId}`)).status()).toBe(404);
+    await page.goto(`/budget?network=Foreign%20Network&show=Foreign%20Budget%20Series&episode=${foreignEpisodeId}`);
+    await expect(page.getByText("Foreign budget episode", { exact: true })).toHaveCount(0);
+
+  });
+
+  test("makes a no-cost show discoverable and supports the episode rate-card modal", async ({ page }) => {
+    await useSession(page, managerUserId);
+    await page.goto("/budget");
+    await expect(page.getByText("No-cost Network", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: /No-cost Network/ }).click();
+    await expect(page.getByText("No-cost Series", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: /No-cost Series/ }).click();
+    await page.getByRole("link", { name: /E01 No-cost episode/ }).click();
+    await expect(page).toHaveURL(new RegExp(`episode=${crossEpisodeId}`));
+    await page.reload();
+    const trigger = page.getByRole("button", { name: "Manage rate card", exact: true });
+    await trigger.click();
+    await expect(page.getByRole("heading", { name: "Episode service rate card", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Override", exact: true }).click();
+    await page.getByLabel("Rate", { exact: true }).fill("175");
+    await page.getByRole("button", { name: "Save override", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Edit override", exact: true })).toBeVisible();
+    const [item] = await sql`select rate from rate_card_items where organization_id = ${organizationId} and rate = '175.00'`;
+    expect(item).toMatchObject({ rate: "175.00" });
+    await page.getByRole("button", { name: "Close rate card", exact: true }).click();
   });
 
   test("supports the budget drill-down and manual line form in the UI", async ({ page }) => {

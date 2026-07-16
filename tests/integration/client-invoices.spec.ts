@@ -51,6 +51,18 @@ test.describe("Client invoice issuance", () => {
 
   test("requires terminal workflow and submitted actual time before issuing or exporting a PDF", async ({ page }) => {
     await useSession(page);
+    await sql`delete from invoice_settings where organization_id = ${organizationId}`;
+    const profileBlocked = await page.request.post("/api/client-invoices", { data: { episodeId } });
+    expect(profileBlocked.status()).toBe(409);
+    expect((await profileBlocked.json()).error).toContain("Complete the invoicing profile");
+    await sql`insert into invoice_settings (organization_id, legal_name, legal_address, billing_email, tax_name, tax_rate_percent, payment_terms_days, payment_instructions) values (${organizationId}, 'Invoice Lab Limited', '1 Billing Lane, London', 'accounts@invoice-lab.test', 'VAT', '0', 30, 'Pay by bank transfer.')`;
+
+    await sql`update shows set client_company_id = null where id = ${showId}`;
+    const clientBlocked = await page.request.post("/api/client-invoices", { data: { episodeId } });
+    expect(clientBlocked.status()).toBe(409);
+    expect((await clientBlocked.json()).error).toContain("Assign a client");
+    await sql`update shows set client_company_id = ${companyId} where id = ${showId}`;
+
     const workflowBlocked = await page.request.post("/api/client-invoices", { data: { episodeId } });
     expect(workflowBlocked.status()).toBe(409);
     expect((await workflowBlocked.json()).error).toContain("Complete the episode workflow");
@@ -63,14 +75,26 @@ test.describe("Client invoice issuance", () => {
     const actuals = await page.request.post(`/api/bookings/${bookingId}/time-submissions`, { data: { actualStartsAt: "2035-08-01T09:00:00.000Z", actualEndsAt: "2035-08-01T18:00:00.000Z", overtimeMinutes: 0 } });
     expect(actuals.status()).toBe(201);
 
-    const issued = await page.request.post("/api/client-invoices", { data: { episodeId } });
-    expect(issued.status()).toBe(201);
+    const issueResponses = await Promise.all([
+      page.request.post("/api/client-invoices", { data: { episodeId } }),
+      page.request.post("/api/client-invoices", { data: { episodeId } }),
+    ]);
+    expect(issueResponses.map((response) => response.status()).sort()).toEqual([201, 409]);
+    const issued = issueResponses.find((response) => response.status() === 201);
+    if (!issued) throw new Error("Expected exactly one invoice issue request to succeed.");
     const invoice = await issued.json() as { id: string; invoiceNumber: string };
     expect(invoice.invoiceNumber).toMatch(/^INVOICELAB-2035|^INVOICELAB-20/);
     const [stored] = await sql`select status, subtotal_amount, total_amount, client_name from client_invoices where id = ${invoice.id}`;
     expect(stored).toMatchObject({ status: "issued", subtotal_amount: "1250.00", total_amount: "1250.00", client_name: "Invoice Client" });
     const [billable] = await sql`select status, client_invoice_id from billables where id = ${billableId}`;
     expect(billable).toMatchObject({ status: "invoiced", client_invoice_id: invoice.id });
+    const [{ count: invoiceCount }] = await sql`select count(*)::int as count from client_invoices where organization_id = ${organizationId}`;
+    expect(invoiceCount).toBe(1);
+
+    await sql`update crm_companies set name = 'Changed client', address = 'Changed address' where id = ${companyId}`;
+    await sql`update invoice_settings set legal_name = 'Changed issuer', legal_address = 'Changed issuer address' where organization_id = ${organizationId}`;
+    const [snapshot] = await sql`select issuer_name, issuer_address, client_name, client_address from client_invoices where id = ${invoice.id}`;
+    expect(snapshot).toMatchObject({ issuer_name: "Invoice Lab Limited", issuer_address: "1 Billing Lane, London", client_name: "Invoice Client", client_address: "1 Studio Way, London" });
 
     const pdf = await page.request.get(`/api/client-invoices/${invoice.id}/pdf`);
     expect(pdf.status()).toBe(200);
@@ -78,6 +102,9 @@ test.describe("Client invoice issuance", () => {
     expect((await pdf.body()).subarray(0, 8).toString()).toBe("%PDF-1.4");
 
     await sql`update episodes set workflow_stage_id = ${activeStageId} where id = ${episodeId}`;
+    expect((await page.request.get(`/api/client-invoices/${invoice.id}/pdf`)).status()).toBe(409);
+    await sql`update episodes set workflow_stage_id = ${terminalStageId} where id = ${episodeId}`;
+    await sql`update client_invoices set status = 'void' where id = ${invoice.id}`;
     expect((await page.request.get(`/api/client-invoices/${invoice.id}/pdf`)).status()).toBe(409);
   });
 });

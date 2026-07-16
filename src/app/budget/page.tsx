@@ -4,7 +4,6 @@ import Link from "next/link";
 import { BudgetLineForm } from "@/components/budget-line-form";
 import { EpisodeInvoicePanel } from "@/components/episode-invoice-panel";
 import { RateCardDialog } from "@/components/rate-card-dialog";
-import { RateOverrideCard } from "@/components/rate-override-card";
 import type { ServiceRate } from "@/components/service-rate-card";
 import { WorkOrderChargeQueue } from "@/components/work-order-charge-queue";
 import { getActiveOrganizationContext } from "@/lib/organizations";
@@ -33,7 +32,7 @@ type Line = {
 
 type BudgetData = {
   lines: Line[];
-  episodes: Array<{ id: string; label: string; showTitle: string }>;
+  episodes: Array<{ id: string; label: string; showId: string; showTitle: string; network: string }>;
   workOrderCharges: Array<{ id: string; title: string; department: string | null; status: string; billingStatus: string; estimatedAmount: string | number | null; currency: string; billingNotes: string | null; episodeTitle: string; episodeNumber: number; showTitle: string }>;
 };
 
@@ -66,9 +65,12 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
   const data = await load();
   const serviceRates = await loadServiceRates();
   const selectedEpisodeId = params.episode;
-  const networks = [...new Set(data.lines.map((line) => line.network ?? "Independent"))];
+  const networks = [...new Set([...data.lines.map((line) => line.network ?? "Independent"), ...data.episodes.map((episode) => episode.network)])];
   if (!selectedNetwork) return <BudgetNetworkPicker networks={networks} lines={data.lines} />;
-  const showRows = [...new Map(data.lines.filter((line) => (line.network ?? "Independent") === selectedNetwork && line.showId && line.showTitle).map((line) => [line.showId!, { id: line.showId!, title: line.showTitle! }])).values()];
+  const showRows = [...new Map([
+    ...data.lines.filter((line) => (line.network ?? "Independent") === selectedNetwork && line.showId && line.showTitle).map((line) => [line.showId!, { id: line.showId!, title: line.showTitle! }] as const),
+    ...data.episodes.filter((episode) => episode.network === selectedNetwork).map((episode) => [episode.showId, { id: episode.showId, title: episode.showTitle }] as const),
+  ]).values()];
   const showNames = showRows.map((show) => show.title);
   if (!activeShow) return <BudgetShowPicker network={selectedNetwork} shows={showRows} lines={data.lines} rates={serviceRates} />;
   if (!showNames.includes(activeShow)) redirect(`/budget?network=${encodeURIComponent(selectedNetwork)}`);
@@ -109,7 +111,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
       <Metric icon={variance > 0 ? <AlertTriangle size={16} /> : <TrendingUp size={16} />} label="Variance" value={`${variance > 0 ? "+" : ""}${money(variance, currency)}`} detail={variance > 0 ? "Over estimate" : "Within estimate"} warning={variance > 0} />
     </section>
 
-    <RateOverrideCard rates={serviceRates} scope={{ type: "episode", episodeId: selectedEpisodeId }} title="Episode service rate card" />
+    <div className="flex justify-end"><RateCardDialog rates={serviceRates} scope={{ type: "episode", episodeId: selectedEpisodeId }} title="Episode service rate card" /></div>
     <EpisodeInvoicePanel episodeId={selectedEpisodeId} readiness={invoiceReadiness} />
     <BookingCostBasis entries={bookingCosts} fallbackCurrency={currency} />
     <WorkOrderChargeQueue charges={activeShow ? data.workOrderCharges.filter((charge) => charge.showTitle === activeShow) : data.workOrderCharges} />
@@ -361,7 +363,7 @@ function BudgetHealth({ actual, estimate }: { actual: number; estimate: number }
 
 async function load(): Promise<BudgetData> {
   if (isDebugDemoMode) {
-    const episodes = [{ id: "demo-e1", label: "Signal North · E01 The Quiet Hour", showTitle: "Signal North" }, { id: "demo-e5", label: "Under Current · E01 The Undertow", showTitle: "Under Current" }];
+    const episodes = [{ id: "demo-e1", label: "Signal North · E01 The Quiet Hour", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network" }, { id: "demo-e5", label: "Under Current · E01 The Undertow", showId: "demo-s2", showTitle: "Under Current", network: "Eastline" }];
     return { episodes, workOrderCharges: [], lines: [
       { id: "b1", workOrderId: null, vendorInvoiceId: null, episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "Edit suite", description: "Avid bays", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 48000, actualAmount: 42150, currency: "GBP", costType: "internal" },
       { id: "b2", workOrderId: null, vendorInvoiceId: null, episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "VFX", description: "Cleanup and screens", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 78000, actualAmount: 82350, currency: "GBP", costType: "billable" },
@@ -371,5 +373,5 @@ async function load(): Promise<BudgetData> {
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return { lines: [], episodes: [], workOrderCharges: [] };
   const [budget, rows] = await Promise.all([getBudgetData(context.organization.organizationId), listEpisodes(context.organization.organizationId)]);
-  return { lines: budget.lines, workOrderCharges: budget.workOrderCharges, episodes: rows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}`, showTitle: episode.showTitle })) };
+  return { lines: budget.lines, workOrderCharges: budget.workOrderCharges, episodes: rows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}`, showId: episode.showId, showTitle: episode.showTitle, network: episode.network ?? "Independent" })) };
 }

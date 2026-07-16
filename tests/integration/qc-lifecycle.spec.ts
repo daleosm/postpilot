@@ -147,8 +147,10 @@ test.describe("QC lifecycle integration", () => {
     expect(afterFailure.status()).toBe(409);
 
     await sql`delete from post_work_orders where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    const reQc = await page.request.post("/api/qc-reports", { data: { episodeId, status: "in_progress", summary: "Corrections are ready for re-QC." } });
+    expect(reQc.status()).toBe(201);
     const passed = await page.request.post("/api/qc-reports", { data: { episodeId, status: "passed", summary: "Correction verified in re-QC." } });
-    expect(passed.status()).toBe(201);
+    expect(passed.status()).toBe(200);
     const signed = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: stageId, approvalRuleId: qcApprovalRuleId, action: "sign_off" } });
     expect(signed.status()).toBe(200);
     await expect(signed.json()).resolves.toMatchObject({ stageComplete: true, advancedTo: { id: deliveryStageId, name: "Delivery" } });
@@ -188,19 +190,33 @@ test.describe("QC lifecycle integration", () => {
     expect(stored.checksum).toBe("abcdefgh");
   });
 
-  test("records draft and in-progress reports without completing QC, while allowing a clean verified pass", async ({ page }) => {
+  test("keeps one active QC run and closes it with a verified pass", async ({ page }) => {
     await switchUser(page, recorderUserId);
     const draft = await page.request.post("/api/qc-reports", { data: { episodeId, status: "draft", summary: "Checklist started." } });
     expect(draft.status()).toBe(201);
+    const draftBody = await draft.json();
     const inProgress = await page.request.post("/api/qc-reports", { data: { episodeId, status: "in_progress", summary: "Technical QC underway." } });
-    expect(inProgress.status()).toBe(201);
-    const reports = await sql`select status, completed_at from qc_reports where organization_id = ${organizationId} and episode_id = ${episodeId} order by created_at`;
-    expect(reports).toEqual([{ status: "draft", completed_at: null }, { status: "in_progress", completed_at: null }]);
+    expect(inProgress.status()).toBe(200);
+    expect(await inProgress.json()).toMatchObject({ id: draftBody.id, updated: true, status: "in_progress" });
+    const reports = await sql`select id, status, completed_at, summary from qc_reports where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    expect(reports).toEqual([{ id: draftBody.id, status: "in_progress", completed_at: null, summary: "Technical QC underway." }]);
     await switchUser(page, qcUserId);
     const passed = await page.request.post("/api/qc-reports", { data: { episodeId, status: "passed", summary: "Initial QC passed." } });
-    expect(passed.status()).toBe(201);
+    expect(passed.status()).toBe(200);
     const [episode] = await sql`select qc_status from episodes where id = ${episodeId}`;
     expect(episode.qc_status).toBe("passed");
+  });
+
+  test("rejects duplicate final QC results and preserves the completed report", async ({ page }) => {
+    await switchUser(page, qcUserId);
+    const passed = await page.request.post("/api/qc-reports", { data: { episodeId, status: "passed", summary: "QC complete." } });
+    expect(passed.status()).toBe(201);
+    const body = await passed.json();
+    const duplicate = await page.request.post("/api/qc-reports", { data: { episodeId, status: "passed", summary: "Accidental repeat." } });
+    expect(duplicate.status()).toBe(409);
+    await expect(duplicate.json()).resolves.toMatchObject({ error: expect.stringContaining("already final") });
+    const reports = await sql`select id, status, summary from qc_reports where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    expect(reports).toEqual([{ id: body.id, status: "passed", summary: "QC complete." }]);
   });
 
   test("enforces the waiver permission and makes waivers auditable", async ({ page }) => {
@@ -250,6 +266,8 @@ test.describe("QC lifecycle integration", () => {
     const [linkedIssueWorkOrder] = await sql`select id, qc_issue_id, assignee_person_id, is_blocking, status from post_work_orders where qc_issue_id = ${issueId}`;
     expect(linkedIssueWorkOrder).toMatchObject({ qc_issue_id: issueId, assignee_person_id: editorPersonId, is_blocking: true, status: "open" });
 
+    const reQc = await page.request.post("/api/qc-reports", { data: { episodeId, status: "in_progress", summary: "Re-QC started after correction." } });
+    expect(reQc.status()).toBe(201);
     const blockedPass = await page.request.post("/api/qc-reports", { data: { episodeId, status: "passed", summary: "This should remain blocked." } });
     expect(blockedPass.status()).toBe(409);
     await expect(blockedPass.json()).resolves.toMatchObject({ error: expect.stringContaining("Resolve or waive") });
@@ -269,7 +287,7 @@ test.describe("QC lifecycle integration", () => {
     expect(issue).toMatchObject({ status: "resolved", resolution: "Verified through linked QC correction work order." });
 
     const passed = await page.request.post("/api/qc-reports", { data: { episodeId, status: "passed", summary: "Re-QC verified after correction." } });
-    expect(passed.status()).toBe(201);
+    expect(passed.status()).toBe(200);
     const [episode] = await sql`select qc_status from episodes where id = ${episodeId}`;
     expect(episode.qc_status).toBe("passed");
   });
