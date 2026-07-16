@@ -25,6 +25,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ inv
     dueDate: clientInvoices.dueDate,
     currency: clientInvoices.currency,
     subtotal: clientInvoices.subtotalAmount,
+    taxEnabled: clientInvoices.taxEnabled,
     taxName: clientInvoices.taxName,
     taxRate: clientInvoices.taxRatePercent,
     taxAmount: clientInvoices.taxAmount,
@@ -62,7 +63,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ inv
   const pdf = createClientInvoicePdf({
     issuer: { name: invoice.issuerName, address: invoice.issuerAddress, email: invoice.issuerEmail, taxName: invoice.taxName, taxNumber: invoice.issuerTaxNumber, paymentInstructions: invoice.paymentInstructions },
     client: { name: invoice.clientName, address: invoice.clientAddress, email: invoice.clientEmail },
-    invoice: { number: invoice.invoiceNumber, invoiceDate: invoice.invoiceDate, dueDate: invoice.dueDate, currency: invoice.currency, subtotal: Number(invoice.subtotal), taxRate: Number(invoice.taxRate), taxAmount: Number(invoice.taxAmount), total: Number(invoice.total), showTitle: invoice.showTitle, episodeLabel: invoice.episodeTitle ? `${invoice.episodeCode ?? `E${String(invoice.episodeNumber ?? 0).padStart(2, "0")}`} ${invoice.episodeTitle}` : null },
+    invoice: { number: invoice.invoiceNumber, invoiceDate: invoice.invoiceDate, dueDate: invoice.dueDate, currency: invoice.currency, subtotal: Number(invoice.subtotal), taxEnabled: invoice.taxEnabled, taxRate: Number(invoice.taxRate), taxAmount: Number(invoice.taxAmount), total: Number(invoice.total), showTitle: invoice.showTitle, episodeLabel: invoice.episodeTitle ? `${invoice.episodeCode ?? `E${String(invoice.episodeNumber ?? 0).padStart(2, "0")}`} ${invoice.episodeTitle}` : null },
     items: items.map((item) => ({ description: item.description, reference: item.reference, quantity: Number(item.quantity), unitAmount: Number(item.unitAmount), amount: Number(item.amount) })),
   });
   const filename = `invoice-${invoice.invoiceNumber.replaceAll(/[^a-z0-9_-]/gi, "-")}.pdf`;

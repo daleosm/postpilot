@@ -1,7 +1,7 @@
 type InvoicePdfInput = {
   issuer: { name: string; address: string | null; email: string | null; taxName: string; taxNumber: string | null; paymentInstructions: string | null };
   client: { name: string; address: string | null; email: string | null };
-  invoice: { number: string; invoiceDate: string; dueDate: string; currency: string; subtotal: number; taxRate: number; taxAmount: number; total: number; showTitle: string | null; episodeLabel: string | null };
+  invoice: { number: string; invoiceDate: string; dueDate: string; currency: string; subtotal: number; taxEnabled: boolean; taxRate: number; taxAmount: number; total: number; showTitle: string | null; episodeLabel: string | null };
   items: Array<{ description: string; reference: string | null; quantity: number; unitAmount: number; amount: number }>;
 };
 type PdfRow = { description: string; quantity: string; unitAmount: string; amount: string };
@@ -72,7 +72,7 @@ function pageContent(input: InvoicePdfInput, rows: PdfRow[], pageIndex: number, 
   if (pageIndex === 0) {
     text(48, 790, input.issuer.name, 18, true, "0.13 0.2 0.18");
     text(420, 790, "INVOICE", 20, true, "0.13 0.2 0.18");
-    labelLines(text, 48, 768, input.issuer.address, input.issuer.email, input.issuer.taxNumber ? `${input.issuer.taxName}: ${input.issuer.taxNumber}` : null);
+    labelLines(text, 48, 768, input.issuer.address, input.issuer.email, input.invoice.taxEnabled && input.issuer.taxNumber ? `${input.issuer.taxName}: ${input.issuer.taxNumber}` : null);
     text(356, 764, `Invoice no.  ${input.invoice.number}`, 9, true);
     text(356, 748, `Issue date   ${displayDate(input.invoice.invoiceDate)}`, 9);
     text(356, 732, `Due date     ${displayDate(input.invoice.dueDate)}`, 9);
@@ -107,9 +107,10 @@ function pageContent(input: InvoicePdfInput, rows: PdfRow[], pageIndex: number, 
 
   if (pageIndex === pageCount - 1) {
     const totalsY = Math.min(y - 18, 180);
-    line(338, totalsY + 68, 547, totalsY + 68, "0.48 0.61 0.56");
-    text(376, totalsY + 48, "Subtotal", 9); text(501, totalsY + 48, money(input.invoice.subtotal, input.invoice.currency), 9);
-    text(376, totalsY + 30, `${input.issuer.taxName} (${input.invoice.taxRate.toFixed(3).replace(/\.000$/, "")}%)`, 9); text(501, totalsY + 30, money(input.invoice.taxAmount, input.invoice.currency), 9);
+    const taxOffset = input.invoice.taxEnabled ? 68 : 50;
+    line(338, totalsY + taxOffset, 547, totalsY + taxOffset, "0.48 0.61 0.56");
+    text(376, totalsY + (input.invoice.taxEnabled ? 48 : 30), "Subtotal", 9); text(501, totalsY + (input.invoice.taxEnabled ? 48 : 30), money(input.invoice.subtotal, input.invoice.currency), 9);
+    if (input.invoice.taxEnabled) { text(376, totalsY + 30, `${input.issuer.taxName} (${input.invoice.taxRate.toFixed(3).replace(/\.000$/, "")}%)`, 9); text(501, totalsY + 30, money(input.invoice.taxAmount, input.invoice.currency), 9); }
     line(338, totalsY + 17, 547, totalsY + 17, "0.48 0.61 0.56");
     text(376, totalsY, "TOTAL DUE", 11, true, "0.13 0.2 0.18"); text(486, totalsY, money(input.invoice.total, input.invoice.currency), 11, true, "0.13 0.2 0.18");
     text(48, 94, `Payment is due by ${displayDate(input.invoice.dueDate)}.`, 9, true);

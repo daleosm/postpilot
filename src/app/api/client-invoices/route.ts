@@ -33,7 +33,8 @@ export async function POST(request: Request) {
   const due = new Date(); due.setDate(due.getDate() + termsDays);
   const dueDate = formatDate(due);
   const subtotal = roundMoney(readiness.billables.reduce((sum, item) => sum + Number(item.amount), 0));
-  const taxRate = Number(settings?.taxRatePercent ?? "0");
+  const taxEnabled = settings?.taxEnabled ?? false;
+  const taxRate = taxEnabled ? Number(settings?.taxRatePercent ?? "0") : 0;
   const taxAmount = roundMoney(subtotal * taxRate / 100);
   const totalAmount = roundMoney(subtotal + taxAmount);
   const currency = organization.currency;
@@ -64,6 +65,7 @@ export async function POST(request: Request) {
       dueDate,
       currency,
       subtotalAmount: String(subtotal),
+      taxEnabled,
       taxName: settings?.taxName ?? "VAT",
       taxRatePercent: String(taxRate),
       taxAmount: String(taxAmount),

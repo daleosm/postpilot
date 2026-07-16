@@ -36,7 +36,7 @@ test.describe("Client invoice issuance", () => {
     await sql`insert into shows (id, organization_id, title, code, client_company_id, time_zone) values (${showId}, ${organizationId}, 'Invoice Series', 'INV', ${companyId}, 'Europe/London')`;
     await sql`insert into seasons (id, organization_id, show_id, number) values (${seasonId}, ${organizationId}, ${showId}, 1)`;
     await sql`insert into post_workflows (id, organization_id, name, is_default) values (${workflowId}, ${organizationId}, 'Invoice workflow', true)`;
-    await sql`insert into invoice_settings (organization_id, legal_name, legal_address, billing_email, tax_name, tax_rate_percent, payment_terms_days, payment_instructions) values (${organizationId}, 'Invoice Lab Limited', '1 Billing Lane, London', 'accounts@invoice-lab.test', 'VAT', '0', 30, 'Pay by bank transfer.')`;
+    await sql`insert into invoice_settings (organization_id, legal_name, legal_address, billing_email, tax_name, tax_rate_percent, payment_terms_days, payment_instructions) values (${organizationId}, 'Invoice Lab Limited', '1 Billing Lane, London', 'accounts@invoice-lab.test', 'VAT', '20', 30, 'Pay by bank transfer.')`;
     await sql`insert into workflow_stages (id, organization_id, workflow_id, name, key, position, is_terminal) values (${activeStageId}, ${organizationId}, ${workflowId}, 'Online', 'online', 1, false), (${terminalStageId}, ${organizationId}, ${workflowId}, 'Archive', 'archive', 2, true)`;
     await sql`insert into episodes (id, organization_id, season_id, workflow_stage_id, number, production_code, title, status, qc_status) values (${episodeId}, ${organizationId}, ${seasonId}, ${activeStageId}, 1, 'INV101', 'Invoice episode', 'online', 'passed')`;
     await sql`insert into bookings (id, organization_id, episode_id, person_id, title, starts_at, ends_at, status, booking_type) values (${bookingId}, ${organizationId}, ${episodeId}, ${managerPersonId}, 'Invoice finishing day', '2035-08-01T09:00:00.000Z', '2035-08-01T18:00:00.000Z', 'confirmed', 'edit')`;
@@ -55,7 +55,7 @@ test.describe("Client invoice issuance", () => {
     const profileBlocked = await page.request.post("/api/client-invoices", { data: { episodeId } });
     expect(profileBlocked.status()).toBe(409);
     expect((await profileBlocked.json()).error).toContain("Complete the invoicing profile");
-    await sql`insert into invoice_settings (organization_id, legal_name, legal_address, billing_email, tax_name, tax_rate_percent, payment_terms_days, payment_instructions) values (${organizationId}, 'Invoice Lab Limited', '1 Billing Lane, London', 'accounts@invoice-lab.test', 'VAT', '0', 30, 'Pay by bank transfer.')`;
+    await sql`insert into invoice_settings (organization_id, legal_name, legal_address, billing_email, tax_name, tax_rate_percent, payment_terms_days, payment_instructions) values (${organizationId}, 'Invoice Lab Limited', '1 Billing Lane, London', 'accounts@invoice-lab.test', 'VAT', '20', 30, 'Pay by bank transfer.')`;
 
     await sql`update shows set client_company_id = null where id = ${showId}`;
     const clientBlocked = await page.request.post("/api/client-invoices", { data: { episodeId } });
@@ -84,8 +84,8 @@ test.describe("Client invoice issuance", () => {
     if (!issued) throw new Error("Expected exactly one invoice issue request to succeed.");
     const invoice = await issued.json() as { id: string; invoiceNumber: string };
     expect(invoice.invoiceNumber).toMatch(/^INVOICELAB-2035|^INVOICELAB-20/);
-    const [stored] = await sql`select status, subtotal_amount, total_amount, client_name from client_invoices where id = ${invoice.id}`;
-    expect(stored).toMatchObject({ status: "issued", subtotal_amount: "1250.00", total_amount: "1250.00", client_name: "Invoice Client" });
+    const [stored] = await sql`select status, subtotal_amount, tax_enabled, tax_rate_percent, tax_amount, total_amount, client_name from client_invoices where id = ${invoice.id}`;
+    expect(stored).toMatchObject({ status: "issued", subtotal_amount: "1250.00", tax_enabled: false, tax_rate_percent: "0.000", tax_amount: "0.00", total_amount: "1250.00", client_name: "Invoice Client" });
     const [billable] = await sql`select status, client_invoice_id from billables where id = ${billableId}`;
     expect(billable).toMatchObject({ status: "invoiced", client_invoice_id: invoice.id });
     const [{ count: invoiceCount }] = await sql`select count(*)::int as count from client_invoices where organization_id = ${organizationId}`;
@@ -100,11 +100,17 @@ test.describe("Client invoice issuance", () => {
     expect(pdf.status()).toBe(200);
     expect(pdf.headers()["content-type"]).toContain("application/pdf");
     expect((await pdf.body()).subarray(0, 8).toString()).toBe("%PDF-1.4");
+    expect(new TextDecoder().decode(await pdf.body())).not.toContain("VAT");
 
     await sql`update episodes set workflow_stage_id = ${activeStageId} where id = ${episodeId}`;
     expect((await page.request.get(`/api/client-invoices/${invoice.id}/pdf`)).status()).toBe(409);
     await sql`update episodes set workflow_stage_id = ${terminalStageId} where id = ${episodeId}`;
     await sql`update client_invoices set status = 'void' where id = ${invoice.id}`;
     expect((await page.request.get(`/api/client-invoices/${invoice.id}/pdf`)).status()).toBe(409);
+
+    const enableTax = await page.request.patch("/api/settings/invoicing", { data: { legalName: "Invoice Lab Limited", legalAddress: "1 Billing Lane, London", billingEmail: "accounts@invoice-lab.test", taxEnabled: true, taxName: "VAT", taxRegistrationNumber: "GB 123 456 789", taxRatePercent: 20, paymentTermsDays: 30, paymentInstructions: "Pay by bank transfer." } });
+    expect(enableTax.status()).toBe(200);
+    const [settings] = await sql`select tax_enabled, tax_rate_percent from invoice_settings where organization_id = ${organizationId}`;
+    expect(settings).toMatchObject({ tax_enabled: true, tax_rate_percent: "20.000" });
   });
 });

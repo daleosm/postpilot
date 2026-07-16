@@ -353,7 +353,7 @@ async function seedTenant(tenant: TenantSeed) {
   await db.insert(invoiceSettings).values({
     id: id(tenant.number, "48", 99), organizationId: tenant.id,
     legalName: `${tenant.name} Limited`, legalAddress: "18 Post House Lane, London, E1 6AB",
-    billingEmail: `accounts@${tenant.slug}.test`, taxName: "VAT", taxRegistrationNumber: `GB ${String(100000000 + tenant.number * 1010101).replace(/(\d{3})(?=\d)/g, "$1 ")}`,
+    billingEmail: `accounts@${tenant.slug}.test`, taxEnabled: false, taxName: "VAT", taxRegistrationNumber: `GB ${String(100000000 + tenant.number * 1010101).replace(/(\d{3})(?=\d)/g, "$1 ")}`,
     taxRatePercent: "20", paymentTermsDays: 30, paymentInstructions: `Please pay by bank transfer, quoting the invoice number. Remittance advice: accounts@${tenant.slug}.test.`,
   });
   await db.insert(users).values(tenantPeople.map((person) => ({ id: person.userId, name: person.name, email: person.email }))).onConflictDoUpdate({ target: users.id, set: { name: sql`excluded.name`, email: sql`excluded.email` } });
@@ -487,7 +487,7 @@ async function seedTenant(tenant: TenantSeed) {
   await db.insert(clientInvoices).values({
     id: issuedInvoiceId, organizationId: tenant.id, sequence: 1, invoiceNumber: `${tenant.slug.toUpperCase()}-2026-0001`, clientCompanyId: companyId(1), showId: issuedShowId, episodeId: issuedEpisodeId,
     status: "issued", invoiceDate: issuedInvoiceDate, dueDate: issuedDueDate, currency: tenant.budgetProfile.currency,
-    subtotalAmount: issuedSubtotal.toFixed(2), taxName: "VAT", taxRatePercent: "20", taxAmount: issuedTax.toFixed(2), totalAmount: (issuedSubtotal + issuedTax).toFixed(2),
+    subtotalAmount: issuedSubtotal.toFixed(2), taxEnabled: true, taxName: "VAT", taxRatePercent: "20", taxAmount: issuedTax.toFixed(2), totalAmount: (issuedSubtotal + issuedTax).toFixed(2),
     issuerName: `${tenant.name} Limited`, issuerAddress: "18 Post House Lane, London, E1 6AB", issuerEmail: `accounts@${tenant.slug}.test`, issuerTaxRegistrationNumber: `GB ${String(100000000 + tenant.number * 1010101).replace(/(\d{3})(?=\d)/g, "$1 ")}`,
     clientName: primaryNetwork, clientAddress: "1 Broadcast Square, London", clientEmail: `finance@${tenant.slug}.client.test`, paymentInstructions: `Please pay by bank transfer, quoting ${tenant.slug.toUpperCase()}-2026-0001.`,
   });

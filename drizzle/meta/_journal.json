@@ -505,6 +505,13 @@
       "when": 1784125648692,
       "tag": "0071_remove_approval_administration_permission",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1784125648693,
+      "tag": "0072_optional_invoice_tax",
+      "breakpoints": true
     }
   ]
 }
