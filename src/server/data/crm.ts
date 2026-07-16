@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, desc, eq, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { activityLog, billables, budgetLines, crmCompanies, crmContacts, episodes, people, postWorkOrders, rateCardItems, rateCards as rateCardRecords, seasons, shows, vendorInvoices } from "@/lib/db/schema";
+import { listPurchaseOrdersForOrganization } from "@/server/data/purchase-orders";
 
 export async function getCrmData(organizationId: string) {
   const db = getDb();
@@ -20,7 +21,7 @@ export async function getCrmData(organizationId: string) {
   return { companies, contacts, rateCards, vendorInvoices: invoiceRows, workOrders, showOptions, episodeOptions, showLinks, owners };
 }
 
-export async function getCrmAccount(organizationId: string, companyId: string) {
+export async function getCrmAccount(organizationId: string, companyId: string, options: { includeVendorProcurement?: boolean } = {}) {
   const db = getDb();
   const [company] = await db.select().from(crmCompanies).where(and(eq(crmCompanies.organizationId, organizationId), eq(crmCompanies.id, companyId))).limit(1);
   if (!company) return null;
@@ -28,12 +29,28 @@ export async function getCrmAccount(organizationId: string, companyId: string) {
     db.select().from(crmContacts).where(and(eq(crmContacts.organizationId, organizationId), eq(crmContacts.companyId, companyId))).orderBy(asc(crmContacts.contactType), asc(crmContacts.name)),
     db.select({ id: shows.id, title: shows.title, code: shows.code, network: shows.network, activeEpisodeCount: sql<number>`count(${episodes.id}) filter (where ${episodes.status} <> 'delivered')` }).from(shows).leftJoin(seasons, and(eq(seasons.showId, shows.id), eq(seasons.organizationId, organizationId))).leftJoin(episodes, and(eq(episodes.seasonId, seasons.id), eq(episodes.organizationId, organizationId))).where(and(eq(shows.organizationId, organizationId), sql`(${shows.clientCompanyId} = ${companyId} or ${shows.productionCompanyId} = ${companyId})`)).groupBy(shows.id, shows.title, shows.code, shows.network).orderBy(asc(shows.title)),
     db.select({ id: vendorInvoices.id, invoiceNumber: vendorInvoices.invoiceNumber, amount: vendorInvoices.amount, currency: vendorInvoices.currency, status: vendorInvoices.status, dueDate: vendorInvoices.dueDate, createdAt: vendorInvoices.createdAt }).from(vendorInvoices).where(and(eq(vendorInvoices.organizationId, organizationId), eq(vendorInvoices.vendorCompanyId, companyId))).orderBy(desc(vendorInvoices.createdAt)),
-    db.select({ id: postWorkOrders.id, title: postWorkOrders.title, status: postWorkOrders.status, dueAt: postWorkOrders.dueAt, episodeNumber: episodes.number, episodeTitle: episodes.title, createdAt: postWorkOrders.createdAt }).from(postWorkOrders).innerJoin(episodes, eq(postWorkOrders.episodeId, episodes.id)).where(and(eq(postWorkOrders.organizationId, organizationId), eq(postWorkOrders.vendorCompanyId, companyId), eq(episodes.organizationId, organizationId))).orderBy(asc(postWorkOrders.dueAt)),
+    db.select({ id: postWorkOrders.id, title: postWorkOrders.title, status: postWorkOrders.status, purchaseOrderId: postWorkOrders.purchaseOrderId, dueAt: postWorkOrders.dueAt, episodeNumber: episodes.number, episodeTitle: episodes.title, createdAt: postWorkOrders.createdAt }).from(postWorkOrders).innerJoin(episodes, eq(postWorkOrders.episodeId, episodes.id)).where(and(eq(postWorkOrders.organizationId, organizationId), eq(postWorkOrders.vendorCompanyId, companyId), eq(postWorkOrders.workType, "external_vendor"), eq(episodes.organizationId, organizationId))).orderBy(asc(postWorkOrders.dueAt)),
     db.select({ value: sql<string>`coalesce(sum(${budgetLines.actualAmount}), 0)` }).from(budgetLines).leftJoin(episodes, eq(budgetLines.episodeId, episodes.id)).leftJoin(seasons, eq(episodes.seasonId, seasons.id)).leftJoin(shows, eq(seasons.showId, shows.id)).where(and(eq(budgetLines.organizationId, organizationId), sql`(${shows.clientCompanyId} = ${companyId} or ${shows.productionCompanyId} = ${companyId})`)),
     db.select({ id: people.id, name: people.name, role: people.role }).from(people).where(and(eq(people.organizationId, organizationId), eq(people.isActive, true))).orderBy(asc(people.name)),
     db.select({ id: rateCardRecords.id, name: rateCardRecords.name, currency: rateCardRecords.currency, effectiveFrom: rateCardRecords.effectiveFrom, effectiveTo: rateCardRecords.effectiveTo, isActive: rateCardRecords.isActive, itemId: rateCardItems.id }).from(rateCardRecords).leftJoin(rateCardItems, and(eq(rateCardItems.rateCardId, rateCardRecords.id), eq(rateCardItems.organizationId, organizationId))).where(and(eq(rateCardRecords.organizationId, organizationId), eq(rateCardRecords.clientCompanyId, companyId))).orderBy(asc(rateCardRecords.name)),
     db.select({ id: billables.id, description: billables.description, amount: billables.amount, currency: billables.currency, status: billables.status, createdAt: billables.createdAt }).from(billables).innerJoin(shows, eq(billables.showId, shows.id)).where(and(eq(billables.organizationId, organizationId), eq(shows.organizationId, organizationId), or(eq(shows.clientCompanyId, companyId), eq(shows.productionCompanyId, companyId)))).orderBy(desc(billables.createdAt)),
   ]);
+
+  // Procurement is deliberately vendor-only. Client, network, studio, and
+  // production-company account responses never receive supplier PO data.
+  const purchaseOrders = company.type === "vendor" && options.includeVendorProcurement
+    ? (await listPurchaseOrdersForOrganization(organizationId)).filter((order) => order.vendorCompanyId === companyId && order.status !== "cancelled")
+    : [];
+  const today = new Date();
+  const expiryWarning = (expiryDate: string | null): "expired" | "expiring" | null => {
+    if (!expiryDate) return null;
+    const days = Math.ceil((new Date(`${expiryDate}T00:00:00`).getTime() - today.getTime()) / 86_400_000);
+    return days < 0 ? "expired" : days <= 14 ? "expiring" : null;
+  };
+  const vendorProcurement = company.type === "vendor" && options.includeVendorProcurement ? {
+    active: purchaseOrders.filter((order) => ["draft", "approved"].includes(order.status)).map((order) => ({ ...order, expiryWarning: expiryWarning(order.expiryDate), workOrders: workOrders.filter((workOrder) => workOrder.purchaseOrderId === order.id) })),
+    closed: purchaseOrders.filter((order) => order.status === "closed").map((order) => ({ ...order, expiryWarning: expiryWarning(order.expiryDate), workOrders: workOrders.filter((workOrder) => workOrder.purchaseOrderId === order.id) })),
+  } : null;
 
   const accountEvents = await db.select({ id: activityLog.id, action: activityLog.action, entityType: activityLog.entityType, entityId: activityLog.entityId, createdAt: activityLog.createdAt }).from(activityLog).where(and(eq(activityLog.organizationId, organizationId), eq(activityLog.entityType, "crm_company"), eq(activityLog.entityId, companyId))).orderBy(desc(activityLog.createdAt)).limit(20);
   const rateCards = Object.values(cardRows.reduce<Record<string, { id: string; name: string; currency: string; effectiveFrom: string | null; effectiveTo: string | null; isActive: boolean; itemCount: number }>>((result, row) => {
@@ -50,7 +67,7 @@ export async function getCrmAccount(organizationId: string, companyId: string) {
   const financials = {
     invoicedAmount: (company.type === "vendor" ? invoices : clientBillables).reduce((total, item) => total + Number(item.amount), 0),
   };
-  return { company, contacts, shows: relatedShows, activeShows: relatedShows.filter((show) => Number(show.activeEpisodeCount) > 0), pastShows: relatedShows.filter((show) => Number(show.activeEpisodeCount) === 0), invoices, workOrders, budgetExposure: Number(exposure[0]?.value ?? 0), owners, rateCards, activities, financials };
+  return { company, contacts, shows: relatedShows, activeShows: relatedShows.filter((show) => Number(show.activeEpisodeCount) > 0), pastShows: relatedShows.filter((show) => Number(show.activeEpisodeCount) === 0), invoices, workOrders, vendorProcurement, budgetExposure: Number(exposure[0]?.value ?? 0), owners, rateCards, activities, financials };
 }
 
 export async function listCrmCompanyOptions(organizationId: string) { return getDb().select({ id: crmCompanies.id, name: crmCompanies.name, type: crmCompanies.type }).from(crmCompanies).where(eq(crmCompanies.organizationId, organizationId)).orderBy(asc(crmCompanies.name)); }

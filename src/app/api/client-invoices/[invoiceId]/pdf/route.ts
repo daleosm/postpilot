@@ -7,6 +7,7 @@ import { clientInvoiceItems, clientInvoices, episodes, shows } from "@/lib/db/sc
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { getEpisodeInvoiceReadiness } from "@/server/data";
+import { getClientPoBillingWarnings } from "@/server/data/client-invoices";
 
 /** Downloads an issued invoice only after workflow completion and actual-time confirmation are still true. */
 export async function GET(_request: Request, { params }: { params: Promise<{ invoiceId: string }> }) {
@@ -58,8 +59,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ inv
     return NextResponse.json({ error: problem }, { status: 409 });
   }
 
-  const items = await db.select({ description: clientInvoiceItems.description, reference: clientInvoiceItems.reference, quantity: clientInvoiceItems.quantity, unitAmount: clientInvoiceItems.unitAmount, amount: clientInvoiceItems.amount })
+  const items = await db.select({ id: clientInvoiceItems.id, billableId: clientInvoiceItems.billableId, clientPurchaseOrderId: clientInvoiceItems.clientPurchaseOrderId, description: clientInvoiceItems.description, reference: clientInvoiceItems.reference, quantity: clientInvoiceItems.quantity, unitAmount: clientInvoiceItems.unitAmount, amount: clientInvoiceItems.amount })
     .from(clientInvoiceItems).where(and(eq(clientInvoiceItems.organizationId, organizationId), eq(clientInvoiceItems.clientInvoiceId, invoice.id))).orderBy(asc(clientInvoiceItems.createdAt));
+  const clientPoWarnings = await getClientPoBillingWarnings(organizationId, items.map((item) => ({ id: item.billableId ?? item.id, clientPurchaseOrderId: item.clientPurchaseOrderId, amount: item.amount })), { requireActive: false });
+  const clientPoBlocker = clientPoWarnings.find((warning) => warning.blocksBilling);
+  if (clientPoBlocker) return NextResponse.json({ error: `Invoice export is blocked: ${clientPoBlocker.message}` }, { status: 409 });
   const pdf = createClientInvoicePdf({
     issuer: { name: invoice.issuerName, address: invoice.issuerAddress, email: invoice.issuerEmail, taxName: invoice.taxName, taxNumber: invoice.issuerTaxNumber, paymentInstructions: invoice.paymentInstructions },
     client: { name: invoice.clientName, address: invoice.clientAddress, email: invoice.clientEmail },

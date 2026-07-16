@@ -10,12 +10,18 @@ import { getActiveOrganizationContext } from "@/lib/organizations";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { can } from "@/lib/permissions";
 import { getBudgetData, getEpisodeInvoiceReadiness, listEpisodeBookingCosts, listEpisodes, listServiceRates } from "@/server/data";
+import type { PurchaseOrderSummary } from "@/server/data/purchase-orders";
+import { listClientPurchaseOrdersForOrganization, type ClientPurchaseOrderSummary } from "@/server/data/client-purchase-orders";
 import { redirect } from "next/navigation";
 
 type Line = {
   id: string;
   workOrderId: string | null;
   vendorInvoiceId: string | null;
+  purchaseOrderId: string | null;
+  purchaseOrderNumber: string | null;
+  purchaseOrderAllocationId: string | null;
+  externalCost: boolean;
   episodeId: string | null;
   episodeTitle: string | null;
   episodeNumber: number | null;
@@ -33,7 +39,9 @@ type Line = {
 type BudgetData = {
   lines: Line[];
   episodes: Array<{ id: string; label: string; showId: string; showTitle: string; network: string }>;
-  workOrderCharges: Array<{ id: string; title: string; department: string | null; status: string; billingStatus: string; estimatedAmount: string | number | null; currency: string; billingNotes: string | null; episodeTitle: string; episodeNumber: number; showTitle: string }>;
+  workOrderCharges: Array<{ id: string; title: string; department: string | null; status: string; billingStatus: string; estimatedAmount: string | number | null; currency: string; billingNotes: string | null; episodeId: string; episodeTitle: string; episodeNumber: number; showId: string; showTitle: string; clientCompanyId: string | null }>;
+  purchaseOrders: PurchaseOrderSummary[];
+  clientPurchaseOrders: ClientPurchaseOrderSummary[];
 };
 
 type BookingCost = {
@@ -74,7 +82,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
   const showNames = showRows.map((show) => show.title);
   if (!activeShow) return <BudgetShowPicker network={selectedNetwork} shows={showRows} lines={data.lines} rates={serviceRates} />;
   if (!showNames.includes(activeShow)) redirect(`/budget?network=${encodeURIComponent(selectedNetwork)}`);
-  if (!selectedEpisodeId) return <BudgetEpisodePicker network={selectedNetwork} show={activeShow} episodes={data.episodes.filter((episode) => episode.showTitle === activeShow)} lines={data.lines.filter((line) => line.showTitle === activeShow)} rates={serviceRates} showId={showRows.find((show) => show.title === activeShow)?.id} />;
+  if (!selectedEpisodeId) return <BudgetEpisodePicker network={selectedNetwork} show={activeShow} episodes={data.episodes.filter((episode) => episode.showTitle === activeShow)} lines={data.lines.filter((line) => line.showTitle === activeShow)} rates={serviceRates} showId={showRows.find((show) => show.title === activeShow)?.id} purchaseOrders={data.purchaseOrders} />;
   const selectedEpisode = data.episodes.find((episode) => episode.id === selectedEpisodeId && episode.showTitle === activeShow);
   if (!selectedEpisode) redirect(`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`);
   const bookingCosts = await loadBookingCosts(selectedEpisodeId);
@@ -93,6 +101,8 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
     groups[key].actual += Number(line.actualAmount);
     return groups;
   }, {}));
+  const episodePurchaseOrders = purchaseOrdersForEpisode(data.purchaseOrders, selectedEpisode);
+  const episodeClientPurchaseOrders = clientPurchaseOrdersForEpisode(data.clientPurchaseOrders, selectedEpisode);
 
   return <div className="space-y-5">
     <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -101,7 +111,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
         <h1 className="mt-2 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Budget</h1>
         <p className="mt-1 text-sm text-[#747977]">Episode-level costs with show roll-ups for post-production control.</p>
       </div>
-      <div className="flex gap-2"><Link href={`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`} className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">All episodes</Link><BudgetLineForm episodes={episodes} currency={currency} /></div>
+      <div className="flex gap-2"><Link href={`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`} className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">All episodes</Link><BudgetLineForm episodes={episodes} currency={currency} purchaseOrders={episodePurchaseOrders} /></div>
     </header>
 
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -109,12 +119,15 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
       <Metric icon={<ReceiptText size={16} />} label="Actual" value={money(totals.actual, currency)} detail={burn ? `${burn}% of estimate` : "No spend recorded"} />
       <Metric icon={<TrendingUp size={16} />} label="Forecast" value={money(forecast, currency)} detail="Actual recorded cost" warning={forecast > totals.estimate} />
       <Metric icon={variance > 0 ? <AlertTriangle size={16} /> : <TrendingUp size={16} />} label="Variance" value={`${variance > 0 ? "+" : ""}${money(variance, currency)}`} detail={variance > 0 ? "Over estimate" : "Within estimate"} warning={variance > 0} />
+      <Metric icon={<ReceiptText size={16} />} label="PO committed" value={money(sumPurchaseOrders(episodePurchaseOrders).committed, currency)} detail={`${episodePurchaseOrders.length} applicable PO${episodePurchaseOrders.length === 1 ? "" : "s"} · excluded from actual`} />
     </section>
 
     <div className="flex justify-end"><RateCardDialog rates={serviceRates} scope={{ type: "episode", episodeId: selectedEpisodeId }} title="Episode service rate card" /></div>
+    <ClientPoBudgetSafeguards orders={episodeClientPurchaseOrders} />
     <EpisodeInvoicePanel episodeId={selectedEpisodeId} readiness={invoiceReadiness} />
     <BookingCostBasis entries={bookingCosts} fallbackCurrency={currency} />
-    <WorkOrderChargeQueue charges={activeShow ? data.workOrderCharges.filter((charge) => charge.showTitle === activeShow) : data.workOrderCharges} />
+    <WorkOrderChargeQueue charges={activeShow ? data.workOrderCharges.filter((charge) => charge.showTitle === activeShow) : data.workOrderCharges} clientPurchaseOrders={data.clientPurchaseOrders} />
+    <PurchaseOrderBudgetSummary title="Episode purchase orders" orders={episodePurchaseOrders} currency={currency} />
 
     <section className="panel p-5">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
@@ -141,14 +154,14 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
     <section className="panel overflow-hidden">
       <div className="border-b border-[#ebeae6] px-5 py-3"><h2 className="text-sm font-semibold text-[#353b39]">Cost lines</h2></div>
       {lines.length === 0 ? <div className="px-5 py-12 text-center text-sm text-[#7d837f]">No episode budget lines match this show. Add the first line to begin tracking spend.</div> : <div className="overflow-x-auto"><div className="min-w-[760px]">
-        <div className="grid grid-cols-[minmax(210px,1.3fr)_190px_140px_110px_110px_90px_80px] gap-3 bg-[#fafaf8] px-5 py-3 text-[10px] font-semibold uppercase tracking-[.08em] text-[#7e837f]"><span>Category</span><span>Episode</span><span>Show</span><span>Estimate</span><span>Actual</span><span>Type</span><span>Action</span></div>
-        <div className="divide-y divide-[#efeeea]">{lines.map((line) => <div key={line.id} className="grid grid-cols-[minmax(210px,1.3fr)_190px_140px_110px_110px_90px_80px] items-center gap-3 px-5 py-3 text-sm text-[#4f5753]">
+        <div className="grid grid-cols-[minmax(190px,1.2fr)_160px_120px_100px_100px_125px_80px] gap-3 bg-[#fafaf8] px-5 py-3 text-[10px] font-semibold uppercase tracking-[.08em] text-[#7e837f]"><span>Category</span><span>Episode</span><span>Estimate</span><span>Actual</span><span>PO</span><span>Type</span><span>Action</span></div>
+        <div className="divide-y divide-[#efeeea]">{lines.map((line) => <div key={line.id} className="grid grid-cols-[minmax(190px,1.2fr)_160px_120px_100px_100px_125px_80px] items-center gap-3 px-5 py-3 text-sm text-[#4f5753]">
           <div className="min-w-0"><p className="font-medium text-[#39423e]">{line.category}</p>{line.description && <p className="mt-0.5 truncate text-xs text-[#858a87]">{line.description}</p>}</div>
           <p className="truncate text-xs text-[#626b67]">{episodeLabel(line)}</p>
-          <p className="truncate text-xs text-[#626b67]">{line.showTitle ?? "—"}</p>
           <p>{money(Number(line.budgetedAmount), line.currency)}</p><p>{money(Number(line.actualAmount), line.currency)}</p>
+          {line.purchaseOrderId && line.purchaseOrderNumber ? <Link href={`/budget/purchase-orders/${line.purchaseOrderId}${line.purchaseOrderAllocationId ? `#allocation-${line.purchaseOrderAllocationId}` : ""}`} className="truncate text-xs font-semibold text-[#58756b] hover:underline">{line.purchaseOrderNumber}</Link> : <span className="text-xs text-[#858a87]">—</span>}
           <p className="capitalize text-xs text-[#6d7672]">{line.costType}</p>
-          {line.workOrderId || line.vendorInvoiceId ? <span className="text-xs text-[#858a87]">Linked</span> : <BudgetLineForm episodes={episodes} currency={currency} line={line} />}
+          {line.workOrderId || line.vendorInvoiceId ? <span className="text-xs text-[#858a87]">Linked</span> : <BudgetLineForm episodes={episodes} currency={currency} purchaseOrders={episodePurchaseOrders} line={line} />}
         </div>)}</div>
       </div></div>}
     </section>
@@ -218,7 +231,7 @@ function BudgetNetworkPicker({ networks, lines, rates }: { networks: string[]; l
       <div><p className="text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">Commercial control</p>
       <h1 className="mt-2 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Budget portfolio</h1>
       <p className="mt-1 text-sm text-[#747977]">Start with the master rate card, then review networks, shows and episodes.</p></div>
-      <RateCardDialog rates={rates} scope={{ type: "master" }} title="Master rate card" />
+      <div className="flex flex-wrap gap-2"><Link href="/budget/purchase-orders" className="inline-flex items-center rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">Vendor POs</Link><Link href="/budget/client-purchase-orders" className="inline-flex items-center rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">Client POs</Link><RateCardDialog rates={rates} scope={{ type: "master" }} title="Master rate card" /></div>
     </header>
     <section className="grid gap-3 sm:grid-cols-3">
       <Metric icon={<CircleDollarSign size={16} />} label="Networks / clients" value={String(networks.length)} detail="With active budget lines" />
@@ -295,7 +308,7 @@ function BudgetShowPicker({ network, shows, lines, rates }: { network: string; s
   </div>;
 }
 
-function BudgetEpisodePicker({ network, show, episodes, lines, rates, showId }: { network: string; show: string; episodes: Array<{ id: string; label: string; showTitle: string }>; lines: Line[]; rates: ServiceRate[]; showId?: string }) {
+function BudgetEpisodePicker({ network, show, episodes, lines, rates, showId, purchaseOrders }: { network: string; show: string; episodes: Array<{ id: string; label: string; showTitle: string; showId: string }>; lines: Line[]; rates: ServiceRate[]; showId?: string; purchaseOrders: PurchaseOrderSummary[] }) {
   const totals = sumLines(lines);
   const currency = currencyFor(lines);
   const forecast = totals.actual;
@@ -315,6 +328,7 @@ function BudgetEpisodePicker({ network, show, episodes, lines, rates, showId }: 
       <Metric icon={<ReceiptText size={16} />} label="Actual" value={money(totals.actual, currency)} detail={`${burnLabel(totals.actual, totals.estimate)} of estimate`} />
       <Metric icon={<TrendingUp size={16} />} label="Forecast" value={money(forecast, currency)} detail="Actual recorded cost" warning={forecast > totals.estimate} />
     </section>
+    <PurchaseOrderBudgetSummary title="Show purchase orders" orders={purchaseOrdersForShow(purchaseOrders, showId)} currency={currency} />
     <PortfolioTable>
       <div className="grid grid-cols-[minmax(220px,1.6fr)_100px_135px_135px_135px_96px_34px] gap-3 bg-[#f5f5f1] px-5 py-3 text-[10px] font-semibold uppercase tracking-[.08em] text-[#747c77]">
         <span>Episode</span><span>Cost lines</span><span>Estimate</span><span>Actual</span><span>Variance</span><span>Health</span><span aria-hidden />
@@ -348,6 +362,55 @@ function sumLines(lines: Line[]) {
   return lines.reduce((sum, line) => ({ estimate: sum.estimate + Number(line.budgetedAmount), actual: sum.actual + Number(line.actualAmount) }), { estimate: 0, actual: 0 });
 }
 
+function sumPurchaseOrders(orders: PurchaseOrderSummary[]) {
+  return orders.reduce((sum, order) => ({ authorised: sum.authorised + order.authorisedAmount, committed: sum.committed + order.committedAmount, actual: sum.actual + order.actualInvoicedAmount, remaining: sum.remaining + order.remainingAmount }), { authorised: 0, committed: 0, actual: 0, remaining: 0 });
+}
+
+function purchaseOrdersForShow(orders: PurchaseOrderSummary[], showId?: string) {
+  return showId ? orders.filter((order) => order.showId === showId) : [];
+}
+
+/** An episode sees its own POs plus show-level authorisations shared across episodes. */
+function purchaseOrdersForEpisode(orders: PurchaseOrderSummary[], episode: { id: string; showId: string }) {
+  return orders.filter((order) => order.episodeId === episode.id || (order.showId === episode.showId && !order.episodeId));
+}
+
+/** An episode sees its own Client POs plus active show-level billing authority. */
+function clientPurchaseOrdersForEpisode(orders: ClientPurchaseOrderSummary[], episode: { id: string; showId: string }) {
+  return orders.filter((order) => order.episodeId === episode.id || (order.showId === episode.showId && !order.episodeId));
+}
+
+function ClientPoBudgetSafeguards({ orders }: { orders: ClientPurchaseOrderSummary[] }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const attention = orders.flatMap((order) => {
+    const rows: Array<{ id: string; label: string; message: string }> = [];
+    if (order.status === "active" && order.expiryDate && order.expiryDate < today) rows.push({ id: `${order.id}-expired`, label: order.poNumber, message: "Expired billing authority" });
+    else if (order.status === "active" && order.expiryDate && Math.ceil((new Date(`${order.expiryDate}T00:00:00`).getTime() - new Date(`${today}T00:00:00`).getTime()) / 86_400_000) <= 30) rows.push({ id: `${order.id}-expiring`, label: order.poNumber, message: "Expires within 30 days" });
+    if (order.remainingAmount < 0) rows.push({ id: `${order.id}-over`, label: order.poNumber, message: `Over-authorised by ${money(Math.abs(order.remainingAmount), order.currency)}` });
+    else if (order.status === "active" && order.remainingAmount === 0) rows.push({ id: `${order.id}-exhausted`, label: order.poNumber, message: "All value is committed" });
+    return rows;
+  });
+  if (!attention.length) return null;
+  return <section role="alert" className="panel border border-[#efd8cf] bg-[#fffaf7] px-5 py-4"><div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold text-[#8b4f38]">Client PO billing safeguards</p><p className="mt-1 text-xs leading-5 text-[#936044]">Review these billing authorities before posting further client change work or issuing an invoice.</p><ul className="mt-2 space-y-1 text-xs text-[#936044]">{attention.map((item) => <li key={item.id}>{item.label} · {item.message}</li>)}</ul></div><Link href="/budget/client-purchase-orders" className="shrink-0 text-xs font-semibold text-[#8b5b43] hover:underline">Open Client POs</Link></div></section>;
+}
+
+function PurchaseOrderBudgetSummary({ title, orders, currency }: { title: string; orders: PurchaseOrderSummary[]; currency: string }) {
+  const totals = sumPurchaseOrders(orders);
+  return <section className="panel overflow-hidden"><div className="flex flex-col justify-between gap-3 border-b border-[#ebeae6] px-5 py-4 sm:flex-row sm:items-center"><div><h2 className="text-sm font-semibold text-[#353b39]">{title}</h2><p className="mt-1 text-xs text-[#737b77]">Commitments are tracked separately from actual cost, room, and artist time.</p></div><Link href="/budget/purchase-orders" className="text-xs font-semibold text-[#58756b] hover:underline">Open PO register</Link></div>{orders.length === 0 ? <p className="px-5 py-7 text-sm text-[#858a87]">No purchase orders apply to this scope.</p> : <><div className="grid gap-3 border-b border-[#efeeea] px-5 py-3 text-xs sm:grid-cols-4"><Summary label="Authorised" value={money(totals.authorised, currency)} /><Summary label="Committed" value={money(totals.committed, currency)} /><Summary label="Actual invoiced" value={money(totals.actual, currency)} /><Summary label="Remaining" value={money(totals.remaining, currency)} warning={totals.remaining < 0} /></div><div className="divide-y divide-[#efeeea]">{orders.map((order) => { const expiry = purchaseOrderExpiryState(order.expiryDate, order.status); const warning = order.remainingAmount < 0 ? "Over-committed" : expiry; return <Link key={order.id} href={`/budget/purchase-orders/${order.id}`} className="grid gap-2 px-5 py-3 text-sm transition-colors hover:bg-[#f8faf7] sm:grid-cols-[minmax(0,1fr)_120px_120px_120px] sm:items-center"><div className="min-w-0"><p className="truncate font-semibold text-[#44504b]">{order.poNumber}</p><p className="mt-0.5 truncate text-xs text-[#858a87]">{order.vendorName ?? "Vendor"}{order.episodeTitle ? ` · E${String(order.episodeNumber ?? 0).padStart(2, "0")} ${order.episodeTitle}` : order.showTitle ? " · Show-wide" : " · Facility-wide"}</p>{warning && <p className="mt-1 text-xs font-semibold text-[#a65f42]">{warning}</p>}</div><span className="text-xs text-[#606a65]">Commit. {money(order.committedAmount, order.currency)}</span><span className="text-xs text-[#606a65]">Actual {money(order.actualInvoicedAmount, order.currency)}</span><span className={order.remainingAmount < 0 ? "text-xs font-semibold text-[#a65f42]" : "text-xs font-semibold text-[#4f7767]"}>Remain. {money(order.remainingAmount, order.currency)}</span></Link>; })}</div></>}</section>;
+}
+
+function purchaseOrderExpiryState(value: string | Date | null, status: string) {
+  if (!value || status !== "approved") return null;
+  const expiry = new Date(value); const today = new Date();
+  expiry.setHours(0, 0, 0, 0); today.setHours(0, 0, 0, 0);
+  const days = Math.round((expiry.getTime() - today.getTime()) / 86_400_000);
+  if (days < 0) return "Expired";
+  if (days <= 14) return `Expires in ${days}d`;
+  return null;
+}
+
+function Summary({ label, value, warning = false }: { label: string; value: string; warning?: boolean }) { return <div><p className="uppercase tracking-[.08em] text-[#858a87]">{label}</p><p className={`mt-1 font-semibold ${warning ? "text-[#a65f42]" : "text-[#4d5752]"}`}>{value}</p></div>; }
+
 function currencyFor(lines: Line[]) {
   return lines[0]?.currency ?? "USD";
 }
@@ -365,14 +428,14 @@ function BudgetHealth({ actual, estimate }: { actual: number; estimate: number }
 async function load(): Promise<BudgetData> {
   if (isDebugDemoMode) {
     const episodes = [{ id: "demo-e1", label: "Signal North · E01 The Quiet Hour", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network" }, { id: "demo-e5", label: "Under Current · E01 The Undertow", showId: "demo-s2", showTitle: "Under Current", network: "Eastline" }];
-    return { episodes, workOrderCharges: [], lines: [
-      { id: "b1", workOrderId: null, vendorInvoiceId: null, episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "Edit suite", description: "Avid bays", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 48000, actualAmount: 42150, currency: "GBP", costType: "internal" },
-      { id: "b2", workOrderId: null, vendorInvoiceId: null, episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "VFX", description: "Cleanup and screens", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 78000, actualAmount: 82350, currency: "GBP", costType: "billable" },
-      { id: "b3", workOrderId: null, vendorInvoiceId: null, episodeId: "demo-e5", episodeTitle: "The Undertow", episodeNumber: 1, category: "Sound", description: "Mix and stems", showId: "demo-s2", showTitle: "Under Current", network: "Eastline", budgetedAmount: 52000, actualAmount: 47120, currency: "GBP", costType: "internal" },
+    return { episodes, workOrderCharges: [], purchaseOrders: [], clientPurchaseOrders: [], lines: [
+      { id: "b1", workOrderId: null, vendorInvoiceId: null, purchaseOrderId: null, purchaseOrderNumber: null, purchaseOrderAllocationId: null, externalCost: false, episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "Edit suite", description: "Avid bays", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 48000, actualAmount: 42150, currency: "GBP", costType: "internal" },
+      { id: "b2", workOrderId: null, vendorInvoiceId: null, purchaseOrderId: null, purchaseOrderNumber: null, purchaseOrderAllocationId: null, externalCost: false, episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "VFX", description: "Cleanup and screens", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 78000, actualAmount: 82350, currency: "GBP", costType: "billable" },
+      { id: "b3", workOrderId: null, vendorInvoiceId: null, purchaseOrderId: null, purchaseOrderNumber: null, purchaseOrderAllocationId: null, externalCost: false, episodeId: "demo-e5", episodeTitle: "The Undertow", episodeNumber: 1, category: "Sound", description: "Mix and stems", showId: "demo-s2", showTitle: "Under Current", network: "Eastline", budgetedAmount: 52000, actualAmount: 47120, currency: "GBP", costType: "internal" },
     ] };
   }
   const context = await getActiveOrganizationContext();
-  if (!context?.organization) return { lines: [], episodes: [], workOrderCharges: [] };
-  const [budget, rows] = await Promise.all([getBudgetData(context.organization.organizationId), listEpisodes(context.organization.organizationId)]);
-  return { lines: budget.lines, workOrderCharges: budget.workOrderCharges, episodes: rows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}`, showId: episode.showId, showTitle: episode.showTitle, network: episode.network ?? "Independent" })) };
+  if (!context?.organization) return { lines: [], episodes: [], workOrderCharges: [], purchaseOrders: [], clientPurchaseOrders: [] };
+  const [budget, rows, clientPurchaseOrders] = await Promise.all([getBudgetData(context.organization.organizationId), listEpisodes(context.organization.organizationId), listClientPurchaseOrdersForOrganization(context.organization.organizationId)]);
+  return { lines: budget.lines, workOrderCharges: budget.workOrderCharges, purchaseOrders: budget.purchaseOrders, clientPurchaseOrders, episodes: rows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}`, showId: episode.showId, showTitle: episode.showTitle, network: episode.network ?? "Independent" })) };
 }

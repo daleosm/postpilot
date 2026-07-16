@@ -35,6 +35,10 @@ const secondBookingId = "94000000-0000-4000-8000-000000000023";
 const partialBookingId = "94000000-0000-4000-8000-000000000024";
 const multiDayBookingId = "94000000-0000-4000-8000-000000000025";
 const cancelledBookingId = "94000000-0000-4000-8000-000000000026";
+const vendorId = "94000000-0000-4000-8000-000000000027";
+const foreignVendorId = "94000000-0000-4000-8000-000000000028";
+const purchaseOrderId = "94000000-0000-4000-8000-000000000029";
+const foreignPurchaseOrderId = "94000000-0000-4000-8000-000000000030";
 
 function linePayload(overrides: Record<string, unknown> = {}) {
   return { episodeId, category: "editor", description: "Editorial support", budgetedAmount: 100, actualAmount: 25, costType: "internal", ...overrides };
@@ -58,18 +62,22 @@ test.describe("Budget integration", () => {
     await sql`insert into organization_role_policies (organization_id, role, label, permissions) values (${organizationId}, 'finance', 'Finance', '["manage_budget"]'::jsonb), (${organizationId}, 'rate_manager', 'Rate manager', '["manage_rates"]'::jsonb), (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb)`;
     await sql`insert into people (id, organization_id, user_id, name, email, role) values (${managerPersonId}, ${organizationId}, ${managerUserId}, 'Budget Lab Manager', 'budget-manager@postpilot.test', 'producer'), (${financePersonId}, ${organizationId}, ${financeUserId}, 'Budget Lab Finance', 'budget-finance@postpilot.test', 'finance'), (${ratePersonId}, ${organizationId}, ${rateUserId}, 'Budget Lab Rates', 'budget-rates@postpilot.test', 'rate_manager'), (${artistPersonId}, ${organizationId}, ${artistUserId}, 'Budget Lab Artist', 'budget-artist@postpilot.test', 'editor')`;
     await sql`insert into rooms (id, organization_id, name, type) values (${roomId}, ${organizationId}, 'Budget Edit 1', 'edit_bay')`;
+    await sql`insert into crm_companies (id, organization_id, name, type, currency) values (${vendorId}, ${organizationId}, 'Budget Lab Finishing', 'vendor', 'GBP'), (${foreignVendorId}, ${foreignOrganizationId}, 'Foreign Lab Finishing', 'vendor', 'GBP')`;
     await sql`insert into shows (id, organization_id, title, code, network, time_zone) values (${showId}, ${organizationId}, 'Budget Series', 'BUD', 'Budget Network', 'Europe/London'), (${crossShowId}, ${organizationId}, 'No-cost Series', 'EMPTY', 'No-cost Network', 'Europe/London'), (${foreignShowId}, ${foreignOrganizationId}, 'Foreign Budget Series', 'FBUD', 'Foreign Network', 'Europe/London')`;
     await sql`insert into seasons (id, organization_id, show_id, number) values (${seasonId}, ${organizationId}, ${showId}, 1), (${crossSeasonId}, ${organizationId}, ${crossShowId}, 1), (${foreignSeasonId}, ${foreignOrganizationId}, ${foreignShowId}, 1)`;
     await sql`insert into episodes (id, organization_id, season_id, number, title, status, qc_status) values (${episodeId}, ${organizationId}, ${seasonId}, 1, 'Budget episode', 'assembly', 'not_started'), (${otherEpisodeId}, ${organizationId}, ${seasonId}, 2, 'Other budget episode', 'assembly', 'not_started'), (${crossEpisodeId}, ${organizationId}, ${crossSeasonId}, 1, 'No-cost episode', 'assembly', 'not_started'), (${foreignEpisodeId}, ${foreignOrganizationId}, ${foreignSeasonId}, 1, 'Foreign budget episode', 'assembly', 'not_started')`;
     await sql`insert into bookings (id, organization_id, room_id, episode_id, person_id, title, starts_at, ends_at, status, booking_type) values (${bookingId}, ${organizationId}, ${roomId}, ${episodeId}, ${artistPersonId}, 'Budget edit day', '2035-07-10T09:00:00.000Z', '2035-07-10T18:00:00.000Z', 'confirmed', 'edit')`;
     await sql`insert into service_rates (id, organization_id, name, category, unit, rate, currency) values (${facilityRateId}, ${organizationId}, 'Edit suite day', 'Edit suite', 'day', '100.00', 'GBP'), (${foreignRateId}, ${foreignOrganizationId}, 'Foreign edit suite day', 'Edit suite', 'day', '300.00', 'GBP')`;
     await sql`insert into budget_lines (id, organization_id, show_id, season_id, episode_id, category, budgeted_amount, actual_amount, currency, cost_type) values (${foreignLineId}, ${foreignOrganizationId}, ${foreignShowId}, ${foreignSeasonId}, ${foreignEpisodeId}, 'editor', '100.00', '10.00', 'GBP', 'internal')`;
+    await sql`insert into purchase_orders (id, organization_id, vendor_company_id, show_id, episode_id, po_number, currency, approved_amount, status) values (${foreignPurchaseOrderId}, ${foreignOrganizationId}, ${foreignVendorId}, ${foreignShowId}, ${foreignEpisodeId}, 'FOREIGN-BUDGET-PO', 'GBP', '1000.00', 'approved')`;
   });
 
   test.beforeEach(async () => {
     await sql`delete from bookings where organization_id = ${organizationId} and id <> ${bookingId}`;
     await sql`delete from activity_log where organization_id = ${organizationId} and entity_type = 'budget_line'`;
+    await sql`delete from purchase_order_allocations where organization_id = ${organizationId}`;
     await sql`delete from budget_lines where organization_id = ${organizationId}`;
+    await sql`delete from purchase_orders where organization_id = ${organizationId}`;
     await sql`delete from post_work_orders where organization_id = ${organizationId}`;
     await sql`delete from rate_cards where organization_id = ${organizationId}`;
     await sql`delete from service_rates where organization_id = ${organizationId} and id <> ${facilityRateId}`;
@@ -102,6 +110,43 @@ test.describe("Budget integration", () => {
     expect(gone).toBeUndefined();
     const events = await sql`select action from activity_log where organization_id = ${organizationId} and entity_type = 'budget_line' order by created_at`;
     expect(events.map((event) => event.action)).toEqual(["budget_line.created", "budget_line.updated", "budget_line.deleted"]);
+  });
+
+  test("links approved PO commitments to eligible external budget lines without inflating actual cost", async ({ page }) => {
+    await useSession(page, managerUserId);
+    await sql`insert into purchase_orders (id, organization_id, vendor_company_id, show_id, episode_id, po_number, currency, approved_amount, status) values (${purchaseOrderId}, ${organizationId}, ${vendorId}, ${showId}, ${episodeId}, 'BUDGET-PO-001', 'GBP', '500.00', 'approved')`;
+
+    await useSession(page, financeUserId);
+    const create = await page.request.post("/api/budget-lines", { data: linePayload({ category: "VFX", description: "External clean-up pass", budgetedAmount: 240, actualAmount: 25, externalCost: true, purchaseOrderId }) });
+    expect(create.status()).toBe(201);
+    const lineId = (await create.json()).id as string;
+    const [line] = await sql`select purchase_order_id, external_cost, actual_amount from budget_lines where id = ${lineId}`;
+    expect(line).toMatchObject({ purchase_order_id: purchaseOrderId, external_cost: true, actual_amount: "25.00" });
+    const [allocation] = await sql`select purchase_order_id, budget_line_id, amount from purchase_order_allocations where organization_id = ${organizationId} and budget_line_id = ${lineId}`;
+    expect(allocation).toMatchObject({ purchase_order_id: purchaseOrderId, budget_line_id: lineId, amount: "240.00" });
+
+    const detail = await (await page.request.get(`/api/purchase-orders/${purchaseOrderId}`)).json();
+    expect(detail).toMatchObject({ committedAmount: 240, actualInvoicedAmount: 0, remainingAmount: 260 });
+    await page.goto(`/budget?network=Budget%20Network&show=Budget%20Series&episode=${episodeId}`);
+    await expect(page.getByText("£25.00", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("£240.00", { exact: true }).first()).toBeVisible();
+
+    expect((await page.request.patch(`/api/budget-lines/${lineId}`, { data: { budgetedAmount: 275, actualAmount: 75 } })).status()).toBe(200);
+    const [updatedAllocation] = await sql`select amount from purchase_order_allocations where organization_id = ${organizationId} and budget_line_id = ${lineId}`;
+    expect(updatedAllocation).toMatchObject({ amount: "275.00" });
+    const updatedDetail = await (await page.request.get(`/api/purchase-orders/${purchaseOrderId}`)).json();
+    expect(updatedDetail).toMatchObject({ committedAmount: 275, actualInvoicedAmount: 0 });
+    await page.reload();
+    await expect(page.getByText("£75.00", { exact: true }).first()).toBeVisible();
+
+    expect((await page.request.patch(`/api/budget-lines/${lineId}`, { data: { purchaseOrderId: null } })).status()).toBe(200);
+    const [cleared] = await sql`select purchase_order_id from budget_lines where id = ${lineId}`;
+    expect(cleared).toMatchObject({ purchase_order_id: null });
+    const allocations = await sql`select id from purchase_order_allocations where organization_id = ${organizationId} and budget_line_id = ${lineId}`;
+    expect(allocations).toHaveLength(0);
+
+    expect((await page.request.post("/api/budget-lines", { data: linePayload({ externalCost: false, purchaseOrderId }) })).status()).toBe(400);
+    expect((await page.request.post("/api/budget-lines", { data: linePayload({ externalCost: true, purchaseOrderId: foreignPurchaseOrderId }) })).status()).toBe(404);
   });
 
   test("derives show and season from a cross-show episode move instead of trusting client scope", async ({ page }) => {

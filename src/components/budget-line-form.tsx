@@ -5,7 +5,7 @@ import { Button } from "@heroui/react";
 import { Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
 const categories = ["edit suite", "editor", "assistant editor", "color", "sound", "VFX", "QC", "finalisation", "storage", "overtime"] as const;
@@ -16,21 +16,28 @@ const schema = z.object({
   budgetedAmount: z.coerce.number().nonnegative("Estimate cannot be negative."),
   actualAmount: z.coerce.number().nonnegative("Actual cost cannot be negative."),
   costType: z.enum(["billable", "internal"]),
+  externalCost: z.boolean(),
+  purchaseOrderId: z.string().uuid().nullable(),
 });
 type Values = z.infer<typeof schema>;
-type BudgetLine = { id: string; episodeId: string | null; category: string; description: string | null; budgetedAmount: string | number; actualAmount: string | number; costType: string };
+type BudgetLine = { id: string; episodeId: string | null; category: string; description: string | null; budgetedAmount: string | number; actualAmount: string | number; costType: string; externalCost: boolean; purchaseOrderId: string | null };
+type PurchaseOrderOption = { id: string; poNumber: string; vendorName: string | null; showId: string | null; episodeId: string | null; status: string; remainingAmount: number; currency: string };
 
-export function BudgetLineForm({ episodes, currency, line }: { episodes: Array<{ id: string; label: string }>; currency: string; line?: BudgetLine }) {
+export function BudgetLineForm({ episodes, currency, purchaseOrders, line }: { episodes: Array<{ id: string; label: string; showId?: string }>; currency: string; purchaseOrders: PurchaseOrderOption[]; line?: BudgetLine }) {
   const [open, setOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const router = useRouter();
-  const defaults = () => ({ episodeId: line?.episodeId ?? "", category: (categories.includes(line?.category as (typeof categories)[number]) ? line?.category : "editor") as Values["category"], description: line?.description ?? "", budgetedAmount: line ? Number(line.budgetedAmount) : 0, actualAmount: line ? Number(line.actualAmount) : 0, costType: (line?.costType === "billable" ? "billable" : "internal") as Values["costType"] });
+  const defaults = () => ({ episodeId: line?.episodeId ?? "", category: (categories.includes(line?.category as (typeof categories)[number]) ? line?.category : "editor") as Values["category"], description: line?.description ?? "", budgetedAmount: line ? Number(line.budgetedAmount) : 0, actualAmount: line ? Number(line.actualAmount) : 0, costType: (line?.costType === "billable" ? "billable" : "internal") as Values["costType"], externalCost: line?.externalCost ?? false, purchaseOrderId: line?.purchaseOrderId ?? null });
   const form = useForm<z.input<typeof schema>, unknown, Values>({ resolver: zodResolver(schema), defaultValues: defaults() });
+  const [externalCost, selectedEpisodeId] = useWatch({ control: form.control, name: ["externalCost", "episodeId"] });
+  const selectedEpisode = episodes.find((episode) => episode.id === selectedEpisodeId);
+  const eligiblePurchaseOrders = purchaseOrders.filter((order) => order.status === "approved" && (!order.showId || !selectedEpisode?.showId || order.showId === selectedEpisode.showId) && (!order.episodeId || order.episodeId === selectedEpisodeId));
 
   async function submit(values: Values) {
     setSubmitError(null);
     try {
-      const response = await fetch(line ? `/api/budget-lines/${line.id}` : "/api/budget-lines", { method: line ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
+      const payload = { ...values, purchaseOrderId: values.externalCost ? values.purchaseOrderId : null };
+      const response = await fetch(line ? `/api/budget-lines/${line.id}` : "/api/budget-lines", { method: line ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
         setSubmitError(body?.error ?? "Unable to save this budget line.");
@@ -62,6 +69,8 @@ export function BudgetLineForm({ episodes, currency, line }: { episodes: Array<{
           <div className="grid gap-4 sm:grid-cols-2"><Field label="Category" error={form.formState.errors.category?.message}><select {...form.register("category")} className="control">{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></Field><Field label="Cost type" error={form.formState.errors.costType?.message}><select {...form.register("costType")} className="control"><option value="internal">Internal</option><option value="billable">Billable</option></select></Field></div>
           <Field label="Description" error={form.formState.errors.description?.message}><input {...form.register("description")} placeholder="e.g. Final mix and audio stems" className="control" /></Field>
           <div className="grid gap-4 sm:grid-cols-2"><Field label={`Estimated cost (${currency})`} error={form.formState.errors.budgetedAmount?.message}><input type="number" min="0" step="0.01" inputMode="decimal" {...form.register("budgetedAmount")} className="control" /></Field><Field label={`Actual cost (${currency})`} error={form.formState.errors.actualAmount?.message}><input type="number" min="0" step="0.01" inputMode="decimal" {...form.register("actualAmount")} className="control" /></Field></div>
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-[#e3e5e1] bg-white px-3 py-2.5 text-sm text-[#4f5954]"><input type="checkbox" {...form.register("externalCost")} className="h-4 w-4 accent-[#58756b]" /> External vendor cost</label>
+          {externalCost && <Field label="Purchase order (optional)" error={form.formState.errors.purchaseOrderId?.message}><select {...form.register("purchaseOrderId", { setValueAs: (value) => value || null })} className="control"><option value="">No PO selected</option>{eligiblePurchaseOrders.map((order) => <option key={order.id} value={order.id}>{order.poNumber} · {order.vendorName ?? "Vendor"} · {currency} {order.remainingAmount.toFixed(2)} remaining</option>)}</select><p className="mt-1 text-xs font-normal text-[#858a87]">Linking an approved PO reserves this line’s estimate as a commitment; it is not added to actual cost.</p></Field>}
         </div>
         {submitError && <p role="alert" className="mt-4 rounded-lg bg-[#f9e7df] px-3 py-2 text-sm text-[#9f563c]">{submitError}</p>}
         <div className="mt-6 flex justify-end gap-2">{line && <Button type="button" variant="tertiary" onPress={remove} className="text-[#a35e41]">Delete</Button>}<Button type="button" variant="tertiary" onPress={() => setOpen(false)}>Cancel</Button><Button type="submit" variant="primary" isDisabled={form.formState.isSubmitting} className="bg-[#263130] text-white">{form.formState.isSubmitting ? "Saving…" : "Save line"}</Button></div>

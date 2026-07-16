@@ -14,6 +14,11 @@ const workOrderStatuses = ["open", "awaiting_approval", "in_progress", "ready_fo
 const workOrderBillingScopes = ["included", "billable_change", "internal"] as const;
 const workOrderItemTypes = ["service", "material", "expense"] as const;
 const workOrderItemUnits = ["hour", "day", "unit", "fixed"] as const;
+const workOrderWorkTypes = ["internal", "external_vendor"] as const;
+const purchaseOrderStatuses = ["draft", "approved", "closed", "cancelled"] as const;
+const purchaseOrderAllocationTypes = ["work_order", "budget_line", "vendor_invoice"] as const;
+const clientPurchaseOrderStatuses = ["draft", "active", "closed", "cancelled"] as const;
+const clientPurchaseOrderAllocationTypes = ["billable", "client_invoice", "change_order"] as const;
 const roleKey = z.string().trim().min(2).max(80).regex(/^[a-z0-9_]+$/, "Use lowercase letters, numbers, and underscores.");
 
 export const insertUserSchema = z.object({
@@ -297,6 +302,9 @@ export const createPostWorkOrderSchema = z.object({
   workflowStageId: nullableId,
   bookingId: nullableId,
   vendorCompanyId: nullableId,
+  purchaseOrderId: nullableId,
+  clientPurchaseOrderId: nullableId,
+  workType: z.enum(workOrderWorkTypes).default("internal"),
   kind: z.enum(["work_order", "qc_exception"]).default("work_order"),
   title: z.string().trim().min(2, "A work-order title is required.").max(160),
   description: z.string().trim().max(4000).nullable().optional(),
@@ -315,6 +323,10 @@ export const createPostWorkOrderSchema = z.object({
 }).transform((value) => ({ ...value, isBlocking: value.isBlocking ?? Boolean(value.workflowStageId) })).refine((value) => !value.isBlocking || Boolean(value.workflowStageId), {
   message: "A blocking work order must be linked to a workflow stage.",
   path: ["workflowStageId"],
+}).superRefine((value, context) => {
+  if (value.workType === "external_vendor" && !value.vendorCompanyId) context.addIssue({ code: z.ZodIssueCode.custom, path: ["vendorCompanyId"], message: "Choose a vendor for external work." });
+  if (value.workType === "internal" && (value.vendorCompanyId || value.purchaseOrderId || value.estimatedAmount !== null && value.estimatedAmount !== undefined)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["workType"], message: "Internal work cannot include a vendor, PO, or vendor estimate." });
+  if (value.clientPurchaseOrderId && (value.workType !== "internal" || value.billingScope !== "billable_change")) context.addIssue({ code: z.ZodIssueCode.custom, path: ["clientPurchaseOrderId"], message: "A client PO is only available for internal client-billable work." });
 });
 
 export const updatePostWorkOrderSchema = z.object({
@@ -325,6 +337,9 @@ export const updatePostWorkOrderSchema = z.object({
   assigneePersonId: nullableId,
   assigneeRole: z.string().trim().max(80).nullable().optional(),
   vendorCompanyId: nullableId,
+  purchaseOrderId: nullableId,
+  clientPurchaseOrderId: nullableId,
+  workType: z.enum(workOrderWorkTypes).optional(),
   priority: z.enum(workOrderPriorities).optional(),
   isBlocking: z.boolean().optional(),
   billingScope: z.enum(workOrderBillingScopes).optional(),
@@ -335,12 +350,15 @@ export const updatePostWorkOrderSchema = z.object({
   externalUrl: z.string().url().max(2000).nullable().optional(),
   dueAt: optionalTimestamp.nullable(),
   approvalNote: z.string().trim().max(2000).nullable().optional(),
+  overrunReason: z.string().trim().min(8, "Explain the PO overrun.").max(2000).nullable().optional(),
 }).refine((value) => Object.keys(value).length > 0, "Provide at least one change.");
 
 export const postWorkOrderChargeSchema = z.object({
   actualAmount: money.positive("Enter the client charge total."),
   category: z.string().trim().min(2).max(120).optional(),
   reference: z.string().trim().max(120).nullable().optional(),
+  clientPurchaseOrderId: nullableId,
+  clientPoOverrunReason: z.string().trim().min(8, "Explain the client PO overrun before authorising it.").max(2000).nullable().optional(),
 });
 
 export const insertBudgetLineSchema = z.object({
@@ -348,14 +366,31 @@ export const insertBudgetLineSchema = z.object({
   showId: nullableId,
   seasonId: nullableId,
   episodeId: nullableId,
+  purchaseOrderId: nullableId,
   code: z.string().trim().max(40).nullable().optional(),
   category: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000).nullable().optional(),
   budgetedAmount: money.default(0),
   actualAmount: money.default(0),
   costType: z.enum(["billable", "internal"]).default("internal"),
+  externalCost: z.boolean().default(false),
 });
-export const updateBudgetLineSchema = insertBudgetLineSchema.omit({ organizationId: true }).partial();
+// Do not derive this from the insert schema with `.partial()`: Zod defaults on
+// the insert shape would otherwise be materialised on a PATCH and overwrite
+// omitted values such as `externalCost`.
+export const updateBudgetLineSchema = z.object({
+  showId: nullableId.optional(),
+  seasonId: nullableId.optional(),
+  episodeId: nullableId.optional(),
+  purchaseOrderId: nullableId.optional(),
+  code: z.string().trim().max(40).nullable().optional(),
+  category: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+  budgetedAmount: money.optional(),
+  actualAmount: money.optional(),
+  costType: z.enum(["billable", "internal"]).optional(),
+  externalCost: z.boolean().optional(),
+}).refine((value) => Object.keys(value).length > 0, "Provide at least one budget line change.");
 
 // Costs are tracked at episode level. The broader insert schema remains useful for
 // importing historical data, while the product-facing create route uses this one.
@@ -406,6 +441,145 @@ export const insertVendorInvoiceSchema = z.object({
   status: z.enum(["received", "approved", "paid", "disputed", "void"]).default("received"),
   invoiceDate: optionalDate.nullable(),
   dueDate: optionalDate.nullable(),
+  externalDocumentUrl: z.string().url().max(2000).nullable().optional(),
+});
+
+/** A deliberately small supplier-actual entry made from a PO detail page. */
+export const createPurchaseOrderActualCostSchema = z.object({
+  episodeId: nullableId,
+  invoiceNumber: z.string().trim().min(1, "Enter the supplier invoice or reference number.").max(120),
+  invoiceDate: z.coerce.date({ error: "Enter the supplier invoice date." }),
+  amount: money.positive("Enter a positive supplier cost."),
+  description: z.string().trim().min(1, "Enter a short description.").max(2000),
+  externalDocumentUrl: z.string().url("Enter a valid document link.").max(2000).nullable().optional(),
+});
+
+const purchaseOrderFieldsSchema = z.object({
+  vendorCompanyId: id,
+  showId: nullableId,
+  episodeId: nullableId,
+  poNumber: z.string().trim().min(1, "PO number is required.").max(120),
+  approvedAmount: money.positive("Approved amount must be greater than zero."),
+  issueDate: optionalDate.nullable(),
+  expiryDate: optionalDate.nullable(),
+  notes: z.string().trim().max(8000).nullable().optional(),
+  externalDocumentUrl: z.string().url().max(2000).nullable().optional(),
+});
+
+function validatePurchaseOrderDates(value: { issueDate?: Date | null; expiryDate?: Date | null }, context: z.RefinementCtx) {
+  if (value.issueDate && value.expiryDate && value.expiryDate < value.issueDate) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["expiryDate"], message: "Expiry date cannot be before the issue date." });
+  }
+}
+
+const purchaseOrderFormSchema = purchaseOrderFieldsSchema.extend({ status: z.enum(purchaseOrderStatuses).default("draft") })
+  .superRefine(validatePurchaseOrderDates);
+
+/** Client-safe PO payload. Organisation and currency are always supplied by the server. */
+export const createPurchaseOrderSchema = purchaseOrderFormSchema;
+export const updatePurchaseOrderSchema = purchaseOrderFieldsSchema.partial().extend({ status: z.enum(purchaseOrderStatuses).optional() })
+  .superRefine(validatePurchaseOrderDates);
+export const insertPurchaseOrderSchema = purchaseOrderFieldsSchema.extend({
+  status: z.enum(purchaseOrderStatuses).default("draft"),
+  organizationId: id,
+  currency: z.string().trim().length(3).toUpperCase(),
+  createdByUserId: z.string().min(1).nullable().optional(),
+}).superRefine(validatePurchaseOrderDates);
+
+const purchaseOrderAllocationFormSchema = z.object({
+  allocationType: z.enum(purchaseOrderAllocationTypes),
+  workOrderId: nullableId,
+  budgetLineId: nullableId,
+  vendorInvoiceId: nullableId,
+  amount: money.positive("Allocation amount must be greater than zero."),
+  allocationDate: z.coerce.date(),
+  reference: z.string().trim().max(160).nullable().optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+}).superRefine((value, context) => {
+  const references = [value.workOrderId, value.budgetLineId, value.vendorInvoiceId].filter(Boolean);
+  const sourceByType = {
+    work_order: value.workOrderId,
+    budget_line: value.budgetLineId,
+    vendor_invoice: value.vendorInvoiceId,
+  };
+  if (references.length !== 1 || !sourceByType[value.allocationType]) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "An allocation must reference exactly one record matching its allocation type.",
+      path: ["allocationType"],
+    });
+  }
+});
+
+/** An overrun reason is audit-only and is never persisted as an editable balance. */
+export const createPurchaseOrderAllocationSchema = purchaseOrderAllocationFormSchema.extend({
+  overrunReason: z.string().trim().min(8, "Explain why this PO needs to exceed its authorised value.").max(2000).nullable().optional(),
+});
+export const insertPurchaseOrderAllocationSchema = purchaseOrderAllocationFormSchema.extend({
+  organizationId: id,
+  purchaseOrderId: id,
+  createdByUserId: z.string().min(1).nullable().optional(),
+});
+
+const clientPurchaseOrderFieldsSchema = z.object({
+  clientCompanyId: id,
+  showId: nullableId,
+  episodeId: nullableId,
+  poNumber: z.string().trim().min(1, "PO number is required.").max(120),
+  approvedAmount: money.positive("Authorised amount must be greater than zero."),
+  issueDate: optionalDate.nullable(),
+  expiryDate: optionalDate.nullable(),
+  notes: z.string().trim().max(8000).nullable().optional(),
+  externalDocumentUrl: z.string().url().max(2000).nullable().optional(),
+});
+
+const clientPurchaseOrderFormSchema = clientPurchaseOrderFieldsSchema.extend({ status: z.enum(clientPurchaseOrderStatuses).default("draft") })
+  .superRefine(validatePurchaseOrderDates);
+
+/** Client billing authorisations. Organisation and currency are supplied by the server. */
+export const createClientPurchaseOrderSchema = clientPurchaseOrderFormSchema;
+export const updateClientPurchaseOrderSchema = clientPurchaseOrderFieldsSchema.partial().extend({ status: z.enum(clientPurchaseOrderStatuses).optional() })
+  .superRefine(validatePurchaseOrderDates);
+export const insertClientPurchaseOrderSchema = clientPurchaseOrderFieldsSchema.extend({
+  status: z.enum(clientPurchaseOrderStatuses).default("draft"),
+  organizationId: id,
+  currency: z.string().trim().length(3).toUpperCase(),
+  createdByUserId: z.string().min(1).nullable().optional(),
+}).superRefine(validatePurchaseOrderDates);
+
+const clientPurchaseOrderAllocationFormSchema = z.object({
+  allocationType: z.enum(clientPurchaseOrderAllocationTypes),
+  billableId: nullableId,
+  clientInvoiceId: nullableId,
+  clientInvoiceItemId: nullableId,
+  changeOrderReference: z.string().trim().min(1).max(160).nullable().optional(),
+  amount: money.positive("Allocation amount must be greater than zero."),
+  allocationDate: z.coerce.date(),
+  reference: z.string().trim().max(160).nullable().optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+}).superRefine((value, context) => {
+  const references = [value.billableId, value.clientInvoiceId, value.clientInvoiceItemId, value.changeOrderReference].filter(Boolean);
+  const sourceByType = {
+    billable: value.billableId,
+    client_invoice: value.clientInvoiceId ?? value.clientInvoiceItemId,
+    change_order: value.changeOrderReference,
+  };
+  if (references.length !== 1 || !sourceByType[value.allocationType]) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "An allocation must reference exactly one record matching its allocation type.",
+      path: ["allocationType"],
+    });
+  }
+});
+
+export const createClientPurchaseOrderAllocationSchema = clientPurchaseOrderAllocationFormSchema.extend({
+  overrunReason: z.string().trim().min(8, "Explain why this client PO needs to exceed its authorised value.").max(2000).nullable().optional(),
+});
+export const insertClientPurchaseOrderAllocationSchema = clientPurchaseOrderAllocationFormSchema.extend({
+  organizationId: id,
+  clientPurchaseOrderId: id,
+  createdByUserId: z.string().min(1).nullable().optional(),
 });
 
 export const insertActivityLogSchema = z.object({

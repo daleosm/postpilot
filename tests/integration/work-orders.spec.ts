@@ -31,6 +31,13 @@ const foreignEpisodeId = "91000000-0000-4000-8000-000000000023";
 const foreignWorkOrderId = "91000000-0000-4000-8000-000000000024";
 const alternateWorkflowId = "91000000-0000-4000-8000-000000000025";
 const alternateStageId = "91000000-0000-4000-8000-000000000026";
+const purchaseOrderId = "91000000-0000-4000-8000-000000000027";
+const otherEpisodePurchaseOrderId = "91000000-0000-4000-8000-000000000028";
+const foreignVendorCompanyId = "91000000-0000-4000-8000-000000000029";
+const foreignPurchaseOrderId = "91000000-0000-4000-8000-000000000030";
+const clientPurchaseOrderId = "91000000-0000-4000-8000-000000000031";
+const foreignClientPurchaseOrderId = "91000000-0000-4000-8000-000000000032";
+const foreignClientCompanyId = "91000000-0000-4000-8000-000000000033";
 const qcUserId = "user_work_order_qc";
 const editorUserId = "user_work_order_editor";
 const coordinatorUserId = "user_work_order_coordinator";
@@ -58,11 +65,13 @@ test.describe("Post work orders integration", () => {
     await sql`insert into post_workflows (id, organization_id, name, is_default) values (${workflowId}, ${organizationId}, 'Work order test workflow', true), (${alternateWorkflowId}, ${organizationId}, 'Alternate work order workflow', false), (${foreignWorkflowId}, ${foreignOrganizationId}, 'Foreign work order workflow', true)`;
     await sql`insert into workflow_stages (id, organization_id, workflow_id, name, key, position, color, is_terminal, can_start_early) values (${stageId}, ${organizationId}, ${workflowId}, 'QC verification', 'quality_control', 1, '#506f68', false, false), (${laterStageId}, ${organizationId}, ${workflowId}, 'Delivery handoff', 'delivery_handoff', 2, '#506f68', false, false), (${alternateStageId}, ${organizationId}, ${alternateWorkflowId}, 'Alternate stage', 'alternate_stage', 1, '#506f68', false, false), (${foreignStageId}, ${foreignOrganizationId}, ${foreignWorkflowId}, 'Foreign stage', 'foreign_stage', 1, '#506f68', false, false)`;
     await sql`insert into workflow_stage_approval_rules (id, organization_id, workflow_stage_id, approver_role, label, approval_order, is_required) values (${ruleId}, ${organizationId}, ${stageId}, 'post_supervisor', 'Post Supervisor sign-off', 1, true)`;
-    await sql`insert into organization_role_policies (organization_id, role, label, permissions) values (${organizationId}, 'post_supervisor', 'Post supervisor', '["manage_work_orders","approve_work_orders","manage_shows","manage_budget"]'::jsonb), (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb), (${organizationId}, 'quality_verifier', 'QC verifier', '["update_assigned_work","verify_qc","approve_work_orders"]'::jsonb), (${organizationId}, 'operations_coordinator', 'Operations coordinator', '["manage_work_orders"]'::jsonb)`;
-    await sql`insert into crm_companies (id, organization_id, name, type, currency) values (${vendorCompanyId}, ${organizationId}, 'Lab Finishing Vendor', 'vendor', 'GBP'), (${clientCompanyId}, ${organizationId}, 'Lab Network Client', 'client', 'GBP')`;
-    await sql`insert into shows (id, organization_id, title, code, time_zone) values (${showId}, ${organizationId}, 'Work Order Lab Series', 'WOL', 'Europe/London'), (${foreignShowId}, ${foreignOrganizationId}, 'Foreign Work Order Series', 'FWOL', 'Europe/London')`;
+    await sql`insert into organization_role_policies (organization_id, role, label, permissions) values (${organizationId}, 'post_supervisor', 'Post supervisor', '["manage_work_orders","approve_work_orders","manage_shows","manage_budget"]'::jsonb), (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb), (${organizationId}, 'quality_verifier', 'QC verifier', '["update_assigned_work","verify_qc","approve_work_orders","approve_budget_overruns"]'::jsonb), (${organizationId}, 'operations_coordinator', 'Operations coordinator', '["manage_work_orders","approve_work_orders"]'::jsonb)`;
+    await sql`insert into crm_companies (id, organization_id, name, type, currency) values (${vendorCompanyId}, ${organizationId}, 'Lab Finishing Vendor', 'vendor', 'GBP'), (${clientCompanyId}, ${organizationId}, 'Lab Network Client', 'client', 'GBP'), (${foreignVendorCompanyId}, ${foreignOrganizationId}, 'Foreign Finishing Vendor', 'vendor', 'GBP'), (${foreignClientCompanyId}, ${foreignOrganizationId}, 'Foreign Client', 'client', 'GBP')`;
+    await sql`insert into shows (id, organization_id, title, code, client_company_id, time_zone) values (${showId}, ${organizationId}, 'Work Order Lab Series', 'WOL', ${clientCompanyId}, 'Europe/London'), (${foreignShowId}, ${foreignOrganizationId}, 'Foreign Work Order Series', 'FWOL', null, 'Europe/London')`;
     await sql`insert into seasons (id, organization_id, show_id, number) values (${seasonId}, ${organizationId}, ${showId}, 1), (${foreignSeasonId}, ${foreignOrganizationId}, ${foreignShowId}, 1)`;
     await sql`insert into episodes (id, organization_id, season_id, workflow_stage_id, number, title, status, qc_status) values (${episodeId}, ${organizationId}, ${seasonId}, ${stageId}, 1, 'Correction test', 'online', 'needs_attention'), (${otherEpisodeId}, ${organizationId}, ${seasonId}, ${stageId}, 2, 'Other correction test', 'online', 'needs_attention'), (${foreignEpisodeId}, ${foreignOrganizationId}, ${foreignSeasonId}, ${foreignStageId}, 1, 'Foreign correction test', 'online', 'needs_attention')`;
+    await sql`insert into client_purchase_orders (id, organization_id, client_company_id, show_id, episode_id, po_number, currency, approved_amount, status) values (${clientPurchaseOrderId}, ${organizationId}, ${clientCompanyId}, ${showId}, ${episodeId}, 'WOL-CLIENT-001', 'GBP', '2000.00', 'active'), (${foreignClientPurchaseOrderId}, ${foreignOrganizationId}, ${foreignClientCompanyId}, ${foreignShowId}, ${foreignEpisodeId}, 'FOREIGN-WOL-CLIENT-001', 'GBP', '2000.00', 'active')`;
+    await sql`insert into purchase_orders (id, organization_id, vendor_company_id, show_id, episode_id, po_number, currency, approved_amount, status) values (${purchaseOrderId}, ${organizationId}, ${vendorCompanyId}, ${showId}, ${episodeId}, 'WOL-PO-001', 'GBP', 1500, 'approved'), (${otherEpisodePurchaseOrderId}, ${organizationId}, ${vendorCompanyId}, ${showId}, ${otherEpisodeId}, 'WOL-PO-002', 'GBP', 800, 'approved'), (${foreignPurchaseOrderId}, ${foreignOrganizationId}, ${foreignVendorCompanyId}, ${foreignShowId}, ${foreignEpisodeId}, 'FWOL-PO-001', 'GBP', 900, 'approved')`;
     await sql`insert into rooms (id, organization_id, name, type) values (${roomId}, ${organizationId}, 'Lab Online', 'online')`;
     await sql`insert into bookings (id, organization_id, room_id, episode_id, title, starts_at, ends_at, status, booking_type) values (${otherBookingId}, ${organizationId}, ${roomId}, ${otherEpisodeId}, 'Other episode online', '2035-02-01T09:00:00.000Z', '2035-02-01T12:00:00.000Z', 'confirmed', 'conform')`;
     await sql`insert into post_work_orders (id, organization_id, episode_id, workflow_stage_id, title) values (${foreignWorkOrderId}, ${foreignOrganizationId}, ${foreignEpisodeId}, ${foreignStageId}, 'Foreign work order')`;
@@ -70,6 +79,7 @@ test.describe("Post work orders integration", () => {
   });
 
   test.beforeEach(async () => {
+    await sql`delete from purchase_order_allocations where organization_id = ${organizationId}`;
     await sql`delete from budget_lines where organization_id = ${organizationId}`;
     await sql`delete from billables where organization_id = ${organizationId}`;
     await sql`delete from vendor_invoices where organization_id = ${organizationId}`;
@@ -161,9 +171,11 @@ test.describe("Post work orders integration", () => {
     const switchUser = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
     expect(switchUser.status()).toBe(200);
     await activateLab(page);
-    const create = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Client-requested alternate title card", billingScope: "billable_change", clientQuoteAmount: 750, clientQuoteCurrency: "USD" } });
+    const create = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Client-requested alternate title card", billingScope: "billable_change", clientPurchaseOrderId, clientQuoteAmount: 750, clientQuoteCurrency: "USD" } });
     expect(create.status()).toBe(201);
     const workOrderId = (await create.json()).id as string;
+    const [selectedClientPo] = await sql`select client_purchase_order_id from post_work_orders where id = ${workOrderId}`;
+    expect(selectedClientPo).toMatchObject({ client_purchase_order_id: clientPurchaseOrderId });
 
     const beforeCompletion = await page.request.post(`/api/work-orders/${workOrderId}/charge`, { data: { actualAmount: 800, category: "Graphics" } });
     expect(beforeCompletion.status()).toBe(409);
@@ -178,8 +190,16 @@ test.describe("Post work orders integration", () => {
     expect(readyToPost).toMatchObject({ billing_status: "draft" });
     const postCharge = await page.request.post(`/api/work-orders/${workOrderId}/charge`, { data: { actualAmount: 800, category: "Graphics", reference: "CO-104" } });
     expect(postCharge.status()).toBe(201);
-    const [budgetLine] = await sql`select work_order_id, budgeted_amount, actual_amount, cost_type from budget_lines where work_order_id = ${workOrderId}`;
-    expect(budgetLine).toMatchObject({ work_order_id: workOrderId, budgeted_amount: "750.00", actual_amount: "800.00", cost_type: "billable" });
+    const [budgetLine] = await sql`select work_order_id, budgeted_amount, actual_amount, cost_type, external_cost from budget_lines where work_order_id = ${workOrderId}`;
+    expect(budgetLine).toMatchObject({ work_order_id: workOrderId, budgeted_amount: "750.00", actual_amount: "800.00", cost_type: "billable", external_cost: false });
+    const [billable] = await sql`select client_purchase_order_id from billables where organization_id = ${organizationId} and episode_id = ${episodeId} and reference = 'CO-104'`;
+    expect(billable).toMatchObject({ client_purchase_order_id: clientPurchaseOrderId });
+    const [clientPoAllocation] = await sql`select allocation_type, billable_id, amount from client_purchase_order_allocations where organization_id = ${organizationId} and client_purchase_order_id = ${clientPurchaseOrderId}`;
+    expect(clientPoAllocation).toMatchObject({ allocation_type: "billable", billable_id: expect.any(String), amount: "800.00" });
+    const [vendorPoAllocations] = await sql`select count(*)::int as count from purchase_order_allocations where organization_id = ${organizationId} and purchase_order_id = ${purchaseOrderId}`;
+    const [vendorSpend] = await sql`select count(*)::int as count from vendor_invoices where organization_id = ${organizationId}`;
+    expect(vendorPoAllocations.count).toBe(0);
+    expect(vendorSpend.count).toBe(0);
 
     const duplicate = await page.request.post(`/api/work-orders/${workOrderId}/charge`, { data: { actualAmount: 800 } });
     expect(duplicate.status()).toBe(409);
@@ -190,7 +210,7 @@ test.describe("Post work orders integration", () => {
     expect(switchUser.status()).toBe(200);
     await activateLab(page);
     const create = await page.request.post("/api/work-orders", { data: {
-      episodeId, workflowStageId: stageId, title: "External versioning change", vendorCompanyId,
+      episodeId, workflowStageId: stageId, title: "External versioning change", workType: "external_vendor", vendorCompanyId,
       billingScope: "billable_change", estimatedAmount: 450, currency: "GBP", clientQuoteAmount: 900, clientQuoteCurrency: "USD",
     } });
     expect(create.status()).toBe(201);
@@ -239,13 +259,94 @@ test.describe("Post work orders integration", () => {
     expect(otherEpisodeBooking.status()).toBe(409);
     await expect(otherEpisodeBooking.json()).resolves.toMatchObject({ error: "Booking must belong to this episode." });
 
-    const wrongVendorType = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, vendorCompanyId: clientCompanyId, title: "Client cannot be a vendor" } });
+    const wrongVendorType = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, workType: "external_vendor", vendorCompanyId: clientCompanyId, title: "Client cannot be a vendor" } });
     expect(wrongVendorType.status()).toBe(400);
     await expect(wrongVendorType.json()).resolves.toMatchObject({ error: "Select a vendor account for external work." });
 
     const wrongWorkflow = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: alternateStageId, title: "Wrong workflow stage" } });
     expect(wrongWorkflow.status()).toBe(409);
     await expect(wrongWorkflow.json()).resolves.toMatchObject({ error: "Workflow stage does not belong to this episode's workflow." });
+  });
+
+  test("keeps vendor and PO controls exclusive to applicable external work", async ({ page }) => {
+    await switchDebugUser(page, "user_maya");
+
+    const internal = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Internal title correction" } });
+    expect(internal.status()).toBe(201);
+    const internalId = (await internal.json()).id as string;
+    const [internalRow] = await sql`select work_type, vendor_company_id, purchase_order_id, estimated_amount from post_work_orders where id = ${internalId}`;
+    expect(internalRow).toMatchObject({ work_type: "internal", vendor_company_id: null, purchase_order_id: null, estimated_amount: null });
+
+    const internalWithVendor = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Invalid internal vendor", vendorCompanyId, estimatedAmount: 50 } });
+    expect(internalWithVendor.status()).toBe(400);
+
+    const vendorWithClientPo = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Invalid vendor client PO", workType: "external_vendor", vendorCompanyId, billingScope: "billable_change", clientPurchaseOrderId } });
+    expect(vendorWithClientPo.status()).toBe(400);
+
+    const withoutVendor = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Missing supplier", workType: "external_vendor" } });
+    expect(withoutVendor.status()).toBe(400);
+
+    const external = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "External caption correction", workType: "external_vendor", vendorCompanyId, purchaseOrderId, estimatedAmount: 475 } });
+    expect(external.status()).toBe(201);
+    const externalId = (await external.json()).id as string;
+    const [externalRow] = await sql`select work_type, vendor_company_id, purchase_order_id, estimated_amount from post_work_orders where id = ${externalId}`;
+    expect(externalRow).toMatchObject({ work_type: "external_vendor", vendor_company_id: vendorCompanyId, purchase_order_id: purchaseOrderId, estimated_amount: "475.00" });
+
+    const convertToInternal = await page.request.patch(`/api/work-orders/${externalId}`, { data: { workType: "internal" } });
+    expect(convertToInternal.status()).toBe(200);
+    const [convertedRow] = await sql`select work_type, vendor_company_id, purchase_order_id, estimated_amount from post_work_orders where id = ${externalId}`;
+    expect(convertedRow).toMatchObject({ work_type: "internal", vendor_company_id: null, purchase_order_id: null, estimated_amount: null });
+
+    const wrongEpisodePo = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Wrong episode PO", workType: "external_vendor", vendorCompanyId, purchaseOrderId: otherEpisodePurchaseOrderId } });
+    expect(wrongEpisodePo.status()).toBe(409);
+
+    const foreignPo = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Foreign PO", workType: "external_vendor", vendorCompanyId, purchaseOrderId: foreignPurchaseOrderId } });
+    expect(foreignPo.status()).toBe(404);
+
+    const foreignClientPo = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Foreign client PO", billingScope: "billable_change", clientPurchaseOrderId: foreignClientPurchaseOrderId } });
+    expect(foreignClientPo.status()).toBe(404);
+
+    const selector = await page.request.get(`/api/purchase-orders?vendorId=${vendorCompanyId}&episodeId=${episodeId}`);
+    expect(selector.status()).toBe(200);
+    const eligible = await selector.json() as Array<{ id: string }>;
+    expect(eligible.map((order) => order.id)).toEqual([purchaseOrderId]);
+  });
+
+  test("commits approved external work to its PO once and gates overruns", async ({ page }) => {
+    await switchDebugUser(page, "user_maya");
+    const withinPo = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "Within PO finishing change", workType: "external_vendor", vendorCompanyId, purchaseOrderId, estimatedAmount: 600 } });
+    expect(withinPo.status()).toBe(201);
+    const withinPoId = (await withinPo.json()).id as string;
+    expect((await page.request.patch(`/api/work-orders/${withinPoId}`, { data: { status: "awaiting_approval" } })).status()).toBe(200);
+
+    await switchDebugUser(page, qcUserId);
+    expect((await page.request.patch(`/api/work-orders/${withinPoId}`, { data: { status: "in_progress" } })).status()).toBe(200);
+    const [commitment] = await sql`select amount, work_order_id from purchase_order_allocations where organization_id = ${organizationId} and purchase_order_id = ${purchaseOrderId} and work_order_id = ${withinPoId}`;
+    expect(commitment).toMatchObject({ amount: "600.00", work_order_id: withinPoId });
+    const [commitmentActivity] = await sql`select action from activity_log where organization_id = ${organizationId} and entity_type = 'purchase_order' and entity_id = ${purchaseOrderId} and action = 'purchase_order.work_order_committed'`;
+    expect(commitmentActivity).toBeTruthy();
+
+    await switchDebugUser(page, "user_maya");
+    const duplicate = await page.request.post(`/api/purchase-orders/${purchaseOrderId}/allocations`, { data: { allocationType: "work_order", workOrderId: withinPoId, amount: 600, allocationDate: "2035-02-02" } });
+    expect(duplicate.status()).toBe(409);
+
+    const overrun = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, title: "PO overrun finishing change", workType: "external_vendor", vendorCompanyId, purchaseOrderId, estimatedAmount: 1000 } });
+    expect(overrun.status()).toBe(201);
+    const overrunId = (await overrun.json()).id as string;
+    expect((await page.request.patch(`/api/work-orders/${overrunId}`, { data: { status: "awaiting_approval" } })).status()).toBe(200);
+
+    await switchDebugUser(page, qcUserId);
+    const missingReason = await page.request.patch(`/api/work-orders/${overrunId}`, { data: { status: "in_progress" } });
+    expect(missingReason.status()).toBe(400);
+    await expect(missingReason.json()).resolves.toMatchObject({ error: expect.stringContaining("exceeds") });
+    await switchDebugUser(page, coordinatorUserId);
+    const unauthorisedOverrun = await page.request.patch(`/api/work-orders/${overrunId}`, { data: { status: "in_progress", overrunReason: "Client added a mandatory second technical pass." } });
+    expect(unauthorisedOverrun.status()).toBe(403);
+    await expect(unauthorisedOverrun.json()).resolves.toMatchObject({ error: expect.stringContaining("Budget approval") });
+    await switchDebugUser(page, qcUserId);
+    expect((await page.request.patch(`/api/work-orders/${overrunId}`, { data: { status: "in_progress", overrunReason: "Client added a mandatory second technical pass." } })).status()).toBe(200);
+    const [overrunActivity] = await sql`select metadata from activity_log where organization_id = ${organizationId} and entity_type = 'purchase_order' and entity_id = ${purchaseOrderId} and action = 'purchase_order.work_order_overrun_authorised' order by created_at desc limit 1`;
+    expect(overrunActivity.metadata).toMatchObject({ workOrderId: overrunId, overrunAmount: 100, overrunReason: "Client added a mandatory second technical pass." });
   });
 
   test("requires independent approval before an assigned artist can start work", async ({ page }) => {
@@ -380,16 +481,18 @@ test.describe("Post work orders integration", () => {
     await page.getByRole("button", { name: "Work orders", exact: true }).click();
     await expect(page.getByText("No work orders for this episode yet.", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "New work order", exact: true }).click();
-    await expect(page.getByLabel("Estimated vendor cost")).not.toBeVisible();
-    await page.getByLabel("Vendor (optional)").selectOption(vendorCompanyId);
+    const vendorSelect = page.locator('select[name="vendorCompanyId"]');
+    await expect(vendorSelect).not.toBeVisible();
+    await page.getByRole("button", { name: "External vendor work", exact: true }).click();
+    await expect(page.getByRole("button", { name: "External vendor work", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(vendorSelect).toBeVisible();
     await expect(page.getByLabel("Estimated vendor cost")).toBeVisible();
-    await page.getByLabel("Work type").selectOption("billable_change");
-    await expect(page.getByLabel("Quoted client change")).toBeVisible();
+    await expect(page.locator('select[name="purchaseOrderId"]')).toBeVisible();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("button", { name: "New work order", exact: true }).click();
+    await expect(vendorSelect).not.toBeVisible();
     await page.getByLabel("Title").fill("UI-created work order");
-    await page.getByLabel("Estimated vendor cost").fill("240");
-    await page.getByLabel("Quoted client change").fill("480");
     await page.getByRole("button", { name: "Save draft", exact: true }).click();
-    await expect(page.getByText("Work order saved as draft.", { exact: true })).toBeVisible();
     await expect(page.getByText("UI-created work order", { exact: true })).toBeVisible();
   });
 
@@ -397,7 +500,7 @@ test.describe("Post work orders integration", () => {
     const switchManager = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
     expect(switchManager.status()).toBe(200);
     await activateLab(page);
-    const create = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, vendorCompanyId, estimatedAmount: 450, title: "External subtitle conform" } });
+    const create = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, workType: "external_vendor", vendorCompanyId, estimatedAmount: 450, title: "External subtitle conform" } });
     expect(create.status()).toBe(201);
     const workOrderId = (await create.json()).id as string;
     expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "awaiting_approval" } })).status()).toBe(200);

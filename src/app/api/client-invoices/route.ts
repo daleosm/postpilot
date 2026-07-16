@@ -4,14 +4,19 @@ import { z } from "zod";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { billables, clientInvoiceItems, clientInvoices } from "@/lib/db/schema";
+import { billables, clientInvoiceItems, clientInvoices, clientPurchaseOrderAllocations, clientPurchaseOrders } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { getEpisodeInvoiceReadiness, getInvoiceSettings } from "@/server/data";
 
-const requestSchema = z.object({ episodeId: z.string().uuid() });
+const requestSchema = z.object({
+  episodeId: z.string().uuid(),
+  clientPoOverruns: z.array(z.object({ clientPurchaseOrderId: z.string().uuid(), reason: z.string().trim().min(8).max(2000) })).default([]),
+  clientPoOverrunReason: z.string().trim().min(8).max(2000).optional(),
+});
 
 class InvoiceIssueConflict extends Error {}
+class InvoiceIssueError extends Error { constructor(public readonly status: number, message: string) { super(message); } }
 
 /** Issues an immutable client invoice from approved, uninvoiced episode charges. */
 export async function POST(request: Request) {
@@ -40,6 +45,9 @@ export async function POST(request: Request) {
   const currency = organization.currency;
   const issuerName = settings?.legalName?.trim() || organization.organizationName;
   const billingIds = readiness.billables.map((item) => item.id);
+  const overrunReasons = new Map(parsed.data.clientPoOverruns.map((entry) => [entry.clientPurchaseOrderId, entry.reason]));
+  const mayApproveOverruns = await can("approve_budget_overruns");
+  const clientPoInvoiceAllocations: Array<{ clientPurchaseOrderId: string; invoiceItemId: string; amount: string; overrunAuthorised: boolean }> = [];
 
   let invoice: { id: string; invoiceNumber: string };
   try {
@@ -80,16 +88,37 @@ export async function POST(request: Request) {
       paymentInstructions: settings?.paymentInstructions ?? null,
     }).returning({ id: clientInvoices.id, invoiceNumber: clientInvoices.invoiceNumber });
 
-    await tx.insert(clientInvoiceItems).values(readiness.billables.map((item) => ({
+    const invoiceItems = await tx.insert(clientInvoiceItems).values(readiness.billables.map((item) => ({
       organizationId,
       clientInvoiceId: created.id,
       billableId: item.id,
+      clientPurchaseOrderId: item.clientPurchaseOrderId,
       description: item.description?.trim() || "Post-production services",
       reference: item.reference,
       quantity: "1",
       unitAmount: item.amount,
       amount: item.amount,
-    })));
+    }))).returning({ id: clientInvoiceItems.id, billableId: clientInvoiceItems.billableId, clientPurchaseOrderId: clientInvoiceItems.clientPurchaseOrderId, amount: clientInvoiceItems.amount, description: clientInvoiceItems.description, reference: clientInvoiceItems.reference });
+
+    for (const item of invoiceItems.filter((candidate) => candidate.clientPurchaseOrderId)) {
+      const purchaseOrderId = item.clientPurchaseOrderId!;
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`postpilot-client-po:${purchaseOrderId}`}))`);
+      const [purchaseOrder] = await tx.select({ id: clientPurchaseOrders.id, clientCompanyId: clientPurchaseOrders.clientCompanyId, showId: clientPurchaseOrders.showId, episodeId: clientPurchaseOrders.episodeId, status: clientPurchaseOrders.status, expiryDate: clientPurchaseOrders.expiryDate, approvedAmount: clientPurchaseOrders.approvedAmount })
+        .from(clientPurchaseOrders).where(and(eq(clientPurchaseOrders.id, purchaseOrderId), eq(clientPurchaseOrders.organizationId, organizationId))).limit(1);
+      if (!purchaseOrder || purchaseOrder.status !== "active" || purchaseOrder.clientCompanyId !== readiness.episode!.clientCompanyId || (purchaseOrder.showId && purchaseOrder.showId !== readiness.episode!.showId) || (purchaseOrder.episodeId && purchaseOrder.episodeId !== readiness.episode!.id) || (purchaseOrder.expiryDate && purchaseOrder.expiryDate < invoiceDate)) {
+        throw new InvoiceIssueError(409, "An attached client PO is no longer active or does not apply to this invoice.");
+      }
+      const [totals] = await tx.select({ invoiced: sql<string>`coalesce(sum(case when ${clientPurchaseOrderAllocations.allocationType} = 'client_invoice' then ${clientPurchaseOrderAllocations.amount} else 0 end), 0)` })
+        .from(clientPurchaseOrderAllocations).where(and(eq(clientPurchaseOrderAllocations.organizationId, organizationId), eq(clientPurchaseOrderAllocations.clientPurchaseOrderId, purchaseOrderId)));
+      const overrun = Number(totals?.invoiced ?? 0) + Number(item.amount) - Number(purchaseOrder.approvedAmount);
+      if (overrun > 0) {
+        if (!(overrunReasons.get(purchaseOrderId) ?? parsed.data.clientPoOverrunReason)) throw new InvoiceIssueError(400, `Client PO ${purchaseOrderId} would be exceeded by ${overrun.toFixed(2)}. Supply an overrun reason.`);
+        if (!mayApproveOverruns) throw new InvoiceIssueError(403, "Your role needs the Budget approval permission to authorise this client PO overrun.");
+      }
+      const overrunAuthorised = overrun > 0;
+      await tx.insert(clientPurchaseOrderAllocations).values({ organizationId, clientPurchaseOrderId: purchaseOrderId, allocationType: "client_invoice", clientInvoiceItemId: item.id, amount: item.amount, overrunAuthorised, allocationDate: invoiceDate, reference: item.reference, description: item.description, createdByUserId: context.userId });
+      clientPoInvoiceAllocations.push({ clientPurchaseOrderId: purchaseOrderId, invoiceItemId: item.id, amount: item.amount, overrunAuthorised });
+    }
     const linked = await tx.update(billables).set({ clientInvoiceId: created.id, status: "invoiced", invoiceDate, dueDate, updatedAt: new Date() })
       .where(and(eq(billables.organizationId, organizationId), inArray(billables.id, billingIds), eq(billables.status, "approved"), isNull(billables.clientInvoiceId)))
       .returning({ id: billables.id });
@@ -98,10 +127,12 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     if (error instanceof InvoiceIssueConflict) return NextResponse.json({ error: error.message }, { status: 409 });
+    if (error instanceof InvoiceIssueError) return NextResponse.json({ error: error.message }, { status: error.status });
     throw error;
   }
 
   await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "client_invoice.issued", entityType: "client_invoice", entityId: invoice.id, metadata: { episodeId: readiness.episode.id, invoiceNumber: invoice.invoiceNumber, subtotal, taxAmount, totalAmount, currency } });
+  await Promise.all(clientPoInvoiceAllocations.map((allocation) => writeAuditEvent({ organizationId, actorUserId: context.userId, action: allocation.overrunAuthorised ? "client_purchase_order.overrun_authorised" : "client_purchase_order.invoice_entered", entityType: "client_purchase_order", entityId: allocation.clientPurchaseOrderId, metadata: { invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, invoiceItemId: allocation.invoiceItemId, allocationType: "client_invoice", amount: allocation.amount } })));
   return NextResponse.json(invoice, { status: 201 });
 }
 

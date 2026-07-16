@@ -3,17 +3,22 @@ import "server-only";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { bookings, billables, budgetLines, episodes, people, postWorkOrders, rooms, seasons, serviceRates, shows } from "@/lib/db/schema";
+import { bookings, billables, budgetLines, episodes, people, postWorkOrders, purchaseOrderAllocations, purchaseOrders, rooms, seasons, serviceRates, shows } from "@/lib/db/schema";
 import { resolveRate } from "@/lib/rate-resolution";
+import { listPurchaseOrdersForOrganization } from "@/server/data/purchase-orders";
 
 export async function getBudgetData(organizationId: string) {
   const db = getDb();
-  const [storedLines, invoices, workOrderCharges] = await Promise.all([
+  const [storedLines, invoices, workOrderCharges, purchaseOrderSummaries] = await Promise.all([
     db.select({
       id: budgetLines.id,
       code: budgetLines.code,
       workOrderId: budgetLines.workOrderId,
       vendorInvoiceId: budgetLines.vendorInvoiceId,
+      purchaseOrderId: budgetLines.purchaseOrderId,
+      externalCost: budgetLines.externalCost,
+      purchaseOrderNumber: purchaseOrders.poNumber,
+      purchaseOrderAllocationId: purchaseOrderAllocations.id,
       category: budgetLines.category,
       description: budgetLines.description,
       budgetedAmount: budgetLines.budgetedAmount,
@@ -31,19 +36,22 @@ export async function getBudgetData(organizationId: string) {
       .leftJoin(episodes, eq(budgetLines.episodeId, episodes.id))
       .leftJoin(seasons, eq(episodes.seasonId, seasons.id))
       .leftJoin(shows, eq(seasons.showId, shows.id))
+      .leftJoin(purchaseOrders, and(eq(budgetLines.purchaseOrderId, purchaseOrders.id), eq(purchaseOrders.organizationId, organizationId)))
+      .leftJoin(purchaseOrderAllocations, and(eq(purchaseOrderAllocations.budgetLineId, budgetLines.id), eq(purchaseOrderAllocations.organizationId, organizationId)))
       .where(and(eq(budgetLines.organizationId, organizationId), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId))),
     db.select().from(billables).where(eq(billables.organizationId, organizationId)).orderBy(desc(billables.invoiceDate)),
     db.select({
       id: postWorkOrders.id, title: postWorkOrders.title, department: postWorkOrders.department, status: postWorkOrders.status,
       billingStatus: postWorkOrders.billingStatus, estimatedAmount: sql<string | null>`coalesce(${postWorkOrders.clientQuoteAmount}, ${postWorkOrders.estimatedAmount})`, actualAmount: postWorkOrders.actualAmount,
       currency: sql<string>`coalesce(${postWorkOrders.clientQuoteCurrency}, ${postWorkOrders.currency})`, billingNotes: postWorkOrders.billingNotes, episodeId: episodes.id, episodeTitle: episodes.title,
-      episodeNumber: episodes.number, showTitle: shows.title,
+      episodeNumber: episodes.number, showId: shows.id, showTitle: shows.title, clientCompanyId: shows.clientCompanyId,
     }).from(postWorkOrders)
       .innerJoin(episodes, eq(postWorkOrders.episodeId, episodes.id))
       .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
       .innerJoin(shows, eq(seasons.showId, shows.id))
       .where(and(eq(postWorkOrders.organizationId, organizationId), eq(postWorkOrders.billingScope, "billable_change"), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId)))
       .orderBy(asc(postWorkOrders.createdAt)),
+    listPurchaseOrdersForOrganization(organizationId),
   ]);
   const bookingCosts = await listBookingCosts(organizationId);
   const lines = applyBookingCostRollups(storedLines, bookingCosts);
@@ -51,6 +59,7 @@ export async function getBudgetData(organizationId: string) {
     lines,
     billables: invoices,
     workOrderCharges,
+    purchaseOrders: purchaseOrderSummaries,
     totals: lines.reduce((total, line) => ({ budgeted: total.budgeted + Number(line.budgetedAmount), actual: total.actual + Number(line.actualAmount) }), { budgeted: 0, actual: 0 }),
   };
 }

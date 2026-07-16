@@ -1,0 +1,3 @@
+ALTER TABLE "client_purchase_order_allocations" DROP CONSTRAINT IF EXISTS "client_purchase_order_allocations_billable_id_fkey";
+ALTER TABLE "client_purchase_order_allocations" DROP CONSTRAINT IF EXISTS "client_purchase_order_allocations_client_invoice_id_fkey";
+ALTER TABLE "client_purchase_order_allocations" DROP CONSTRAINT IF EXISTS "client_purchase_order_allocations_client_invoice_item_id_fkey";

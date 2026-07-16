@@ -3,10 +3,11 @@ import { NextResponse } from "next/server";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { budgetLines, episodes, seasons, shows } from "@/lib/db/schema";
+import { budgetLines, episodes, purchaseOrderAllocations, seasons, shows } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { updateBudgetLineSchema } from "@/lib/validations/entities";
+import { PurchaseOrderError, resolveBudgetLinePurchaseOrder } from "@/server/purchase-orders";
 
 async function getMutableLine(lineId: string, organizationId: string) {
   const [line] = await getDb().select().from(budgetLines)
@@ -23,6 +24,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ li
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const organizationId = context.organization.organizationId;
+  const currency = context.organization.currency;
   const { lineId } = await params;
   const result = await getMutableLine(lineId, organizationId);
   if ("error" in result) return result.error;
@@ -38,14 +40,45 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ li
     if (!episode) return NextResponse.json({ error: "Episode not found." }, { status: 404 });
     episodeScope = episode;
   }
-  await getDb().update(budgetLines).set({
-    ...rest,
-    ...(episodeId !== undefined ? { episodeId, showId: episodeScope!.showId, seasonId: episodeScope!.seasonId } : {}),
-    ...(budgetedAmount === undefined ? {} : { budgetedAmount: String(budgetedAmount) }),
-    ...(actualAmount === undefined ? {} : { actualAmount: String(actualAmount) }),
-    currency: context.organization.currency,
-    updatedAt: new Date(),
-  }).where(and(eq(budgetLines.id, lineId), eq(budgetLines.organizationId, organizationId)));
+  const finalEpisodeId = episodeId === undefined ? result.line.episodeId : episodeId;
+  if (!finalEpisodeId) return NextResponse.json({ error: "A budget line must remain linked to an episode." }, { status: 400 });
+  const finalScope = episodeScope ?? { showId: result.line.showId!, seasonId: result.line.seasonId! };
+  const finalExternalCost = rest.externalCost === undefined ? result.line.externalCost : rest.externalCost;
+  const finalPurchaseOrderId = rest.purchaseOrderId === undefined ? result.line.purchaseOrderId : rest.purchaseOrderId;
+  let purchaseOrder;
+  try {
+    purchaseOrder = await resolveBudgetLinePurchaseOrder(organizationId, {
+      purchaseOrderId: finalPurchaseOrderId,
+      externalCost: finalExternalCost,
+      showId: finalScope.showId,
+      episodeId: finalEpisodeId,
+    });
+  } catch (error) {
+    if (error instanceof PurchaseOrderError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
+  }
+  const finalBudgetedAmount = budgetedAmount === undefined ? String(result.line.budgetedAmount) : String(budgetedAmount);
+  await getDb().transaction(async (tx) => {
+    await tx.update(budgetLines).set({
+      ...rest,
+      purchaseOrderId: purchaseOrder?.id ?? null,
+      ...(episodeId !== undefined ? { episodeId, showId: finalScope.showId, seasonId: finalScope.seasonId } : {}),
+      ...(budgetedAmount === undefined ? {} : { budgetedAmount: finalBudgetedAmount }),
+      ...(actualAmount === undefined ? {} : { actualAmount: String(actualAmount) }),
+      currency,
+      updatedAt: new Date(),
+    }).where(and(eq(budgetLines.id, lineId), eq(budgetLines.organizationId, organizationId)));
+    const [allocation] = await tx.select({ id: purchaseOrderAllocations.id, purchaseOrderId: purchaseOrderAllocations.purchaseOrderId, allocationDate: purchaseOrderAllocations.allocationDate })
+      .from(purchaseOrderAllocations).where(and(eq(purchaseOrderAllocations.organizationId, organizationId), eq(purchaseOrderAllocations.budgetLineId, lineId))).limit(1);
+    if (!purchaseOrder && allocation) {
+      await tx.delete(purchaseOrderAllocations).where(and(eq(purchaseOrderAllocations.id, allocation.id), eq(purchaseOrderAllocations.organizationId, organizationId)));
+    } else if (purchaseOrder && allocation) {
+      await tx.update(purchaseOrderAllocations).set({ purchaseOrderId: purchaseOrder.id, amount: finalBudgetedAmount, description: rest.description === undefined ? result.line.description ?? result.line.category : rest.description ?? result.line.category, updatedAt: new Date() })
+        .where(and(eq(purchaseOrderAllocations.id, allocation.id), eq(purchaseOrderAllocations.organizationId, organizationId)));
+    } else if (purchaseOrder) {
+      await tx.insert(purchaseOrderAllocations).values({ organizationId, purchaseOrderId: purchaseOrder.id, allocationType: "budget_line", budgetLineId: lineId, amount: finalBudgetedAmount, allocationDate: new Date().toISOString().slice(0, 10), reference: `Budget line ${lineId.slice(0, 8)}`, description: rest.description === undefined ? result.line.description ?? result.line.category : rest.description ?? result.line.category, createdByUserId: context.userId });
+    }
+  });
   await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "budget_line.updated", entityType: "budget_line", entityId: lineId, metadata: { episodeId: episodeId ?? result.line.episodeId } });
   return NextResponse.json({ ok: true });
 }
@@ -54,10 +87,14 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   if (!(await can("manage_budget"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const organizationId = context.organization.organizationId;
   const { lineId } = await params;
-  const result = await getMutableLine(lineId, context.organization.organizationId);
+  const result = await getMutableLine(lineId, organizationId);
   if ("error" in result) return result.error;
-  await getDb().delete(budgetLines).where(and(eq(budgetLines.id, lineId), eq(budgetLines.organizationId, context.organization.organizationId)));
-  await writeAuditEvent({ organizationId: context.organization.organizationId, actorUserId: context.userId, action: "budget_line.deleted", entityType: "budget_line", entityId: lineId, metadata: { episodeId: result.line.episodeId } });
+  await getDb().transaction(async (tx) => {
+    await tx.delete(purchaseOrderAllocations).where(and(eq(purchaseOrderAllocations.organizationId, organizationId), eq(purchaseOrderAllocations.budgetLineId, lineId)));
+    await tx.delete(budgetLines).where(and(eq(budgetLines.id, lineId), eq(budgetLines.organizationId, organizationId)));
+  });
+  await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "budget_line.deleted", entityType: "budget_line", entityId: lineId, metadata: { episodeId: result.line.episodeId } });
   return NextResponse.json({ ok: true });
 }

@@ -3,7 +3,7 @@ import "server-only";
 import { aliasedTable, and, asc, eq, notInArray, or } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { budgetLines, episodes, people, postWorkOrderItems, postWorkOrders, seasons, shows, workflowStages } from "@/lib/db/schema";
+import { budgetLines, episodes, people, postWorkOrderItems, postWorkOrders, purchaseOrders, seasons, shows, workflowStages } from "@/lib/db/schema";
 
 const assignees = aliasedTable(people, "work_order_assignees");
 const approvers = aliasedTable(people, "work_order_approvers");
@@ -14,7 +14,7 @@ export async function listEpisodeWorkOrders(organizationId: string, episodeId: s
   const [workOrders, items] = await Promise.all([db.select({
     id: postWorkOrders.id, episodeId: postWorkOrders.episodeId, workflowStageId: postWorkOrders.workflowStageId, workflowStageName: workflowStages.name,
     kind: postWorkOrders.kind, title: postWorkOrders.title, description: postWorkOrders.description, department: postWorkOrders.department,
-    assigneePersonId: postWorkOrders.assigneePersonId, assigneeName: assignees.name, assigneeRole: postWorkOrders.assigneeRole, vendorCompanyId: postWorkOrders.vendorCompanyId,
+    assigneePersonId: postWorkOrders.assigneePersonId, assigneeName: assignees.name, assigneeRole: postWorkOrders.assigneeRole, workType: postWorkOrders.workType, vendorCompanyId: postWorkOrders.vendorCompanyId, purchaseOrderId: postWorkOrders.purchaseOrderId, purchaseOrderNumber: purchaseOrders.poNumber, clientPurchaseOrderId: postWorkOrders.clientPurchaseOrderId,
     priority: postWorkOrders.priority, isBlocking: postWorkOrders.isBlocking, status: postWorkOrders.status, externalUrl: postWorkOrders.externalUrl,
     billingScope: postWorkOrders.billingScope, billingStatus: postWorkOrders.billingStatus, estimatedAmount: postWorkOrders.estimatedAmount, clientQuoteAmount: postWorkOrders.clientQuoteAmount, actualAmount: postWorkOrders.actualAmount, currency: postWorkOrders.currency, clientQuoteCurrency: postWorkOrders.clientQuoteCurrency, billingNotes: postWorkOrders.billingNotes, budgetLineId: workOrderBudgetLines.id,
     approvedByPersonId: postWorkOrders.approvedByPersonId, approvedByName: approvers.name, approvedAt: postWorkOrders.approvedAt, approvalNote: postWorkOrders.approvalNote,
@@ -23,6 +23,7 @@ export async function listEpisodeWorkOrders(organizationId: string, episodeId: s
     .leftJoin(workflowStages, and(eq(postWorkOrders.workflowStageId, workflowStages.id), eq(workflowStages.organizationId, organizationId)))
     .leftJoin(assignees, and(eq(postWorkOrders.assigneePersonId, assignees.id), eq(assignees.organizationId, organizationId)))
     .leftJoin(approvers, and(eq(postWorkOrders.approvedByPersonId, approvers.id), eq(approvers.organizationId, organizationId)))
+    .leftJoin(purchaseOrders, and(eq(postWorkOrders.purchaseOrderId, purchaseOrders.id), eq(purchaseOrders.organizationId, organizationId)))
     .leftJoin(workOrderBudgetLines, and(eq(workOrderBudgetLines.workOrderId, postWorkOrders.id), eq(workOrderBudgetLines.organizationId, organizationId)))
     .where(and(eq(postWorkOrders.organizationId, organizationId), eq(postWorkOrders.episodeId, episodeId)))
     .orderBy(asc(postWorkOrders.status), asc(postWorkOrders.dueAt), asc(postWorkOrders.createdAt)),

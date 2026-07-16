@@ -17,6 +17,13 @@ const terminalStageId = "99000000-0000-4000-8000-000000000008";
 const episodeId = "99000000-0000-4000-8000-000000000009";
 const bookingId = "99000000-0000-4000-8000-000000000010";
 const billableId = "99000000-0000-4000-8000-000000000011";
+const clientPurchaseOrderId = "99000000-0000-4000-8000-000000000012";
+const foreignOrganizationId = "99000000-0000-4000-8000-000000000013";
+const foreignCompanyId = "99000000-0000-4000-8000-000000000014";
+const foreignShowId = "99000000-0000-4000-8000-000000000015";
+const foreignSeasonId = "99000000-0000-4000-8000-000000000016";
+const foreignEpisodeId = "99000000-0000-4000-8000-000000000017";
+const foreignClientPurchaseOrderId = "99000000-0000-4000-8000-000000000018";
 
 async function useSession(page: Page) {
   expect((await page.request.post("/api/debug/user", { data: { userId: managerUserId } })).status()).toBe(200);
@@ -29,7 +36,7 @@ test.describe("Client invoice issuance", () => {
   test.beforeAll(async () => {
     await sql`delete from organizations where id = ${organizationId}`;
     await sql`insert into users (id, name, email) values (${managerUserId}, 'Invoice Lab Manager', 'invoice-lab-manager@postpilot.test') on conflict (id) do update set name = excluded.name, email = excluded.email`;
-    await sql`insert into organizations (id, name, slug, currency) values (${organizationId}, 'Invoice Lab', 'invoice-lab', 'GBP')`;
+    await sql`insert into organizations (id, name, slug, currency) values (${organizationId}, 'Invoice Lab', 'invoice-lab', 'GBP'), (${foreignOrganizationId}, 'Foreign Invoice Lab', 'foreign-invoice-lab', 'GBP')`;
     await sql`insert into organization_members (organization_id, user_id, role) values (${organizationId}, ${managerUserId}, 'admin')`;
     await sql`insert into people (id, organization_id, user_id, name, email, role) values (${managerPersonId}, ${organizationId}, ${managerUserId}, 'Invoice Lab Manager', 'invoice-lab-manager@postpilot.test', 'producer')`;
     await sql`insert into crm_companies (id, organization_id, name, type, address, finance_email, payment_terms_days) values (${companyId}, ${organizationId}, 'Invoice Client', 'client', '1 Studio Way, London', 'accounts@invoice-client.test', 14)`;
@@ -40,11 +47,17 @@ test.describe("Client invoice issuance", () => {
     await sql`insert into workflow_stages (id, organization_id, workflow_id, name, key, position, is_terminal) values (${activeStageId}, ${organizationId}, ${workflowId}, 'Online', 'online', 1, false), (${terminalStageId}, ${organizationId}, ${workflowId}, 'Archive', 'archive', 2, true)`;
     await sql`insert into episodes (id, organization_id, season_id, workflow_stage_id, number, production_code, title, status, qc_status) values (${episodeId}, ${organizationId}, ${seasonId}, ${activeStageId}, 1, 'INV101', 'Invoice episode', 'online', 'passed')`;
     await sql`insert into bookings (id, organization_id, episode_id, person_id, title, starts_at, ends_at, status, booking_type) values (${bookingId}, ${organizationId}, ${episodeId}, ${managerPersonId}, 'Invoice finishing day', '2035-08-01T09:00:00.000Z', '2035-08-01T18:00:00.000Z', 'confirmed', 'edit')`;
-    await sql`insert into billables (id, organization_id, show_id, episode_id, vendor, reference, description, amount, currency, status) values (${billableId}, ${organizationId}, ${showId}, ${episodeId}, 'Client change', 'CO-12', 'Approved editorial change', '1250.00', 'GBP', 'approved')`;
+    await sql`insert into client_purchase_orders (id, organization_id, client_company_id, show_id, episode_id, po_number, currency, approved_amount, status) values (${clientPurchaseOrderId}, ${organizationId}, ${companyId}, ${showId}, ${episodeId}, 'INV-CLIENT-001', 'GBP', '2000.00', 'active')`;
+    await sql`insert into crm_companies (id, organization_id, name, type, address) values (${foreignCompanyId}, ${foreignOrganizationId}, 'Foreign Invoice Client', 'client', '2 Foreign Way')`;
+    await sql`insert into shows (id, organization_id, title, code, client_company_id, time_zone) values (${foreignShowId}, ${foreignOrganizationId}, 'Foreign Invoice Series', 'FINV', ${foreignCompanyId}, 'Europe/London')`;
+    await sql`insert into seasons (id, organization_id, show_id, number) values (${foreignSeasonId}, ${foreignOrganizationId}, ${foreignShowId}, 1)`;
+    await sql`insert into episodes (id, organization_id, season_id, number, title, status, qc_status) values (${foreignEpisodeId}, ${foreignOrganizationId}, ${foreignSeasonId}, 1, 'Foreign invoice episode', 'assembly', 'not_started')`;
+    await sql`insert into client_purchase_orders (id, organization_id, client_company_id, show_id, episode_id, po_number, currency, approved_amount, status) values (${foreignClientPurchaseOrderId}, ${foreignOrganizationId}, ${foreignCompanyId}, ${foreignShowId}, ${foreignEpisodeId}, 'FOREIGN-INV-PO-001', 'GBP', '2000.00', 'active')`;
+    await sql`insert into billables (id, organization_id, show_id, episode_id, client_purchase_order_id, vendor, reference, description, amount, currency, status) values (${billableId}, ${organizationId}, ${showId}, ${episodeId}, ${clientPurchaseOrderId}, 'Client change', 'CO-12', 'Approved editorial change', '1250.00', 'GBP', 'approved')`;
   });
 
   test.afterAll(async () => {
-    await sql`delete from organizations where id = ${organizationId}`;
+    await sql`delete from organizations where id in (${organizationId}, ${foreignOrganizationId})`;
     await sql`delete from users where id = ${managerUserId}`;
     await sql.end();
   });
@@ -75,6 +88,22 @@ test.describe("Client invoice issuance", () => {
     const actuals = await page.request.post(`/api/bookings/${bookingId}/time-submissions`, { data: { actualStartsAt: "2035-08-01T09:00:00.000Z", actualEndsAt: "2035-08-01T18:00:00.000Z", overtimeMinutes: 0 } });
     expect(actuals.status()).toBe(201);
 
+    await sql`update billables set client_purchase_order_id = ${foreignClientPurchaseOrderId} where id = ${billableId}`;
+    const foreignClientPoInvoice = await page.request.post("/api/client-invoices", { data: { episodeId } });
+    expect(foreignClientPoInvoice.status()).toBe(409);
+    expect((await foreignClientPoInvoice.json()).error).toContain("no longer available in this post house");
+    await sql`update billables set client_purchase_order_id = ${clientPurchaseOrderId} where id = ${billableId}`;
+
+    const missingClientPoCommitment = await page.request.post("/api/client-invoices", { data: { episodeId } });
+    expect(missingClientPoCommitment.status()).toBe(409);
+    expect((await missingClientPoCommitment.json()).error).toContain("billable commitment is missing");
+    await sql`update client_purchase_orders set approved_amount = '1250.00' where id = ${clientPurchaseOrderId}`;
+    await sql`insert into client_purchase_order_allocations (organization_id, client_purchase_order_id, allocation_type, billable_id, amount, allocation_date) values (${organizationId}, ${clientPurchaseOrderId}, 'billable', ${billableId}, '1250.00', '2035-08-01')`;
+    const exhaustedClientPo = await page.request.post("/api/client-invoices", { data: { episodeId } });
+    expect(exhaustedClientPo.status()).toBe(409);
+    expect((await exhaustedClientPo.json()).error).toContain("no remaining uncommitted billing authority");
+    await sql`update client_purchase_orders set approved_amount = '2000.00' where id = ${clientPurchaseOrderId}`;
+
     const issueResponses = await Promise.all([
       page.request.post("/api/client-invoices", { data: { episodeId } }),
       page.request.post("/api/client-invoices", { data: { episodeId } }),
@@ -88,6 +117,12 @@ test.describe("Client invoice issuance", () => {
     expect(stored).toMatchObject({ status: "issued", subtotal_amount: "1250.00", tax_enabled: false, tax_rate_percent: "0.000", tax_amount: "0.00", total_amount: "1250.00", client_name: "Invoice Client" });
     const [billable] = await sql`select status, client_invoice_id from billables where id = ${billableId}`;
     expect(billable).toMatchObject({ status: "invoiced", client_invoice_id: invoice.id });
+    const [invoiceItem] = await sql`select client_purchase_order_id from client_invoice_items where organization_id = ${organizationId} and billable_id = ${billableId}`;
+    expect(invoiceItem).toMatchObject({ client_purchase_order_id: clientPurchaseOrderId });
+    const [allocation] = await sql`select allocation_type, client_invoice_item_id, amount, overrun_authorised from client_purchase_order_allocations where organization_id = ${organizationId} and client_purchase_order_id = ${clientPurchaseOrderId} and allocation_type = 'client_invoice'`;
+    expect(allocation).toMatchObject({ allocation_type: "client_invoice", amount: "1250.00" });
+    expect(allocation.client_invoice_item_id).toBeTruthy();
+    expect(allocation.overrun_authorised).toBe(false);
     const [{ count: invoiceCount }] = await sql`select count(*)::int as count from client_invoices where organization_id = ${organizationId}`;
     expect(invoiceCount).toBe(1);
 
@@ -101,6 +136,12 @@ test.describe("Client invoice issuance", () => {
     expect(pdf.headers()["content-type"]).toContain("application/pdf");
     expect((await pdf.body()).subarray(0, 8).toString()).toBe("%PDF-1.4");
     expect(new TextDecoder().decode(await pdf.body())).not.toContain("VAT");
+
+    await sql`update client_purchase_orders set expiry_date = '2000-01-01' where id = ${clientPurchaseOrderId}`;
+    const expiredPoPdf = await page.request.get(`/api/client-invoices/${invoice.id}/pdf`);
+    expect(expiredPoPdf.status()).toBe(409);
+    expect((await expiredPoPdf.json()).error).toContain("expired");
+    await sql`update client_purchase_orders set expiry_date = null where id = ${clientPurchaseOrderId}`;
 
     await sql`update episodes set workflow_stage_id = ${activeStageId} where id = ${episodeId}`;
     expect((await page.request.get(`/api/client-invoices/${invoice.id}/pdf`)).status()).toBe(409);

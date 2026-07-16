@@ -36,11 +36,16 @@ export const workOrderStatus = pgEnum("work_order_status", ["open", "awaiting_ap
 export const workOrderPriority = pgEnum("work_order_priority", ["blocker", "high", "normal", "low"]);
 export const workOrderKind = pgEnum("work_order_kind", ["work_order", "qc_exception"]);
 export const workOrderItemType = pgEnum("work_order_item_type", ["service", "material", "expense"]);
+export const workOrderWorkType = pgEnum("work_order_work_type", ["internal", "external_vendor"]);
 export const workOrderBillingScope = pgEnum("work_order_billing_scope", ["included", "billable_change", "internal"]);
 export const workOrderBillingStatus = pgEnum("work_order_billing_status", ["not_billable", "draft", "posted", "declined"]);
 export const cateringRequestType = pgEnum("catering_request_type", ["lunch", "tea_coffee", "snack"]);
 export const cateringRequestStatus = pgEnum("catering_request_status", ["requested", "acknowledged", "preparing", "delivered", "cancelled"]);
 export const vendorInvoiceStatus = pgEnum("vendor_invoice_status", ["received", "approved", "paid", "disputed", "void"]);
+export const purchaseOrderStatus = pgEnum("purchase_order_status", ["draft", "approved", "closed", "cancelled"]);
+export const purchaseOrderAllocationType = pgEnum("purchase_order_allocation_type", ["work_order", "budget_line", "vendor_invoice"]);
+export const clientPurchaseOrderStatus = pgEnum("client_purchase_order_status", ["draft", "active", "closed", "cancelled"]);
+export const clientPurchaseOrderAllocationType = pgEnum("client_purchase_order_allocation_type", ["billable", "client_invoice", "change_order"]);
 
 /** Auth.js adapter tables */
 export const users = pgTable("users", {
@@ -440,7 +445,10 @@ export const postWorkOrders = pgTable("post_work_orders", {
   episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
   workflowStageId: uuid("workflow_stage_id").references(() => workflowStages.id, { onDelete: "set null" }),
   bookingId: uuid("booking_id").references(() => bookings.id, { onDelete: "set null" }),
+  workType: workOrderWorkType("work_type").default("internal").notNull(),
   vendorCompanyId: uuid("vendor_company_id").references(() => crmCompanies.id, { onDelete: "set null" }),
+  purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "set null" }),
+  clientPurchaseOrderId: uuid("client_purchase_order_id").references(() => clientPurchaseOrders.id, { onDelete: "set null" }),
   qcIssueId: uuid("qc_issue_id").references(() => qcIssues.id, { onDelete: "set null" }),
   kind: workOrderKind("kind").default("work_order").notNull(),
   title: text("title").notNull(),
@@ -475,6 +483,8 @@ export const postWorkOrders = pgTable("post_work_orders", {
   index("post_work_orders_org_assignee_status_idx").on(table.organizationId, table.assigneePersonId, table.status),
   index("post_work_orders_episode_status_idx").on(table.episodeId, table.status),
   index("post_work_orders_organization_stage_idx").on(table.organizationId, table.workflowStageId),
+  index("post_work_orders_org_purchase_order_idx").on(table.organizationId, table.purchaseOrderId),
+  index("post_work_orders_org_client_purchase_order_idx").on(table.organizationId, table.clientPurchaseOrderId),
 ]);
 
 /** Cost and scope breakdown kept inside the operational work order. These do
@@ -504,6 +514,9 @@ export const budgetLines = pgTable("budget_lines", {
   episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "cascade" }),
   workOrderId: uuid("work_order_id").references(() => postWorkOrders.id, { onDelete: "set null" }),
   vendorInvoiceId: uuid("vendor_invoice_id").references(() => vendorInvoices.id, { onDelete: "set null" }),
+  /** External supplier spend can be reserved against one optional approved PO. */
+  purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "set null" }),
+  externalCost: boolean("external_cost").default(false).notNull(),
   code: text("code"),
   category: text("category").notNull(),
   description: text("description"),
@@ -514,6 +527,7 @@ export const budgetLines = pgTable("budget_lines", {
   ...auditColumns,
 }, (table) => [
   index("budget_lines_organization_id_idx").on(table.organizationId),
+  index("budget_lines_org_purchase_order_idx").on(table.organizationId, table.purchaseOrderId),
   uniqueIndex("budget_lines_work_order_id_idx").on(table.workOrderId),
   uniqueIndex("budget_lines_vendor_invoice_id_idx").on(table.vendorInvoiceId),
 ]);
@@ -579,6 +593,8 @@ export const billables = pgTable("billables", {
   showId: uuid("show_id").references(() => shows.id, { onDelete: "cascade" }),
   episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "cascade" }),
   clientInvoiceId: uuid("client_invoice_id").references(() => clientInvoices.id, { onDelete: "set null" }),
+  /** Optional client billing authority selected when the charge is posted. */
+  clientPurchaseOrderId: uuid("client_purchase_order_id").references(() => clientPurchaseOrders.id, { onDelete: "set null" }),
   vendor: text("vendor").notNull(),
   reference: text("reference"),
   description: text("description"),
@@ -591,7 +607,63 @@ export const billables = pgTable("billables", {
   rateSnapshot: jsonb("rate_snapshot").$type<Record<string, unknown>>(),
   overrideReason: text("override_reason"),
   ...auditColumns,
-}, (table) => [index("billables_organization_status_idx").on(table.organizationId, table.status), index("billables_client_invoice_idx").on(table.clientInvoiceId)]);
+}, (table) => [index("billables_organization_status_idx").on(table.organizationId, table.status), index("billables_client_invoice_idx").on(table.clientInvoiceId), index("billables_org_client_purchase_order_idx").on(table.organizationId, table.clientPurchaseOrderId)]);
+
+/**
+ * A client's billing-authorisation envelope. This is distinct from a vendor
+ * purchase order: it controls what the facility may bill, not what it may spend.
+ */
+export const clientPurchaseOrders = pgTable("client_purchase_orders", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  clientCompanyId: uuid("client_company_id").notNull().references(() => crmCompanies.id, { onDelete: "restrict" }),
+  showId: uuid("show_id").references(() => shows.id, { onDelete: "set null" }),
+  episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "set null" }),
+  poNumber: text("po_number").notNull(),
+  currency: text("currency").notNull(),
+  approvedAmount: numeric("approved_amount", { precision: 14, scale: 2 }).notNull(),
+  issueDate: date("issue_date"),
+  expiryDate: date("expiry_date"),
+  status: clientPurchaseOrderStatus("status").default("draft").notNull(),
+  notes: text("notes"),
+  externalDocumentUrl: text("external_document_url"),
+  createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("client_purchase_orders_org_number_idx").on(table.organizationId, table.poNumber),
+  index("client_purchase_orders_org_client_status_idx").on(table.organizationId, table.clientCompanyId, table.status),
+  index("client_purchase_orders_org_show_episode_idx").on(table.organizationId, table.showId, table.episodeId),
+  index("client_purchase_orders_org_expiry_idx").on(table.organizationId, table.expiryDate),
+]);
+
+/**
+ * Client-side authorisation ledger. Change-order references are intentionally
+ * text-only until a dedicated change-order module is introduced.
+ */
+export const clientPurchaseOrderAllocations = pgTable("client_purchase_order_allocations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  clientPurchaseOrderId: uuid("client_purchase_order_id").notNull().references(() => clientPurchaseOrders.id, { onDelete: "cascade" }),
+  allocationType: clientPurchaseOrderAllocationType("allocation_type").notNull(),
+  billableId: uuid("billable_id").references(() => billables.id, { onDelete: "cascade" }),
+  clientInvoiceId: uuid("client_invoice_id").references(() => clientInvoices.id, { onDelete: "cascade" }),
+  clientInvoiceItemId: uuid("client_invoice_item_id").references(() => clientInvoiceItems.id, { onDelete: "cascade" }),
+  changeOrderReference: text("change_order_reference"),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  /** True only when a budget approver authorised the allocation beyond the client PO value. */
+  overrunAuthorised: boolean("overrun_authorised").default(false).notNull(),
+  allocationDate: date("allocation_date").notNull(),
+  reference: text("reference"),
+  description: text("description"),
+  createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  ...auditColumns,
+}, (table) => [
+  index("client_po_allocations_org_po_date_idx").on(table.organizationId, table.clientPurchaseOrderId, table.allocationDate),
+  uniqueIndex("client_po_allocations_po_billable_idx").on(table.clientPurchaseOrderId, table.billableId),
+  uniqueIndex("client_po_allocations_po_invoice_idx").on(table.clientPurchaseOrderId, table.clientInvoiceId),
+  uniqueIndex("client_po_allocations_po_invoice_item_idx").on(table.clientPurchaseOrderId, table.clientInvoiceItemId),
+  uniqueIndex("client_po_allocations_po_change_order_idx").on(table.clientPurchaseOrderId, table.changeOrderReference),
+]);
 
 /** Immutable issued-invoice line snapshots, linked back to their originating client charges where possible. */
 export const clientInvoiceItems = pgTable("client_invoice_items", {
@@ -599,6 +671,7 @@ export const clientInvoiceItems = pgTable("client_invoice_items", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   clientInvoiceId: uuid("client_invoice_id").notNull().references(() => clientInvoices.id, { onDelete: "cascade" }),
   billableId: uuid("billable_id").references(() => billables.id, { onDelete: "set null" }),
+  clientPurchaseOrderId: uuid("client_purchase_order_id").references(() => clientPurchaseOrders.id, { onDelete: "set null" }),
   description: text("description").notNull(),
   reference: text("reference"),
   quantity: numeric("quantity", { precision: 12, scale: 3 }).default("1").notNull(),
@@ -607,6 +680,7 @@ export const clientInvoiceItems = pgTable("client_invoice_items", {
   ...auditColumns,
 }, (table) => [
   index("client_invoice_items_org_invoice_idx").on(table.organizationId, table.clientInvoiceId),
+  index("client_invoice_items_org_client_purchase_order_idx").on(table.organizationId, table.clientPurchaseOrderId),
   uniqueIndex("client_invoice_items_billable_idx").on(table.billableId),
 ]);
 
@@ -625,8 +699,63 @@ export const vendorInvoices = pgTable("vendor_invoices", {
   status: vendorInvoiceStatus("status").default("received").notNull(),
   invoiceDate: date("invoice_date"),
   dueDate: date("due_date"),
+  externalDocumentUrl: text("external_document_url"),
   ...auditColumns,
 }, (table) => [uniqueIndex("vendor_invoices_org_number_idx").on(table.organizationId, table.vendorCompanyId, table.invoiceNumber), index("vendor_invoices_org_work_order_idx").on(table.organizationId, table.workOrderId), index("vendor_invoices_org_status_idx").on(table.organizationId, table.status)]);
+
+/**
+ * A vendor's authorised spend envelope for a show or episode. Calculated
+ * committed and actual balances intentionally live in allocation queries,
+ * rather than being editable columns on this record.
+ */
+export const purchaseOrders = pgTable("purchase_orders", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  vendorCompanyId: uuid("vendor_company_id").notNull().references(() => crmCompanies.id, { onDelete: "restrict" }),
+  showId: uuid("show_id").references(() => shows.id, { onDelete: "set null" }),
+  episodeId: uuid("episode_id").references(() => episodes.id, { onDelete: "set null" }),
+  poNumber: text("po_number").notNull(),
+  currency: text("currency").notNull(),
+  approvedAmount: numeric("approved_amount", { precision: 14, scale: 2 }).notNull(),
+  issueDate: date("issue_date"),
+  expiryDate: date("expiry_date"),
+  status: purchaseOrderStatus("status").default("draft").notNull(),
+  notes: text("notes"),
+  externalDocumentUrl: text("external_document_url"),
+  createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("purchase_orders_org_number_idx").on(table.organizationId, table.poNumber),
+  index("purchase_orders_org_vendor_status_idx").on(table.organizationId, table.vendorCompanyId, table.status),
+  index("purchase_orders_org_show_episode_idx").on(table.organizationId, table.showId, table.episodeId),
+  index("purchase_orders_org_expiry_idx").on(table.organizationId, table.expiryDate),
+]);
+
+/**
+ * An immutable-style PO ledger. Each entry is linked to exactly one operational
+ * source, allowing committed and invoiced values to be calculated accurately.
+ */
+export const purchaseOrderAllocations = pgTable("purchase_order_allocations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  purchaseOrderId: uuid("purchase_order_id").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }),
+  allocationType: purchaseOrderAllocationType("allocation_type").notNull(),
+  workOrderId: uuid("work_order_id").references(() => postWorkOrders.id, { onDelete: "set null" }),
+  budgetLineId: uuid("budget_line_id").references(() => budgetLines.id, { onDelete: "set null" }),
+  vendorInvoiceId: uuid("vendor_invoice_id").references(() => vendorInvoices.id, { onDelete: "set null" }),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  allocationDate: date("allocation_date").notNull(),
+  reference: text("reference"),
+  description: text("description"),
+  createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  ...auditColumns,
+}, (table) => [
+  index("purchase_order_allocations_org_po_date_idx").on(table.organizationId, table.purchaseOrderId, table.allocationDate),
+  uniqueIndex("purchase_order_allocations_org_budget_line_idx").on(table.organizationId, table.budgetLineId),
+  uniqueIndex("purchase_order_allocations_po_work_order_idx").on(table.purchaseOrderId, table.workOrderId),
+  uniqueIndex("purchase_order_allocations_po_budget_line_idx").on(table.purchaseOrderId, table.budgetLineId),
+  uniqueIndex("purchase_order_allocations_po_vendor_invoice_idx").on(table.purchaseOrderId, table.vendorInvoiceId),
+]);
 
 export const activityLog = pgTable("activity_log", {
   id: uuid("id").defaultRandom().primaryKey(),

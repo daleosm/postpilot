@@ -3,9 +3,11 @@ import { ArrowLeft, CalendarClock, ContactRound, FileText, Landmark, ReceiptText
 import { notFound, redirect } from "next/navigation";
 
 import { CrmAccountDetailsForm } from "@/components/crm-account-details-form";
+import { ClientPurchaseOrdersSummary } from "@/components/client-purchase-orders-summary";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { getCrmAccount } from "@/server/data/crm";
+import { getClientPurchaseOrderCommercialLinksForOrganization, listClientPurchaseOrdersForAccount } from "@/server/data/client-purchase-orders";
 
 export default async function CrmAccountPage({ params }: { params: Promise<{ companyId: string }> }) {
   const [mayManageShows, mayManageBudget] = await Promise.all([can("manage_shows"), can("manage_budget")]);
@@ -13,11 +15,16 @@ export default async function CrmAccountPage({ params }: { params: Promise<{ com
   const context = await getActiveOrganizationContext();
   if (!context?.organization) notFound();
   const { companyId } = await params;
-  const data = await getCrmAccount(context.organization.organizationId, companyId);
+  const data = await getCrmAccount(context.organization.organizationId, companyId, { includeVendorProcurement: mayManageBudget });
   if (!data) notFound();
   const { company } = data;
   const owner = data.owners.find((person) => person.id === company.accountOwnerId);
   const isVendor = company.type === "vendor";
+  const isClientBillingAccount = company.type === "client" || company.type === "network";
+  const clientPurchaseOrders = mayManageBudget && isClientBillingAccount
+    ? await listClientPurchaseOrdersForAccount(context.organization.organizationId, company.id)
+    : [];
+  const clientPurchaseOrderLinks = await getClientPurchaseOrderCommercialLinksForOrganization(context.organization.organizationId, clientPurchaseOrders.map((order) => order.id));
 
   return <div className="space-y-5">
     <Link href="/crm" className="flex w-fit items-center gap-1 text-xs font-medium text-[#617b75]"><ArrowLeft size={14}/> Clients & vendors</Link>
@@ -63,6 +70,10 @@ export default async function CrmAccountPage({ params }: { params: Promise<{ com
 
     {isVendor && <Panel title="Vendor operations" icon={<ReceiptText size={16}/> }><div className={`grid divide-y divide-[#efeeea] ${mayManageBudget ? "md:grid-cols-2 md:divide-x md:divide-y-0" : ""}`}><Rows title="Active work orders" empty="No active vendor work orders." rows={data.workOrders.filter((item) => !["complete", "cancelled"].includes(item.status)).map((item) => ({ id: item.id, primary: item.title, secondary: `E${String(item.episodeNumber).padStart(2, "0")} ${item.episodeTitle} · ${item.status}` }))}/>{mayManageBudget && <Rows title="Vendor invoices" empty="No vendor invoices." rows={data.invoices.map((item) => ({ id: item.id, primary: item.invoiceNumber, secondary: `${money(Number(item.amount), item.currency)} · ${item.status}` }))}/>}</div></Panel>}
 
+    {isVendor && mayManageBudget && data.vendorProcurement && <VendorProcurement procurement={data.vendorProcurement} />}
+
+    {mayManageBudget && isClientBillingAccount && <ClientPurchaseOrdersSummary orders={clientPurchaseOrders} links={clientPurchaseOrderLinks} scope="account" />}
+
     <Panel title="Recent commercial activity" icon={<CalendarClock size={16}/> }>
       <div className="divide-y divide-[#efeeea]">{data.activities.map((activity) => <div key={activity.id} className="flex justify-between gap-4 px-5 py-3"><div className="min-w-0"><p className="text-sm font-medium text-[#46504b]">{activity.action.replaceAll(".", " ").replaceAll("_", " ")}</p><p className="mt-1 truncate text-xs text-[#7d837f]">{activity.detail}</p></div><time className="shrink-0 text-xs text-[#858a87]" dateTime={activity.createdAt.toISOString()}>{formatDateTime(activity.createdAt)}</time></div>)}{!data.activities.length && <Empty message="No commercial activity recorded for this account yet." />}</div>
     </Panel>
@@ -77,6 +88,9 @@ function ProfileItem({ label, value }: { label: string; value: string }) { retur
 function Empty({ message }: { message: string }) { return <p className="px-5 py-8 text-sm text-[#858a87]">{message}</p>; }
 function Rows({ title, empty, rows }: { title: string; empty: string; rows: Array<{ id: string; primary: string; secondary: string }> }) { return <div><div className="px-5 py-3 text-sm font-semibold text-[#3e4743]">{title}</div><div className="divide-y divide-[#efeeea]">{rows.map((row) => <div key={row.id} className="px-5 py-3"><p className="text-sm font-medium text-[#3d4642]">{row.primary}</p><p className="mt-1 text-xs text-[#7d837f]">{row.secondary}</p></div>)}{!rows.length && <Empty message={empty}/>}</div></div>; }
 function ShowList({ title, shows, empty, muted = false }: { title: string; shows: Array<{ id: string; title: string; code: string; network: string | null; activeEpisodeCount: number }>; empty: string; muted?: boolean }) { return <Panel title={title} icon={<Tags size={16}/> }><div className="divide-y divide-[#efeeea]">{shows.map((show) => <Link key={show.id} href={`/shows/${show.id}`} className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-[#fafbf9]"><div className="min-w-0"><p className="truncate text-sm font-medium text-[#3d4642]">{show.code} · {show.title}</p><p className="mt-1 truncate text-xs text-[#7d837f]">{show.network ?? "Independent"}</p></div>{!muted && <span className="shrink-0 rounded bg-[#e5eee8] px-2 py-1 text-[10px] font-semibold text-[#477263]">{show.activeEpisodeCount} active eps</span>}</Link>)}{!shows.length && <Empty message={empty}/>}</div></Panel>; }
+type VendorPurchaseOrder = { id: string; poNumber: string; currency: string; status: string; expiryDate: string | null; authorisedAmount: number; committedAmount: number; actualInvoicedAmount: number; remainingAmount: number; expiryWarning: "expired" | "expiring" | null; workOrders: Array<{ id: string; title: string; status: string; episodeNumber: number; episodeTitle: string }> };
+function VendorProcurement({ procurement }: { procurement: { active: VendorPurchaseOrder[]; closed: VendorPurchaseOrder[] } }) { return <Panel title="Purchase orders" icon={<Landmark size={16}/> }><div className="border-b border-[#efeeea] px-5 py-3"><p className="text-xs text-[#737b77]">Supplier authorisations, live commitments, invoices, and linked external work. This procurement data is only shown on vendor accounts.</p></div><PurchaseOrderRows label="Active POs" orders={procurement.active} empty="No active purchase orders for this vendor."/><PurchaseOrderRows label="Closed POs" orders={procurement.closed} empty="No closed purchase orders for this vendor."/></Panel>; }
+function PurchaseOrderRows({ label, orders, empty }: { label: string; orders: VendorPurchaseOrder[]; empty: string }) { return <div className="border-b border-[#efeeea] last:border-0"><div className="flex items-center justify-between px-5 py-3"><h3 className="text-sm font-semibold text-[#3e4743]">{label}</h3><span className="text-xs text-[#858a87]">{orders.length}</span></div>{!orders.length ? <Empty message={empty}/> : <div className="overflow-x-auto"><div className="min-w-[760px]"><div className="grid grid-cols-[minmax(150px,1.15fr)_110px_110px_110px_110px_minmax(180px,1fr)] gap-3 bg-[#fafaf8] px-5 py-2 text-[10px] font-semibold uppercase tracking-[.08em] text-[#7e837f]"><span>PO</span><span>Authorised</span><span>Committed</span><span>Actual</span><span>Remaining</span><span>External work orders</span></div>{orders.map((order) => <div key={order.id} className="grid grid-cols-[minmax(150px,1.15fr)_110px_110px_110px_110px_minmax(180px,1fr)] items-center gap-3 border-t border-[#efeeea] px-5 py-3 text-sm"><div className="min-w-0"><Link href={`/budget/purchase-orders/${order.id}`} className="font-semibold text-[#58756b] hover:underline">{order.poNumber}</Link><p className="mt-1 text-xs capitalize text-[#7d837f]">{order.status}{order.expiryDate ? ` · expires ${formatDate(order.expiryDate)}` : ""}</p>{order.expiryWarning && <span className={`mt-1 inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${order.expiryWarning === "expired" ? "bg-[#f9e7df] text-[#9f563c]" : "bg-[#f6ebde] text-[#9a613f]"}`}>{order.expiryWarning === "expired" ? "Expired" : "Expires soon"}</span>}</div><p>{money(order.authorisedAmount, order.currency)}</p><p>{money(order.committedAmount, order.currency)}</p><p>{money(order.actualInvoicedAmount, order.currency)}</p><p className={order.remainingAmount < 0 ? "font-semibold text-[#a65f42]" : "font-semibold text-[#4f7767]"}>{money(order.remainingAmount, order.currency)}</p><div className="min-w-0">{order.workOrders.length ? order.workOrders.map((workOrder) => <p key={workOrder.id} className="truncate text-xs text-[#56615c]">E{String(workOrder.episodeNumber).padStart(2, "0")} · {workOrder.title} <span className="text-[#858a87]">({workOrder.status})</span></p>) : <span className="text-xs text-[#858a87]">No linked work orders</span>}</div></div>)}</div></div>}</div>; }
 function money(value: number, currency: string) { try { return new Intl.NumberFormat("en-GB", { style: "currency", currency, maximumFractionDigits: 2 }).format(value); } catch { return `${currency} ${value.toFixed(2)}`; } }
 function formatDate(value: string | Date) { return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(value)); }
 function formatDateTime(value: Date) { return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(value); }

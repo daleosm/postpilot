@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
@@ -8,6 +8,8 @@ import {
   bookings,
   budgetLines,
   cateringRequests,
+  clientPurchaseOrderAllocations,
+  clientPurchaseOrders,
   clientInvoiceItems,
   clientInvoices,
   crmCompanies,
@@ -22,6 +24,8 @@ import {
   postWorkOrders,
   postWorkOrderItems,
   postWorkflows,
+  purchaseOrderAllocations,
+  purchaseOrders,
   qcIssues,
   qcReports,
   rateCardItems,
@@ -453,7 +457,7 @@ async function seedTenant(tenant: TenantSeed) {
   await db.insert(qcReports).values([{ id: id(tenant.number, "33", 1), organizationId: tenant.id, episodeId: episodeId(4), status: "failed", summary: "Flash-frame and caption timing failures require a corrected post package.", completedAt: at(-1, 16) }]);
   await db.insert(qcIssues).values([{ id: id(tenant.number, "34", 1), organizationId: tenant.id, qcReportId: id(tenant.number, "33", 1), code: "PHOTOSENS-01", severity: "high", description: "Photosensitivity warning at transition; regrade and rerun external QC.", timecodeSeconds: "1817.700", status: "open" }]);
   await db.insert(postWorkOrders).values([
-    { id: id(tenant.number, "38", 1), organizationId: tenant.id, episodeId: episodeId(1), workflowStageId: stageId(4), vendorCompanyId: companyId(3), title: "External caption and QC package", description: "Vendor brief for caption correction and technical QC support.", department: "Delivery", assigneePersonId: byRole("assistant_editor"), assigneeRole: "assistant_editor", priority: "high", isBlocking: false, status: "in_progress", billingScope: "internal", estimatedAmount: (2750 * tenant.budgetProfile.multiplier).toFixed(2), currency: tenant.budgetProfile.currency, externalUrl: "https://example.com/vendor-brief" },
+    { id: id(tenant.number, "38", 1), organizationId: tenant.id, episodeId: episodeId(1), workflowStageId: stageId(4), workType: "external_vendor", vendorCompanyId: companyId(3), title: "External caption and QC package", description: "Vendor brief for caption correction and technical QC support.", department: "Delivery", assigneePersonId: byRole("assistant_editor"), assigneeRole: "assistant_editor", priority: "high", isBlocking: false, status: "in_progress", billingScope: "internal", estimatedAmount: (2750 * tenant.budgetProfile.multiplier).toFixed(2), currency: tenant.budgetProfile.currency, externalUrl: "https://example.com/vendor-brief" },
     { id: id(tenant.number, "38", 2), organizationId: tenant.id, episodeId: episodeId(4), workflowStageId: stageId(13), qcIssueId: id(tenant.number, "34", 1), kind: "qc_exception", title: "QC exception — correct photosensitivity transition", description: "Photosensitivity warning at 00:30:17.700. Regrade, document the correction, then return to QC.", department: "Online", assigneePersonId: byRole("online_editor"), assigneeRole: "online_editor", priority: "blocker", isBlocking: true, status: "open", externalUrl: "https://example.com/qc-report" },
   ]);
   await db.insert(postWorkOrderItems).values([
@@ -470,7 +474,20 @@ async function seedTenant(tenant: TenantSeed) {
   }));
   const vendorInvoiceAmount = 2750 * tenant.budgetProfile.multiplier;
   await db.insert(vendorInvoices).values([{ id: id(tenant.number, "47", 1), organizationId: tenant.id, vendorCompanyId: companyId(3), workOrderId: id(tenant.number, "38", 1), showId: showId(1), episodeId: episodeId(1), invoiceNumber: `${tenant.slug.toUpperCase()}-V-001`, description: "External QC and finishing support", amount: vendorInvoiceAmount.toFixed(2), currency: tenant.budgetProfile.currency, status: "approved", invoiceDate: day(-3), dueDate: day(12) }]);
-  await db.insert(budgetLines).values([{ id: id(tenant.number, "30", 99), organizationId: tenant.id, showId: showId(1), seasonId: seasonId(1), episodeId: episodeId(1), vendorInvoiceId: id(tenant.number, "47", 1), code: "VENDOR-INV-001", category: "Vendor invoice", description: "External QC and finishing support", budgetedAmount: "0", actualAmount: vendorInvoiceAmount.toFixed(2), currency: tenant.budgetProfile.currency, costType: "internal" }]);
+  await db.insert(budgetLines).values([{ id: id(tenant.number, "30", 99), organizationId: tenant.id, showId: showId(1), seasonId: seasonId(1), episodeId: episodeId(1), vendorInvoiceId: id(tenant.number, "47", 1), code: "VENDOR-INV-001", category: "Vendor invoice", description: "External QC and finishing support", budgetedAmount: "0", actualAmount: vendorInvoiceAmount.toFixed(2), currency: tenant.budgetProfile.currency, costType: "internal", externalCost: true }]);
+  await db.insert(purchaseOrders).values([{ id: id(tenant.number, "48", 1), organizationId: tenant.id, vendorCompanyId: companyId(3), showId: showId(1), episodeId: episodeId(1), poNumber: `${tenant.slug.toUpperCase()}-PO-001`, currency: tenant.budgetProfile.currency, approvedAmount: (5000 * tenant.budgetProfile.multiplier).toFixed(2), issueDate: day(-14), expiryDate: day(45), status: "approved", notes: "Approved specialist finishing and delivery support.", externalDocumentUrl: `https://example.com/purchase-orders/${tenant.slug}-001`, createdByUserId: tenant.people.find((person) => person.role === "post_supervisor")?.userId ?? null }]);
+  await db.update(postWorkOrders).set({ purchaseOrderId: id(tenant.number, "48", 1) }).where(and(
+    eq(postWorkOrders.organizationId, tenant.id),
+    eq(postWorkOrders.id, id(tenant.number, "38", 1)),
+  ));
+  await db.update(budgetLines).set({ purchaseOrderId: id(tenant.number, "48", 1), externalCost: true }).where(and(
+    eq(budgetLines.organizationId, tenant.id),
+    eq(budgetLines.id, id(tenant.number, "30", 99)),
+  ));
+  await db.insert(purchaseOrderAllocations).values([
+    { id: id(tenant.number, "49", 1), organizationId: tenant.id, purchaseOrderId: id(tenant.number, "48", 1), allocationType: "work_order", workOrderId: id(tenant.number, "38", 1), amount: vendorInvoiceAmount.toFixed(2), allocationDate: day(-7), reference: "WO-EXT-001", description: "External caption and QC package commitment" },
+    { id: id(tenant.number, "49", 2), organizationId: tenant.id, purchaseOrderId: id(tenant.number, "48", 1), allocationType: "vendor_invoice", vendorInvoiceId: id(tenant.number, "47", 1), amount: vendorInvoiceAmount.toFixed(2), allocationDate: day(-3), reference: `${tenant.slug.toUpperCase()}-V-001`, description: "Supplier invoice received for caption and QC support" },
+  ]);
   // The master rate card lists each standard facility room, artist and service
   // type. Network, show and episode cards only contain negotiated exceptions.
   const masterRates = [
@@ -534,12 +551,24 @@ async function seedTenant(tenant: TenantSeed) {
     { id: id(tenant.number, "49", 1), organizationId: tenant.id, clientInvoiceId: issuedInvoiceId, billableId: id(tenant.number, "31", 2), description: "Approved editorial change and conform", reference: `${tenant.shows[1]?.code ?? tenant.shows[0]?.code}-CO-014`, quantity: "1", unitAmount: issuedLineOne.toFixed(2), amount: issuedLineOne.toFixed(2) },
     { id: id(tenant.number, "49", 2), organizationId: tenant.id, clientInvoiceId: issuedInvoiceId, billableId: id(tenant.number, "31", 3), description: "Client-attended colour grade session", reference: `${tenant.shows[1]?.code ?? tenant.shows[0]?.code}-CO-015`, quantity: "1", unitAmount: issuedLineTwo.toFixed(2), amount: issuedLineTwo.toFixed(2) },
   ]);
+  const activeClientPoId = id(tenant.number, "52", 1);
+  const closedClientPoId = id(tenant.number, "52", 2);
+  await db.insert(clientPurchaseOrders).values([
+    { id: activeClientPoId, organizationId: tenant.id, clientCompanyId: companyId(1), showId: showId(1), episodeId: episodeId(4), poNumber: `${tenant.slug.toUpperCase()}-CLIENT-PO-001`, currency: tenant.budgetProfile.currency, approvedAmount: (clientBillableAmount * 1.15).toFixed(2), issueDate: day(-8), expiryDate: day(55), status: "active", notes: "Client authorisation for approved finishing, clearances, and delivery changes.", externalDocumentUrl: `https://example.com/client-purchase-orders/${tenant.slug}-001`, createdByUserId: tenant.people.find((person) => person.role === "producer")?.userId ?? null },
+    { id: closedClientPoId, organizationId: tenant.id, clientCompanyId: companyId(1), showId: issuedShowId, episodeId: issuedEpisodeId, poNumber: `${tenant.slug.toUpperCase()}-CLIENT-PO-002`, currency: tenant.budgetProfile.currency, approvedAmount: issuedSubtotal.toFixed(2), issueDate: day(-30), expiryDate: day(-1), status: "closed", notes: "Completed client authorisation for editorial change and attended colour session.", createdByUserId: tenant.people.find((person) => person.role === "producer")?.userId ?? null },
+  ]);
+  await db.insert(clientPurchaseOrderAllocations).values([
+    { id: id(tenant.number, "53", 1), organizationId: tenant.id, clientPurchaseOrderId: activeClientPoId, allocationType: "billable", billableId: id(tenant.number, "31", 1), amount: clientBillableAmount.toFixed(2), allocationDate: day(-5), reference: `${tenant.shows[0].code}-CHANGE-021`, description: "Approved finishing and clearance support", createdByUserId: tenant.people.find((person) => person.role === "producer")?.userId ?? null },
+    { id: id(tenant.number, "53", 2), organizationId: tenant.id, clientPurchaseOrderId: closedClientPoId, allocationType: "client_invoice", clientInvoiceId: issuedInvoiceId, amount: issuedSubtotal.toFixed(2), allocationDate: issuedInvoiceDate, reference: `${tenant.slug.toUpperCase()}-2026-0001`, description: "Issued invoice for approved editorial and colour changes", createdByUserId: tenant.people.find((person) => person.role === "finance")?.userId ?? null },
+  ]);
   await db.insert(activityLog).values([
     { id: id(tenant.number, "32", 1), organizationId: tenant.id, actorUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId, action: "episode.picture_lock_approved", entityType: "episode", entityId: episodeId(3), metadata: { workflow: tenant.workflowName, status: "approved" } },
     { id: id(tenant.number, "32", 2), organizationId: tenant.id, actorUserId: tenantPeople.find((person) => person.role === "qc")?.userId, action: "qc.issue_created", entityType: "episode", entityId: episodeId(4), metadata: { issueCount: 1, risk: "high" } },
     { id: id(tenant.number, "32", 3), organizationId: tenant.id, actorUserId: tenantPeople.find((person) => person.role === "producer")?.userId, action: "workflow.changes_requested", entityType: "episode", entityId: episodeId(7), metadata: { network: secondaryNetwork } },
     { id: id(tenant.number, "32", 4), organizationId: tenant.id, actorUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId, action: "workflow.finalised", entityType: "episode", entityId: episodeId(6), metadata: { destination: secondaryNetwork } },
     { id: id(tenant.number, "32", 5), organizationId: tenant.id, actorUserId: tenantPeople.find((person) => person.role === "finance")?.userId, action: "client_invoice.issued", entityType: "client_invoice", entityId: issuedInvoiceId, metadata: { episodeId: issuedEpisodeId, invoiceNumber: `${tenant.slug.toUpperCase()}-2026-0001`, currency: tenant.budgetProfile.currency } },
+    { id: id(tenant.number, "32", 6), organizationId: tenant.id, actorUserId: tenantPeople.find((person) => person.role === "producer")?.userId, action: "client_purchase_order.activated", entityType: "client_purchase_order", entityId: activeClientPoId, metadata: { poNumber: `${tenant.slug.toUpperCase()}-CLIENT-PO-001`, episodeId: episodeId(4) } },
+    { id: id(tenant.number, "32", 7), organizationId: tenant.id, actorUserId: tenantPeople.find((person) => person.role === "finance")?.userId, action: "client_purchase_order.closed", entityType: "client_purchase_order", entityId: closedClientPoId, metadata: { poNumber: `${tenant.slug.toUpperCase()}-CLIENT-PO-002`, invoiceId: issuedInvoiceId } },
   ]);
 }
 
