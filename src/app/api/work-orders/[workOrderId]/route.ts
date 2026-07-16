@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { crmCompanies, people, postWorkOrders, qcIssues } from "@/lib/db/schema";
+import { crmCompanies, people, postWorkOrderItems, postWorkOrders, qcIssues } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can, getTenantRolePolicies } from "@/lib/permissions";
 import { missingTenantReferences } from "@/lib/tenant-resources";
@@ -29,11 +29,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
   const mayVerifyQc = await can("verify_qc");
   const isAssigned = Boolean(person[0] && (workOrder[0].assigneePersonId === person[0].id || workOrder[0].assigneeRole === person[0].role));
   if (!mayManage && !(mayUpdateAssigned && isAssigned) && !(mayApprove && parsed.data.status !== undefined)) return NextResponse.json({ error: "You can only update work assigned to you." }, { status: 403 });
-  const managerFields = ["title", "description", "department", "assigneePersonId", "assigneeRole", "vendorCompanyId", "priority", "isBlocking", "billingScope", "estimatedAmount", "clientQuoteAmount", "billingNotes", "externalUrl", "dueAt"];
+  const managerFields = ["title", "description", "department", "assigneePersonId", "assigneeRole", "vendorCompanyId", "priority", "isBlocking", "billingScope", "estimatedAmount", "clientQuoteAmount", "billingNotes", "items", "externalUrl", "dueAt"];
   if (!mayManage && managerFields.some((field) => field in parsed.data)) return NextResponse.json({ error: "Only post management can change work-order details or assignments." }, { status: 403 });
-  const commercialFields = ["estimatedAmount", "clientQuoteAmount", "billingNotes"];
+  const commercialFields = ["estimatedAmount", "clientQuoteAmount", "billingNotes", "items"];
   if (!mayManageCommercial && commercialFields.some((field) => field in parsed.data)) return NextResponse.json({ error: "Only users with the Budget permission can set commercial values." }, { status: 403 });
-  if (workOrder[0].billingStatus === "posted" && ["billingScope", "estimatedAmount", "clientQuoteAmount", "billingNotes"].some((field) => field in parsed.data)) return NextResponse.json({ error: "A charge already posted to budget cannot be changed here." }, { status: 409 });
+  if (workOrder[0].billingStatus === "posted" && ["billingScope", "estimatedAmount", "clientQuoteAmount", "billingNotes", "items"].some((field) => field in parsed.data)) return NextResponse.json({ error: "A charge already posted to budget cannot be changed here." }, { status: 409 });
   const missing = mayManage ? await missingTenantReferences(organizationId, { personId: parsed.data.assigneePersonId, companyId: parsed.data.vendorCompanyId }) : [];
   if (missing.length) return NextResponse.json({ error: `Invalid ${missing.join(", ")} for this post house.` }, { status: 404 });
   if (mayManage && parsed.data.vendorCompanyId) {
@@ -62,17 +62,21 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
   if (workOrder[0].kind === "qc_exception" && status === "complete" && !mayVerifyQc) return NextResponse.json({ error: "Your role needs the QC verification permission to close a QC exception. Mark it ready for re-QC instead." }, { status: 403 });
   const isComplete = nextStatus === "complete";
   const billingScope = parsed.data.billingScope ?? workOrder[0].billingScope;
-  const billingStatus = billingScope !== "billable_change"
-    ? "not_billable"
-    : isComplete && workOrder[0].billingStatus === "draft"
-      ? "awaiting_finance"
-      : workOrder[0].billingStatus;
+  // Completing a client-billable work order makes it ready for a Budget user
+  // to post. There is no intermediate Accounts approval state.
+  const billingStatus = billingScope !== "billable_change" ? "not_billable" : workOrder[0].billingStatus;
   const qcHandOff = workOrder[0].kind === "qc_exception" && status === "ready_for_review";
   const verificationRole = qcHandOff ? (await getTenantRolePolicies(organizationId)).find((policy) => policy.permissions.includes("verify_qc"))?.role : null;
   if (qcHandOff && !verificationRole) return NextResponse.json({ error: "Configure a role with QC verification before sending this exception to re-QC." }, { status: 409 });
-  const { estimatedAmount, clientQuoteAmount, approvalNote, ...workOrderUpdate } = parsed.data;
+  const { estimatedAmount, clientQuoteAmount, approvalNote, items, ...workOrderUpdate } = parsed.data;
   const completionChanged = status !== undefined;
-  await db.update(postWorkOrders).set({ ...workOrderUpdate, estimatedAmount: estimatedAmount === undefined || estimatedAmount === null ? estimatedAmount : String(estimatedAmount), clientQuoteAmount: clientQuoteAmount === undefined || clientQuoteAmount === null ? clientQuoteAmount : String(clientQuoteAmount), billingStatus, assigneePersonId: qcHandOff ? null : parsed.data.assigneePersonId, assigneeRole: qcHandOff ? verificationRole : parsed.data.assigneeRole, approvedByPersonId: approvalDecision && status === "in_progress" ? person[0]?.id ?? null : workOrder[0].approvedByPersonId, approvedAt: approvalDecision && status === "in_progress" ? new Date() : workOrder[0].approvedAt, approvalNote: approvalDecision ? approvalNote ?? null : workOrder[0].approvalNote, completedByPersonId: completionChanged ? (isComplete ? person[0]?.id ?? null : null) : workOrder[0].completedByPersonId, completedAt: completionChanged ? (isComplete ? new Date() : null) : workOrder[0].completedAt, updatedAt: new Date() }).where(and(eq(postWorkOrders.id, workOrderId), eq(postWorkOrders.organizationId, organizationId)));
+  await db.transaction(async (tx) => {
+    await tx.update(postWorkOrders).set({ ...workOrderUpdate, estimatedAmount: estimatedAmount === undefined || estimatedAmount === null ? estimatedAmount : String(estimatedAmount), clientQuoteAmount: clientQuoteAmount === undefined || clientQuoteAmount === null ? clientQuoteAmount : String(clientQuoteAmount), billingStatus, assigneePersonId: qcHandOff ? null : parsed.data.assigneePersonId, assigneeRole: qcHandOff ? verificationRole : parsed.data.assigneeRole, approvedByPersonId: approvalDecision && status === "in_progress" ? person[0]?.id ?? null : workOrder[0].approvedByPersonId, approvedAt: approvalDecision && status === "in_progress" ? new Date() : workOrder[0].approvedAt, approvalNote: approvalDecision ? approvalNote ?? null : workOrder[0].approvalNote, completedByPersonId: completionChanged ? (isComplete ? person[0]?.id ?? null : null) : workOrder[0].completedByPersonId, completedAt: completionChanged ? (isComplete ? new Date() : null) : workOrder[0].completedAt, updatedAt: new Date() }).where(and(eq(postWorkOrders.id, workOrderId), eq(postWorkOrders.organizationId, organizationId)));
+    if (items !== undefined) {
+      await tx.delete(postWorkOrderItems).where(and(eq(postWorkOrderItems.organizationId, organizationId), eq(postWorkOrderItems.workOrderId, workOrderId)));
+      if (items.length) await tx.insert(postWorkOrderItems).values(items.map((item, index) => ({ organizationId, workOrderId, type: item.type, description: item.description, quantity: String(item.quantity), unit: item.unit, unitRate: String(item.unitRate), discountPercent: String(item.discountPercent), notes: item.notes ?? null, position: index + 1 })));
+    }
+  });
   if (workOrder[0].kind === "qc_exception" && isComplete && workOrder[0].qcIssueId) await db.update(qcIssues).set({ status: "resolved", resolution: "Verified through linked QC correction work order.", resolvedAt: new Date(), updatedAt: new Date() }).where(and(eq(qcIssues.id, workOrder[0].qcIssueId), eq(qcIssues.organizationId, organizationId)));
   await writeAuditEvent({ organizationId, actorUserId: context.userId, action: isComplete ? "work_order.completed" : approvalDecision && status === "in_progress" ? "work_order.approved" : approvalDecision ? "work_order.returned" : status === "awaiting_approval" ? "work_order.submitted" : "work_order.updated", entityType: "post_work_order", entityId: workOrderId, metadata: { episodeId: workOrder[0].episodeId, status: status ?? workOrder[0].status, billingStatus } });
   return NextResponse.json({ ok: true });

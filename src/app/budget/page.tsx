@@ -66,7 +66,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
   const serviceRates = await loadServiceRates();
   const selectedEpisodeId = params.episode;
   const networks = [...new Set([...data.lines.map((line) => line.network ?? "Independent"), ...data.episodes.map((episode) => episode.network)])];
-  if (!selectedNetwork) return <BudgetNetworkPicker networks={networks} lines={data.lines} />;
+  if (!selectedNetwork) return <BudgetNetworkPicker networks={networks} lines={data.lines} rates={serviceRates} />;
   const showRows = [...new Map([
     ...data.lines.filter((line) => (line.network ?? "Independent") === selectedNetwork && line.showId && line.showTitle).map((line) => [line.showId!, { id: line.showId!, title: line.showTitle! }] as const),
     ...data.episodes.filter((episode) => episode.network === selectedNetwork).map((episode) => [episode.showId, { id: episode.showId, title: episode.showTitle }] as const),
@@ -208,16 +208,17 @@ function BookingCostBasis({ entries, fallbackCurrency }: { entries: BookingCost[
 function bookingDateRange(startsAt: Date, endsAt: Date) { const format = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/London" }); const start = format.format(startsAt); const end = format.format(endsAt); return start === end ? start : `${start}–${end}`; }
 function bookingTime(date: Date) { return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Europe/London" }).format(date); }
 function hours(value: number) { return `${Number.isInteger(value) ? value : value.toFixed(1)}h`; }
-function rateSource(source: string | null) { return source === "episode_rate_card" ? "Episode rate card" : source === "show_rate_card" ? "Show rate card" : source === "network_rate_card" ? "Network rate card" : source === "client_rate_card" ? "Client rate card" : source === "facility_rate_card" ? "Facility rate card" : ""; }
+function rateSource(source: string | null) { return source === "episode_rate_card" ? "Episode rate card" : source === "show_rate_card" ? "Show rate card" : source === "network_rate_card" ? "Network rate card" : source === "client_rate_card" ? "Client rate card" : source === "master_rate_card" ? "Master rate card" : source === "facility_rate_card" ? "Base service rate" : ""; }
 
-function BudgetNetworkPicker({ networks, lines }: { networks: string[]; lines: Line[] }) {
+function BudgetNetworkPicker({ networks, lines, rates }: { networks: string[]; lines: Line[]; rates: ServiceRate[] }) {
   const totals = sumLines(lines);
   const currency = currencyFor(lines);
   return <div className="space-y-5">
-    <header>
-      <p className="text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">Commercial control</p>
+    <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+      <div><p className="text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">Commercial control</p>
       <h1 className="mt-2 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Budget portfolio</h1>
-      <p className="mt-1 text-sm text-[#747977]">Start with a network or client, then review the affected shows and episodes.</p>
+      <p className="mt-1 text-sm text-[#747977]">Start with the master rate card, then review networks, shows and episodes.</p></div>
+      <RateCardDialog rates={rates} scope={{ type: "master" }} title="Master rate card" />
     </header>
     <section className="grid gap-3 sm:grid-cols-3">
       <Metric icon={<CircleDollarSign size={16} />} label="Networks / clients" value={String(networks.length)} detail="With active budget lines" />

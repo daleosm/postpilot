@@ -3,7 +3,7 @@ import "server-only";
 import { aliasedTable, and, asc, eq, notInArray, or } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { budgetLines, episodes, people, postWorkOrders, seasons, shows, workflowStages } from "@/lib/db/schema";
+import { budgetLines, episodes, people, postWorkOrderItems, postWorkOrders, seasons, shows, workflowStages } from "@/lib/db/schema";
 
 const assignees = aliasedTable(people, "work_order_assignees");
 const approvers = aliasedTable(people, "work_order_approvers");
@@ -11,7 +11,7 @@ const workOrderBudgetLines = aliasedTable(budgetLines, "work_order_budget_lines"
 
 export async function listEpisodeWorkOrders(organizationId: string, episodeId: string) {
   const db = getDb();
-  return db.select({
+  const [workOrders, items] = await Promise.all([db.select({
     id: postWorkOrders.id, episodeId: postWorkOrders.episodeId, workflowStageId: postWorkOrders.workflowStageId, workflowStageName: workflowStages.name,
     kind: postWorkOrders.kind, title: postWorkOrders.title, description: postWorkOrders.description, department: postWorkOrders.department,
     assigneePersonId: postWorkOrders.assigneePersonId, assigneeName: assignees.name, assigneeRole: postWorkOrders.assigneeRole, vendorCompanyId: postWorkOrders.vendorCompanyId,
@@ -25,7 +25,13 @@ export async function listEpisodeWorkOrders(organizationId: string, episodeId: s
     .leftJoin(approvers, and(eq(postWorkOrders.approvedByPersonId, approvers.id), eq(approvers.organizationId, organizationId)))
     .leftJoin(workOrderBudgetLines, and(eq(workOrderBudgetLines.workOrderId, postWorkOrders.id), eq(workOrderBudgetLines.organizationId, organizationId)))
     .where(and(eq(postWorkOrders.organizationId, organizationId), eq(postWorkOrders.episodeId, episodeId)))
-    .orderBy(asc(postWorkOrders.status), asc(postWorkOrders.dueAt), asc(postWorkOrders.createdAt));
+    .orderBy(asc(postWorkOrders.status), asc(postWorkOrders.dueAt), asc(postWorkOrders.createdAt)),
+    db.select({ id: postWorkOrderItems.id, workOrderId: postWorkOrderItems.workOrderId, type: postWorkOrderItems.type, description: postWorkOrderItems.description, quantity: postWorkOrderItems.quantity, unit: postWorkOrderItems.unit, unitRate: postWorkOrderItems.unitRate, discountPercent: postWorkOrderItems.discountPercent, notes: postWorkOrderItems.notes, position: postWorkOrderItems.position })
+      .from(postWorkOrderItems)
+      .where(and(eq(postWorkOrderItems.organizationId, organizationId)))
+      .orderBy(asc(postWorkOrderItems.position)),
+  ]);
+  return workOrders.map((workOrder) => ({ ...workOrder, items: items.filter((item) => item.workOrderId === workOrder.id) }));
 }
 
 /** Open work explicitly assigned to a person or their tenant role. */

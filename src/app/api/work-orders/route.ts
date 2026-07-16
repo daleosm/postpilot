@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { bookings, crmCompanies, episodes, postWorkOrders, seasons, shows, workflowStages } from "@/lib/db/schema";
+import { bookings, crmCompanies, episodes, postWorkOrderItems, postWorkOrders, seasons, shows, workflowStages } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { missingTenantReferences } from "@/lib/tenant-resources";
@@ -14,10 +14,11 @@ export async function POST(request: Request) {
   const payload = await request.json();
   const parsed = createPostWorkOrderSchema.safeParse(payload);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Check the work-order details." }, { status: 400 });
-  if (!(await can("manage_budget")) && ["estimatedAmount", "clientQuoteAmount", "billingNotes"].some((field) => field in payload)) return NextResponse.json({ error: "Only users with the Budget permission can set commercial values." }, { status: 403 });
+  if (!(await can("manage_budget")) && ["estimatedAmount", "clientQuoteAmount", "billingNotes", "items"].some((field) => field in payload)) return NextResponse.json({ error: "Only users with the Budget permission can set commercial values or line items." }, { status: 403 });
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const organizationId = context.organization.organizationId;
+  const currency = context.organization.currency;
   const missing = await missingTenantReferences(organizationId, { episodeId: parsed.data.episodeId, workflowStageId: parsed.data.workflowStageId, bookingId: parsed.data.bookingId, personId: parsed.data.assigneePersonId, companyId: parsed.data.vendorCompanyId });
   if (missing.length) return NextResponse.json({ error: `Invalid ${missing.join(", ")} for this post house.` }, { status: 404 });
   const db = getDb();
@@ -32,19 +33,23 @@ export async function POST(request: Request) {
   if (booking && booking.episodeId !== episode.id) return NextResponse.json({ error: "Booking must belong to this episode." }, { status: 409 });
   if (targetStage && currentStage && targetStage.workflowId !== currentStage.workflowId) return NextResponse.json({ error: "Workflow stage does not belong to this episode's workflow." }, { status: 409 });
   if (vendor && vendor.type !== "vendor") return NextResponse.json({ error: "Select a vendor account for external work." }, { status: 400 });
-  const { estimatedAmount, clientQuoteAmount, ...workOrderData } = parsed.data;
-  const [workOrder] = await db.insert(postWorkOrders).values({
-    ...workOrderData,
-    vendorCompanyId: parsed.data.vendorCompanyId,
-    estimatedAmount: estimatedAmount === undefined || estimatedAmount === null ? estimatedAmount : String(estimatedAmount),
-    clientQuoteAmount: clientQuoteAmount === undefined || clientQuoteAmount === null ? clientQuoteAmount : String(clientQuoteAmount),
-    organizationId,
-    currency: context.organization.currency,
-    clientQuoteCurrency: context.organization.currency,
-    billingStatus: parsed.data.billingScope === "billable_change" ? "draft" : "not_billable",
-    status: parsed.data.kind === "qc_exception" ? "in_progress" : "open",
-    createdByUserId: context.userId,
-  }).returning({ id: postWorkOrders.id });
-  await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "work_order.created", entityType: "post_work_order", entityId: workOrder.id, metadata: { episodeId: parsed.data.episodeId, kind: parsed.data.kind, priority: parsed.data.priority, billingScope: parsed.data.billingScope } });
+  const { estimatedAmount, clientQuoteAmount, items, ...workOrderData } = parsed.data;
+  const workOrder = await db.transaction(async (tx) => {
+    const [created] = await tx.insert(postWorkOrders).values({
+      ...workOrderData,
+      vendorCompanyId: parsed.data.vendorCompanyId,
+      estimatedAmount: estimatedAmount === undefined || estimatedAmount === null ? estimatedAmount : String(estimatedAmount),
+      clientQuoteAmount: clientQuoteAmount === undefined || clientQuoteAmount === null ? clientQuoteAmount : String(clientQuoteAmount),
+      organizationId,
+      currency,
+      clientQuoteCurrency: currency,
+      billingStatus: parsed.data.billingScope === "billable_change" ? "draft" : "not_billable",
+      status: parsed.data.kind === "qc_exception" ? "in_progress" : "open",
+      createdByUserId: context.userId,
+    }).returning({ id: postWorkOrders.id });
+    if (items.length) await tx.insert(postWorkOrderItems).values(items.map((item, index) => ({ organizationId, workOrderId: created.id, type: item.type, description: item.description, quantity: String(item.quantity), unit: item.unit, unitRate: String(item.unitRate), discountPercent: String(item.discountPercent), notes: item.notes ?? null, position: index + 1 })));
+    return created;
+  });
+  await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "work_order.created", entityType: "post_work_order", entityId: workOrder.id, metadata: { episodeId: parsed.data.episodeId, kind: parsed.data.kind, priority: parsed.data.priority, billingScope: parsed.data.billingScope, itemCount: items.length } });
   return NextResponse.json(workOrder, { status: 201 });
 }

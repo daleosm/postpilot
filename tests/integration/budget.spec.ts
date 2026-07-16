@@ -153,9 +153,15 @@ test.describe("Budget integration", () => {
     expect((await page.request.patch(`/api/service-rates/${foreignRateId}`, { data: { rate: 1 } })).status()).toBe(404);
   });
 
-  test("resolves facility, network, show, and episode rates in precedence order", async ({ page }) => {
+  test("resolves master, network, show, and episode rates in precedence order", async ({ page }) => {
     await useSession(page, rateUserId);
     const override = async (scope: Record<string, unknown>, rate: number) => page.request.post("/api/rate-card-overrides", { data: { scope, serviceRateId: facilityRateId, rate } });
+    expect((await override({ type: "master" }, 110)).status()).toBe(200);
+    const master = await page.request.get("/api/rate-card-overrides?type=master");
+    expect(master.status()).toBe(200);
+    expect((await master.json()).overrides["Edit suite:day"]).toMatchObject({ rate: "110.00" });
+    const masterInherited = await page.request.get(`/api/rate-card-overrides?type=show&showId=${showId}`);
+    expect((await masterInherited.json()).inherited["Edit suite:day"]).toMatchObject({ rate: "110.00" });
     expect((await override({ type: "network", network: "Budget Network" }, 120)).status()).toBe(200);
     const showInherited = await page.request.get(`/api/rate-card-overrides?type=show&showId=${showId}`);
     expect(showInherited.status()).toBe(200);

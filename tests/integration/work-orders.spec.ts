@@ -110,6 +110,33 @@ test.describe("Post work orders integration", () => {
     expect(permittedSignOff.status()).toBe(200);
   });
 
+  test("stores a tenant-scoped service, material, and expense breakdown on a work order", async ({ page }) => {
+    await switchDebugUser(page, "user_maya");
+    const create = await page.request.post("/api/work-orders", { data: {
+      episodeId, workflowStageId: stageId, title: "Localisation correction package",
+      items: [
+        { type: "service", description: "Subtitle timing correction", quantity: 3, unit: "hour", unitRate: 85, discountPercent: 0 },
+        { type: "material", description: "Client review drive", quantity: 1, unit: "unit", unitRate: 12.5, discountPercent: 0 },
+        { type: "expense", description: "Secure delivery transfer", quantity: 1, unit: "fixed", unitRate: 18, discountPercent: 0 },
+      ],
+    } });
+    expect(create.status()).toBe(201);
+    const workOrderId = (await create.json()).id as string;
+    const items = await sql`select type, description, quantity, unit, unit_rate from post_work_order_items where organization_id = ${organizationId} and work_order_id = ${workOrderId} order by position`;
+    expect(items).toEqual([
+      { type: "service", description: "Subtitle timing correction", quantity: "3.00", unit: "hour", unit_rate: "85.00" },
+      { type: "material", description: "Client review drive", quantity: "1.00", unit: "unit", unit_rate: "12.50" },
+      { type: "expense", description: "Secure delivery transfer", quantity: "1.00", unit: "fixed", unit_rate: "18.00" },
+    ]);
+
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { items: [{ type: "service", description: "Corrected subtitle package", quantity: 4, unit: "hour", unitRate: 85, discountPercent: 10 }] } })).status()).toBe(200);
+    const afterUpdate = await sql`select description, quantity, discount_percent from post_work_order_items where organization_id = ${organizationId} and work_order_id = ${workOrderId}`;
+    expect(afterUpdate).toEqual([{ description: "Corrected subtitle package", quantity: "4.00", discount_percent: "10.000" }]);
+
+    await switchDebugUser(page, coordinatorUserId);
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { items: [{ type: "expense", description: "Unapproved entry", quantity: 1, unit: "fixed", unitRate: 5, discountPercent: 0 }] } })).status()).toBe(403);
+  });
+
   test("routes QC exceptions through re-QC and only lets QC close them", async ({ page }) => {
     await activateLab(page);
     const create = await page.request.post("/api/work-orders", { data: { episodeId, workflowStageId: stageId, kind: "qc_exception", title: "Correct flash frame", assigneePersonId: editorPersonId, priority: "blocker", isBlocking: true } });
@@ -130,7 +157,7 @@ test.describe("Post work orders integration", () => {
     expect(qcClose.status()).toBe(200);
   });
 
-  test("requires finance confirmation before a completed client change reaches the episode budget", async ({ page }) => {
+  test("lets a Budget user post a completed client change without an accounts approval state", async ({ page }) => {
     const switchUser = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
     expect(switchUser.status()).toBe(200);
     await activateLab(page);
@@ -147,6 +174,8 @@ test.describe("Post work orders integration", () => {
     await switchDebugUser(page, "user_maya");
     const complete = await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "complete" } });
     expect(complete.status()).toBe(200);
+    const [readyToPost] = await sql`select billing_status from post_work_orders where id = ${workOrderId}`;
+    expect(readyToPost).toMatchObject({ billing_status: "draft" });
     const postCharge = await page.request.post(`/api/work-orders/${workOrderId}/charge`, { data: { actualAmount: 800, category: "Graphics", reference: "CO-104" } });
     expect(postCharge.status()).toBe(201);
     const [budgetLine] = await sql`select work_order_id, budgeted_amount, actual_amount, cost_type from budget_lines where work_order_id = ${workOrderId}`;
@@ -286,7 +315,7 @@ test.describe("Post work orders integration", () => {
     expect(updateAttempt.status()).toBe(403);
   });
 
-  test("protects finance posting and keeps invalid charges out of commercial records", async ({ page }) => {
+  test("protects budget posting and keeps invalid charges out of commercial records", async ({ page }) => {
     const switchManager = await page.request.post("/api/debug/user", { data: { userId: "user_maya" } });
     expect(switchManager.status()).toBe(200);
     await activateLab(page);

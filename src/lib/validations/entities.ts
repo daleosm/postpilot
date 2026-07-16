@@ -12,6 +12,8 @@ const qcStatuses = ["not_started", "in_progress", "passed", "needs_attention", "
 const workOrderPriorities = ["blocker", "high", "normal", "low"] as const;
 const workOrderStatuses = ["open", "awaiting_approval", "in_progress", "ready_for_review", "complete", "rejected", "cancelled"] as const;
 const workOrderBillingScopes = ["included", "billable_change", "internal"] as const;
+const workOrderItemTypes = ["service", "material", "expense"] as const;
+const workOrderItemUnits = ["hour", "day", "unit", "fixed"] as const;
 const roleKey = z.string().trim().min(2).max(80).regex(/^[a-z0-9_]+$/, "Use lowercase letters, numbers, and underscores.");
 
 export const insertUserSchema = z.object({
@@ -280,6 +282,16 @@ export const updateQcIssueSchema = z.object({
   if (value.status === "resolved" && !value.resolution) context.addIssue({ code: z.ZodIssueCode.custom, path: ["resolution"], message: "Add a resolution before closing the issue." });
 });
 
+const workOrderItemSchema = z.object({
+  type: z.enum(workOrderItemTypes),
+  description: z.string().trim().min(2, "Add a line-item description.").max(240),
+  quantity: z.coerce.number().positive("Quantity must be greater than zero."),
+  unit: z.enum(workOrderItemUnits),
+  unitRate: money,
+  discountPercent: z.coerce.number().min(0).max(100).default(0),
+  notes: z.string().trim().max(1000).nullable().optional(),
+});
+
 export const createPostWorkOrderSchema = z.object({
   episodeId: id,
   workflowStageId: nullableId,
@@ -297,6 +309,7 @@ export const createPostWorkOrderSchema = z.object({
   estimatedAmount: money.nullable().optional(),
   clientQuoteAmount: money.nullable().optional(),
   billingNotes: z.string().trim().max(2000).nullable().optional(),
+  items: z.array(workOrderItemSchema).max(50).default([]),
   externalUrl: z.string().url().max(2000).nullable().optional(),
   dueAt: optionalTimestamp.nullable(),
 }).transform((value) => ({ ...value, isBlocking: value.isBlocking ?? Boolean(value.workflowStageId) })).refine((value) => !value.isBlocking || Boolean(value.workflowStageId), {
@@ -318,13 +331,14 @@ export const updatePostWorkOrderSchema = z.object({
   estimatedAmount: money.nullable().optional(),
   clientQuoteAmount: money.nullable().optional(),
   billingNotes: z.string().trim().max(2000).nullable().optional(),
+  items: z.array(workOrderItemSchema).max(50).optional(),
   externalUrl: z.string().url().max(2000).nullable().optional(),
   dueAt: optionalTimestamp.nullable(),
   approvalNote: z.string().trim().max(2000).nullable().optional(),
 }).refine((value) => Object.keys(value).length > 0, "Provide at least one change.");
 
 export const postWorkOrderChargeSchema = z.object({
-  actualAmount: money.positive("Enter the approved client charge."),
+  actualAmount: money.positive("Enter the client charge total."),
   category: z.string().trim().min(2).max(120).optional(),
   reference: z.string().trim().max(120).nullable().optional(),
 });

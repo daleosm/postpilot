@@ -20,6 +20,7 @@ import {
   organizationRolePolicies,
   people,
   postWorkOrders,
+  postWorkOrderItems,
   postWorkflows,
   qcIssues,
   qcReports,
@@ -455,6 +456,12 @@ async function seedTenant(tenant: TenantSeed) {
     { id: id(tenant.number, "38", 1), organizationId: tenant.id, episodeId: episodeId(1), workflowStageId: stageId(4), vendorCompanyId: companyId(3), title: "External caption and QC package", description: "Vendor brief for caption correction and technical QC support.", department: "Delivery", assigneePersonId: byRole("assistant_editor"), assigneeRole: "assistant_editor", priority: "high", isBlocking: false, status: "in_progress", billingScope: "internal", estimatedAmount: (2750 * tenant.budgetProfile.multiplier).toFixed(2), currency: tenant.budgetProfile.currency, externalUrl: "https://example.com/vendor-brief" },
     { id: id(tenant.number, "38", 2), organizationId: tenant.id, episodeId: episodeId(4), workflowStageId: stageId(13), qcIssueId: id(tenant.number, "34", 1), kind: "qc_exception", title: "QC exception — correct photosensitivity transition", description: "Photosensitivity warning at 00:30:17.700. Regrade, document the correction, then return to QC.", department: "Online", assigneePersonId: byRole("online_editor"), assigneeRole: "online_editor", priority: "blocker", isBlocking: true, status: "open", externalUrl: "https://example.com/qc-report" },
   ]);
+  await db.insert(postWorkOrderItems).values([
+    { id: id(tenant.number, "3a", 1), organizationId: tenant.id, workOrderId: id(tenant.number, "38", 1), type: "service", description: "Caption correction and re-export", quantity: "1", unit: "fixed", unitRate: (1250 * tenant.budgetProfile.multiplier).toFixed(2), position: 1 },
+    { id: id(tenant.number, "3a", 2), organizationId: tenant.id, workOrderId: id(tenant.number, "38", 1), type: "service", description: "Technical QC verification pass", quantity: "1", unit: "unit", unitRate: (900 * tenant.budgetProfile.multiplier).toFixed(2), position: 2 },
+    { id: id(tenant.number, "3a", 3), organizationId: tenant.id, workOrderId: id(tenant.number, "38", 1), type: "expense", description: "Secure transfer and delivery media", quantity: "1", unit: "fixed", unitRate: (600 * tenant.budgetProfile.multiplier).toFixed(2), position: 3 },
+    { id: id(tenant.number, "3a", 4), organizationId: tenant.id, workOrderId: id(tenant.number, "38", 2), type: "service", description: "Regrade affected transition", quantity: "2", unit: "hour", unitRate: (210 * tenant.budgetProfile.multiplier).toFixed(2), position: 1 },
+  ]);
 
   const budgetCategories = ["Edit suite", "Editorial artists", "VFX", "Colour", "Sound", "QC", "Finalisation"];
   await db.insert(budgetLines).values(budgetCategories.map((category, index) => {
@@ -464,16 +471,43 @@ async function seedTenant(tenant: TenantSeed) {
   const vendorInvoiceAmount = 2750 * tenant.budgetProfile.multiplier;
   await db.insert(vendorInvoices).values([{ id: id(tenant.number, "47", 1), organizationId: tenant.id, vendorCompanyId: companyId(3), workOrderId: id(tenant.number, "38", 1), showId: showId(1), episodeId: episodeId(1), invoiceNumber: `${tenant.slug.toUpperCase()}-V-001`, description: "External QC and finishing support", amount: vendorInvoiceAmount.toFixed(2), currency: tenant.budgetProfile.currency, status: "approved", invoiceDate: day(-3), dueDate: day(12) }]);
   await db.insert(budgetLines).values([{ id: id(tenant.number, "30", 99), organizationId: tenant.id, showId: showId(1), seasonId: seasonId(1), episodeId: episodeId(1), vendorInvoiceId: id(tenant.number, "47", 1), code: "VENDOR-INV-001", category: "Vendor invoice", description: "External QC and finishing support", budgetedAmount: "0", actualAmount: vendorInvoiceAmount.toFixed(2), currency: tenant.budgetProfile.currency, costType: "internal" }]);
-  await db.insert(serviceRates).values([
-    { id: id(tenant.number, "36", 1), organizationId: tenant.id, name: "Edit bay", category: "Edit suite", unit: "day", rate: (760 * tenant.budgetProfile.multiplier).toFixed(2), currency: tenant.budgetProfile.currency, notes: "Standard staffed edit-bay day." },
-    { id: id(tenant.number, "36", 2), organizationId: tenant.id, name: "Senior editor", category: "Editorial artists", unit: "day", rate: (690 * tenant.budgetProfile.multiplier).toFixed(2), currency: tenant.budgetProfile.currency, notes: "Standard editorial day rate." },
-    { id: id(tenant.number, "36", 3), organizationId: tenant.id, name: "Colour grade", category: "Colour", unit: "day", rate: (980 * tenant.budgetProfile.multiplier).toFixed(2), currency: tenant.budgetProfile.currency, notes: "Suite and colourist." },
-    { id: id(tenant.number, "36", 4), organizationId: tenant.id, name: "Final mix", category: "Sound", unit: "day", rate: (1120 * tenant.budgetProfile.multiplier).toFixed(2), currency: tenant.budgetProfile.currency, notes: "Mix room and mixer." },
-    { id: id(tenant.number, "36", 5), organizationId: tenant.id, name: "Technical QC", category: "QC", unit: "episode", rate: (485 * tenant.budgetProfile.multiplier).toFixed(2), currency: tenant.budgetProfile.currency, notes: "External technical QC pass." },
-    { id: id(tenant.number, "36", 6), organizationId: tenant.id, name: "VFX turnover", category: "VFX", unit: "fixed", rate: (3200 * tenant.budgetProfile.multiplier).toFixed(2), currency: tenant.budgetProfile.currency, notes: "Per-episode vendor coordination allowance." },
+  // The master rate card lists each standard facility room, artist and service
+  // type. Network, show and episode cards only contain negotiated exceptions.
+  const masterRates = [
+    ["Edit bay", "Edit suite", "day", 760, "Standard staffed edit-bay day."],
+    ["Senior editor", "Editorial artists", "day", 690, "Standard editorial day rate."],
+    ["Colour suite", "Colour", "day", 980, "Colour suite and colourist day."],
+    ["Mix stage", "Sound", "day", 1120, "Mix room and mixer day."],
+    ["Technical QC", "QC", "episode", 485, "Technical QC pass per episode."],
+    ["VFX turnover", "VFX", "fixed", 3200, "Per-episode VFX turnover allowance."],
+    ["Client review room", "Client review", "hour", 165, "Client-attended review room hour."],
+    ["Online suite", "Online", "day", 1050, "Online conform suite day."],
+    ["Post supervisor", "Post supervision", "day", 780, "Post supervision day rate."],
+    ["Producer", "Production", "day", 720, "Production day rate."],
+    ["Assistant editor", "Assistant editorial", "day", 510, "Assistant editorial day rate."],
+    ["Online editor", "Online editorial", "day", 780, "Online editor day rate."],
+    ["Colourist", "Colourist", "day", 820, "Colourist day rate."],
+    ["Sound mixer", "Sound mixer", "day", 740, "Sound mixer day rate."],
+    ["Supervising sound editor", "Sound editorial", "day", 760, "Supervising sound editorial day rate."],
+    ["Re-recording mixer", "Re-recording mix", "day", 840, "Re-recording mixer day rate."],
+    ["VFX supervisor", "VFX supervision", "day", 850, "VFX supervision day rate."],
+    ["VFX coordinator", "VFX coordination", "day", 580, "VFX coordination day rate."],
+    ["QC operator", "QC operator", "hour", 72, "QC operator hourly rate."],
+    ["Runner", "Runner", "hour", 32, "Runner hourly rate."],
+  ] as const;
+  await db.insert(serviceRates).values(masterRates.map(([name, category, unit, rate, notes], index) => ({ id: id(tenant.number, "36", index + 1), organizationId: tenant.id, name, category, unit, rate: (rate * tenant.budgetProfile.multiplier).toFixed(2), currency: tenant.budgetProfile.currency, notes })));
+  await db.insert(rateCards).values([
+    { id: id(tenant.number, "45", 1), organizationId: tenant.id, name: "Master rate card", currency: tenant.budgetProfile.currency, isActive: true },
+    { id: id(tenant.number, "45", 2), organizationId: tenant.id, clientCompanyId: companyId(1), network: primaryNetwork, name: `${primaryNetwork} network rate card`, currency: tenant.budgetProfile.currency, isActive: true },
+    { id: id(tenant.number, "45", 3), organizationId: tenant.id, showId: showId(1), name: `${tenant.shows[0].title} show override`, currency: tenant.budgetProfile.currency, isActive: true },
+    { id: id(tenant.number, "45", 4), organizationId: tenant.id, episodeId: episodeId(1), name: `${episodeRows[0].productionCode} episode override`, currency: tenant.budgetProfile.currency, isActive: true },
   ]);
-  await db.insert(rateCards).values([{ id: id(tenant.number, "45", 1), organizationId: tenant.id, clientCompanyId: companyId(1), network: primaryNetwork, name: `${primaryNetwork} network rate card`, currency: tenant.budgetProfile.currency, isActive: true }, { id: id(tenant.number, "45", 2), organizationId: tenant.id, showId: showId(1), name: `${tenant.shows[0].title} show override`, currency: tenant.budgetProfile.currency, isActive: true }, { id: id(tenant.number, "45", 3), organizationId: tenant.id, episodeId: episodeId(1), name: `${episodeRows[0].productionCode} episode override`, currency: tenant.budgetProfile.currency, isActive: true }]);
-  await db.insert(rateCardItems).values([{ id: id(tenant.number, "46", 1), organizationId: tenant.id, rateCardId: id(tenant.number, "45", 1), serviceRateId: id(tenant.number, "36", 3), category: "Colour", unit: "day", rate: (930 * tenant.budgetProfile.multiplier).toFixed(2) }, { id: id(tenant.number, "46", 2), organizationId: tenant.id, rateCardId: id(tenant.number, "45", 2), serviceRateId: id(tenant.number, "36", 1), category: "Edit suite", unit: "day", rate: (720 * tenant.budgetProfile.multiplier).toFixed(2) }, { id: id(tenant.number, "46", 3), organizationId: tenant.id, rateCardId: id(tenant.number, "45", 3), serviceRateId: id(tenant.number, "36", 5), category: "QC", unit: "episode", rate: (525 * tenant.budgetProfile.multiplier).toFixed(2) }]);
+  await db.insert(rateCardItems).values([
+    ...masterRates.map(([, category, unit, rate], index) => ({ id: id(tenant.number, "46", index + 1), organizationId: tenant.id, rateCardId: id(tenant.number, "45", 1), serviceRateId: id(tenant.number, "36", index + 1), category, unit, rate: (rate * tenant.budgetProfile.multiplier).toFixed(2) })),
+    { id: id(tenant.number, "46", 101), organizationId: tenant.id, rateCardId: id(tenant.number, "45", 2), serviceRateId: id(tenant.number, "36", 3), category: "Colour", unit: "day", rate: (930 * tenant.budgetProfile.multiplier).toFixed(2) },
+    { id: id(tenant.number, "46", 102), organizationId: tenant.id, rateCardId: id(tenant.number, "45", 3), serviceRateId: id(tenant.number, "36", 1), category: "Edit suite", unit: "day", rate: (720 * tenant.budgetProfile.multiplier).toFixed(2) },
+    { id: id(tenant.number, "46", 103), organizationId: tenant.id, rateCardId: id(tenant.number, "45", 4), serviceRateId: id(tenant.number, "36", 5), category: "QC", unit: "episode", rate: (525 * tenant.budgetProfile.multiplier).toFixed(2) },
+  ]);
   const clientBillableAmount = 18400 * tenant.budgetProfile.multiplier;
   const issuedLineOne = 5250 * tenant.budgetProfile.multiplier;
   const issuedLineTwo = 2000 * tenant.budgetProfile.multiplier;

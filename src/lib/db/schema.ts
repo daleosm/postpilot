@@ -35,8 +35,9 @@ export const qcIssueStatus = pgEnum("qc_issue_status", ["open", "resolved", "wai
 export const workOrderStatus = pgEnum("work_order_status", ["open", "awaiting_approval", "in_progress", "ready_for_review", "complete", "rejected", "cancelled"]);
 export const workOrderPriority = pgEnum("work_order_priority", ["blocker", "high", "normal", "low"]);
 export const workOrderKind = pgEnum("work_order_kind", ["work_order", "qc_exception"]);
+export const workOrderItemType = pgEnum("work_order_item_type", ["service", "material", "expense"]);
 export const workOrderBillingScope = pgEnum("work_order_billing_scope", ["included", "billable_change", "internal"]);
-export const workOrderBillingStatus = pgEnum("work_order_billing_status", ["not_billable", "draft", "awaiting_finance", "posted", "declined"]);
+export const workOrderBillingStatus = pgEnum("work_order_billing_status", ["not_billable", "draft", "posted", "declined"]);
 export const cateringRequestType = pgEnum("catering_request_type", ["lunch", "tea_coffee", "snack"]);
 export const cateringRequestStatus = pgEnum("catering_request_status", ["requested", "acknowledged", "preparing", "delivered", "cancelled"]);
 export const vendorInvoiceStatus = pgEnum("vendor_invoice_status", ["received", "approved", "paid", "disputed", "void"]);
@@ -474,6 +475,25 @@ export const postWorkOrders = pgTable("post_work_orders", {
   index("post_work_orders_org_assignee_status_idx").on(table.organizationId, table.assigneePersonId, table.status),
   index("post_work_orders_episode_status_idx").on(table.episodeId, table.status),
   index("post_work_orders_organization_stage_idx").on(table.organizationId, table.workflowStageId),
+]);
+
+/** Cost and scope breakdown kept inside the operational work order. These do
+ * not create a budget line or invoice until an authorised Budget user posts it. */
+export const postWorkOrderItems = pgTable("post_work_order_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  workOrderId: uuid("work_order_id").notNull().references(() => postWorkOrders.id, { onDelete: "cascade" }),
+  type: workOrderItemType("type").default("service").notNull(),
+  description: text("description").notNull(),
+  quantity: numeric("quantity", { precision: 12, scale: 2 }).default("1").notNull(),
+  unit: text("unit").default("unit").notNull(),
+  unitRate: numeric("unit_rate", { precision: 14, scale: 2 }).default("0").notNull(),
+  discountPercent: numeric("discount_percent", { precision: 7, scale: 3 }).default("0").notNull(),
+  notes: text("notes"),
+  position: integer("position").default(1).notNull(),
+  ...auditColumns,
+}, (table) => [
+  index("post_work_order_items_org_work_order_idx").on(table.organizationId, table.workOrderId),
 ]);
 
 export const budgetLines = pgTable("budget_lines", {

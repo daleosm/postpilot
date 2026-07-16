@@ -8,7 +8,7 @@ import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { postWorkOrderChargeSchema } from "@/lib/validations/entities";
 
-/** A user with the tenant Budget permission explicitly posts a completed client change into the episode budget. This never creates an invoice. */
+/** A Budget user explicitly posts a completed client change into the episode budget. This never creates an invoice. */
 export async function POST(request: Request, { params }: { params: Promise<{ workOrderId: string }> }) {
   if (!(await can("manage_budget"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const parsed = postWorkOrderChargeSchema.safeParse(await request.json());
@@ -30,7 +30,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ wor
     .limit(1);
   if (!workOrder) return NextResponse.json({ error: "Work order not found." }, { status: 404 });
   if (workOrder.billingScope !== "billable_change") return NextResponse.json({ error: "Only a client-billable change can be posted to the budget." }, { status: 409 });
-  if (workOrder.status !== "complete" || workOrder.billingStatus !== "awaiting_finance") return NextResponse.json({ error: "Complete the work order before its approved charge can be posted." }, { status: 409 });
+  if (workOrder.status !== "complete" || workOrder.billingStatus !== "draft") return NextResponse.json({ error: "Complete the work order before its charge can be posted." }, { status: 409 });
   const { line, billable } = await db.transaction(async (tx) => {
     const [line] = await tx.insert(budgetLines).values({
       organizationId,
