@@ -610,6 +610,20 @@
       "when": 1785420000000,
       "tag": "0086_client_po_overrun_authorisation",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1785506400000,
+      "tag": "0087_audio_suite_service_rate",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1785592800000,
+      "tag": "0088_client_po_global_source_integrity",
+      "breakpoints": true
     }
   ]
 }

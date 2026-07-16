@@ -663,6 +663,11 @@ export const clientPurchaseOrderAllocations = pgTable("client_purchase_order_all
   uniqueIndex("client_po_allocations_po_invoice_idx").on(table.clientPurchaseOrderId, table.clientInvoiceId),
   uniqueIndex("client_po_allocations_po_invoice_item_idx").on(table.clientPurchaseOrderId, table.clientInvoiceItemId),
   uniqueIndex("client_po_allocations_po_change_order_idx").on(table.clientPurchaseOrderId, table.changeOrderReference),
+  // A source may be allocated to only one client PO in a tenant. This keeps
+  // the live authorisation ledger from double-counting the same billing item.
+  uniqueIndex("client_po_allocations_org_billable_idx").on(table.organizationId, table.billableId),
+  uniqueIndex("client_po_allocations_org_invoice_idx").on(table.organizationId, table.clientInvoiceId),
+  uniqueIndex("client_po_allocations_org_invoice_item_idx").on(table.organizationId, table.clientInvoiceItemId),
 ]);
 
 /** Immutable issued-invoice line snapshots, linked back to their originating client charges where possible. */

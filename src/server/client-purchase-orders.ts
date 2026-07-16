@@ -62,8 +62,8 @@ async function resolveClientPurchaseOrderScope(organizationId: string, scope: Cl
   const [[client], [show], [episode]] = await Promise.all([
     db.select({ id: crmCompanies.id, type: crmCompanies.type }).from(crmCompanies)
       .where(and(eq(crmCompanies.id, scope.clientCompanyId), eq(crmCompanies.organizationId, organizationId))).limit(1),
-    scope.showId ? db.select({ id: shows.id }).from(shows).where(and(eq(shows.id, scope.showId), eq(shows.organizationId, organizationId))).limit(1) : Promise.resolve([]),
-    scope.episodeId ? db.select({ id: episodes.id, showId: shows.id }).from(episodes)
+    scope.showId ? db.select({ id: shows.id, clientCompanyId: shows.clientCompanyId }).from(shows).where(and(eq(shows.id, scope.showId), eq(shows.organizationId, organizationId))).limit(1) : Promise.resolve([]),
+    scope.episodeId ? db.select({ id: episodes.id, showId: shows.id, clientCompanyId: shows.clientCompanyId }).from(episodes)
       .innerJoin(seasons, eq(episodes.seasonId, seasons.id)).innerJoin(shows, eq(seasons.showId, shows.id))
       .where(and(eq(episodes.id, scope.episodeId), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId))).limit(1) : Promise.resolve([]),
   ]);
@@ -72,6 +72,10 @@ async function resolveClientPurchaseOrderScope(organizationId: string, scope: Cl
   if (scope.showId && !show) throw new ClientPurchaseOrderError(404, "Show not found in this post house.");
   if (scope.episodeId && !episode) throw new ClientPurchaseOrderError(404, "Episode not found in this post house.");
   if (scope.showId && episode && scope.showId !== episode.showId) throw new ClientPurchaseOrderError(400, "The selected episode does not belong to the selected show.");
+  const scopedShow = show ?? episode;
+  if (scopedShow && scopedShow.clientCompanyId !== scope.clientCompanyId) {
+    throw new ClientPurchaseOrderError(400, "The selected show belongs to a different client account.");
+  }
   return { showId: scope.showId ?? episode?.showId ?? null, episodeId: scope.episodeId ?? null };
 }
 
@@ -163,10 +167,12 @@ async function validateAllocationSource(organizationId: string, order: typeof cl
   if (input.allocationType === "change_order") return;
   const db = getDb();
   if (input.allocationType === "billable") {
-    const [billable] = await db.select({ showId: billables.showId, episodeId: billables.episodeId, status: billables.status, clientInvoiceId: billables.clientInvoiceId })
-      .from(billables).where(and(eq(billables.id, input.billableId!), eq(billables.organizationId, organizationId))).limit(1);
+    const [billable] = await db.select({ showId: billables.showId, episodeId: billables.episodeId, status: billables.status, clientInvoiceId: billables.clientInvoiceId, clientCompanyId: shows.clientCompanyId })
+      .from(billables).leftJoin(shows, and(eq(billables.showId, shows.id), eq(shows.organizationId, organizationId)))
+      .where(and(eq(billables.id, input.billableId!), eq(billables.organizationId, organizationId))).limit(1);
     if (!billable) throw new ClientPurchaseOrderError(404, "Billable not found in this post house.");
     if (!["approved", "invoiced", "paid"].includes(billable.status)) throw new ClientPurchaseOrderError(409, "Only approved or invoiced billables can consume a client PO.");
+    if (billable.clientCompanyId !== order.clientCompanyId) throw new ClientPurchaseOrderError(400, "The billable belongs to a different client account.");
     if (order.showId && billable.showId !== order.showId) throw new ClientPurchaseOrderError(400, "The billable belongs to a different show.");
     if (order.episodeId && billable.episodeId !== order.episodeId) throw new ClientPurchaseOrderError(400, "The billable belongs to a different episode.");
     return;
@@ -194,12 +200,27 @@ export async function createActiveClientPurchaseOrderAllocation(purchaseOrderId:
   if (order.status !== "active") throw new ClientPurchaseOrderError(409, "Only active client POs can receive allocations.");
   await validateAllocationSource(context.organizationId, order, parsed.data);
 
-  const existingPredicate = parsed.data.allocationType === "billable" ? eq(clientPurchaseOrderAllocations.billableId, parsed.data.billableId!)
-    : parsed.data.allocationType === "client_invoice" ? (parsed.data.clientInvoiceItemId ? eq(clientPurchaseOrderAllocations.clientInvoiceItemId, parsed.data.clientInvoiceItemId) : eq(clientPurchaseOrderAllocations.clientInvoiceId, parsed.data.clientInvoiceId!))
-      : eq(clientPurchaseOrderAllocations.changeOrderReference, parsed.data.changeOrderReference!);
-  const [existing] = await getDb().select({ id: clientPurchaseOrderAllocations.id }).from(clientPurchaseOrderAllocations)
-    .where(and(eq(clientPurchaseOrderAllocations.organizationId, context.organizationId), eq(clientPurchaseOrderAllocations.clientPurchaseOrderId, purchaseOrderId), existingPredicate)).limit(1);
-  if (existing) throw new ClientPurchaseOrderError(409, "This client billing record already has a client PO allocation.");
+  const db = getDb();
+  if (parsed.data.allocationType === "billable") {
+    const [existing] = await db.select({ id: clientPurchaseOrderAllocations.id }).from(clientPurchaseOrderAllocations)
+      .where(and(eq(clientPurchaseOrderAllocations.organizationId, context.organizationId), eq(clientPurchaseOrderAllocations.billableId, parsed.data.billableId!))).limit(1);
+    if (existing) throw new ClientPurchaseOrderError(409, "This billable already has a client PO allocation.");
+  } else if (parsed.data.allocationType === "client_invoice") {
+    const invoiceId = parsed.data.clientInvoiceId ?? (await db.select({ clientInvoiceId: clientInvoiceItems.clientInvoiceId }).from(clientInvoiceItems)
+      .where(and(eq(clientInvoiceItems.id, parsed.data.clientInvoiceItemId!), eq(clientInvoiceItems.organizationId, context.organizationId))).limit(1))[0]?.clientInvoiceId;
+    const [[headerAllocation], [lineAllocation]] = await Promise.all([
+      db.select({ id: clientPurchaseOrderAllocations.id }).from(clientPurchaseOrderAllocations)
+        .where(and(eq(clientPurchaseOrderAllocations.organizationId, context.organizationId), eq(clientPurchaseOrderAllocations.clientInvoiceId, invoiceId!))).limit(1),
+      db.select({ id: clientPurchaseOrderAllocations.id }).from(clientPurchaseOrderAllocations)
+        .innerJoin(clientInvoiceItems, and(eq(clientPurchaseOrderAllocations.clientInvoiceItemId, clientInvoiceItems.id), eq(clientInvoiceItems.organizationId, context.organizationId)))
+        .where(and(eq(clientPurchaseOrderAllocations.organizationId, context.organizationId), eq(clientInvoiceItems.clientInvoiceId, invoiceId!))).limit(1),
+    ]);
+    if (headerAllocation || lineAllocation) throw new ClientPurchaseOrderError(409, "This client invoice already has a client PO allocation.");
+  } else {
+    const [existing] = await db.select({ id: clientPurchaseOrderAllocations.id }).from(clientPurchaseOrderAllocations)
+      .where(and(eq(clientPurchaseOrderAllocations.organizationId, context.organizationId), eq(clientPurchaseOrderAllocations.clientPurchaseOrderId, purchaseOrderId), eq(clientPurchaseOrderAllocations.changeOrderReference, parsed.data.changeOrderReference!))).limit(1);
+    if (existing) throw new ClientPurchaseOrderError(409, "This client billing record already has a client PO allocation.");
+  }
 
   const detail = await getClientPurchaseOrderDetailForOrganization(context.organizationId, purchaseOrderId);
   if (!detail) throw new ClientPurchaseOrderError(404, "Client purchase order not found.");
