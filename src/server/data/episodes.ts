@@ -18,7 +18,7 @@ export async function listEpisodes(organizationId: string, showId?: string) {
 
   return db.select({
     id: episodes.id, title: episodes.title, number: episodes.number, productionCode: episodes.productionCode, status: episodes.status, qcStatus: episodes.qcStatus, airDate: episodes.airDate, lockedCutDate: episodes.lockedCutDate, deliveryDeadline: episodes.deliveryDeadline,
-    showId: shows.id, showTitle: shows.title, network: shows.network, seasonNumber: seasons.number, workflowStageId: episodes.workflowStageId, workflowStage: workflowStages.name, workflowStageColor: workflowStages.color, editorName: editors.name, producerName: producers.name,
+    showId: shows.id, showTitle: shows.title, network: shows.network, seasonId: seasons.id, seasonNumber: seasons.number, workflowStageId: episodes.workflowStageId, workflowStage: workflowStages.name, workflowStageColor: workflowStages.color, editorName: editors.name, producerName: producers.name,
   }).from(episodes)
     .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
     .innerJoin(shows, eq(seasons.showId, shows.id))

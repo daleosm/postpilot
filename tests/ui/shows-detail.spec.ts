@@ -30,6 +30,15 @@ test.describe("Show detail UI", () => {
     await expect(page.getByText("Episode team", { exact: true })).toHaveCount(1);
   });
 
+  test("opens the selected season in the episode pipeline", async ({ page }) => {
+    await page.goto(`/shows/${CROSSING_POINT_SHOW_ID}`);
+
+    await page.getByRole("link", { name: /Open season/ }).first().click();
+    await expect(page).toHaveURL(/\/episodes\?season=/);
+    await expect(page.getByRole("heading", { name: "Episodes" })).toBeVisible();
+    await expect(page.getByText("4 episodes", { exact: true })).toBeVisible();
+  });
+
   test("does not render the show workspace for an artist without Shows permission", async ({ context, page }) => {
     await useDebugSession(context, "user_copper_editor", COPPERLINE_ORGANIZATION_ID);
     await page.goto(`/shows/${CROSSING_POINT_SHOW_ID}`);

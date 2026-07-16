@@ -5,7 +5,7 @@ import { Filter, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 
 export type EpisodeTableRow = {
-  id: string; code: string | null; title: string; number: number; showId: string; showTitle: string; seasonNumber: number; workflowStage: string | null; editorName: string | null; producerName: string | null; lockedCutDate: string | null; deliveryDeadline: Date | null; qcStatus: string; status: string;
+  id: string; code: string | null; title: string; number: number; showId: string; showTitle: string; seasonId: string; seasonNumber: number; workflowStage: string | null; editorName: string | null; producerName: string | null; lockedCutDate: string | null; deliveryDeadline: Date | null; qcStatus: string; status: string;
 };
 
 export function EpisodesTable({ episodes }: { episodes: EpisodeTableRow[] }) {
