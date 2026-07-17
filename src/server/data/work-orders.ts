@@ -45,6 +45,7 @@ export async function listWorkOrderInbox(organizationId: string, userId: string)
     id: postWorkOrders.id, episodeId: episodes.id, showId: shows.id, showTitle: shows.title, episodeTitle: episodes.title, episodeNumber: episodes.number,
     workflowStageName: workflowStages.name, kind: postWorkOrders.kind, title: postWorkOrders.title, description: postWorkOrders.description,
     priority: postWorkOrders.priority, isBlocking: postWorkOrders.isBlocking, status: postWorkOrders.status, dueAt: postWorkOrders.dueAt, externalUrl: postWorkOrders.externalUrl,
+    bookingId: postWorkOrders.bookingId, workType: postWorkOrders.workType, assigneePersonId: postWorkOrders.assigneePersonId,
   }).from(postWorkOrders)
     .innerJoin(episodes, eq(postWorkOrders.episodeId, episodes.id))
     .innerJoin(seasons, eq(episodes.seasonId, seasons.id))

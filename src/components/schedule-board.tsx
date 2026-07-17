@@ -1,12 +1,13 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { ChevronLeft, ChevronRight, Coffee, UsersRound } from "lucide-react";
+import { ChevronLeft, ChevronRight, Coffee, GripVertical, UsersRound } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { BookingFormDialog, type BookingResources } from "@/components/booking-form-dialog";
 import { BookingConflictFlagDialog } from "@/components/booking-conflict-flag-dialog";
 import { ActualTimeDialog } from "@/components/actual-time-dialog";
+import { ScheduleWorkOrderDialog, type SchedulableWorkOrder } from "@/components/schedule-work-order-dialog";
 
 export type ScheduleBooking = {
   id: string;
@@ -46,18 +47,22 @@ const HOURS_PER_DAY = MINUTES_IN_SUITE_DAY / 60;
 const ROOM_COLUMN_WIDTH = 168;
 const DAY_WIDTH = 260;
 
-export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, initialDate, canManage, canSubmitOwnTime, currentPersonId }: { bookings: ScheduleBooking[]; rooms: Array<{ id: string; name: string; type: string }>; resources: BookingResources; cateringRequests: CateringRequest[]; initialDate: string; canManage: boolean; canSubmitOwnTime: boolean; currentPersonId: string | null }) {
+export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, workOrders, initialDate, canManage, canSubmitOwnTime, currentPersonId }: { bookings: ScheduleBooking[]; rooms: Array<{ id: string; name: string; type: string }>; resources: BookingResources; cateringRequests: CateringRequest[]; workOrders: Array<SchedulableWorkOrder & { bookingId: string | null; workType: string; assigneePersonId: string | null; status: string }>; initialDate: string; canManage: boolean; canSubmitOwnTime: boolean; currentPersonId: string | null }) {
   const [view, setView] = useState<"day" | "week">("week");
   const [mode, setMode] = useState<"rooms" | "staff">("rooms");
   const [cursor, setCursor] = useState(() => startOfDay(new Date(initialDate)));
   const [selectedBooking, setSelectedBooking] = useState<ScheduleBooking | null>(null);
+  const [draggedWorkOrder, setDraggedWorkOrder] = useState<SchedulableWorkOrder | null>(null);
+  const [pendingReservation, setPendingReservation] = useState<{ workOrder: SchedulableWorkOrder; roomId: string; startsAt: Date } | null>(null);
   const days = useMemo(() => Array.from({ length: view === "week" ? 7 : 1 }, (_, index) => addDays(cursor, index)), [cursor, view]);
   const rangeEnd = useMemo(() => addDays(cursor, days.length), [cursor, days.length]);
   const visible = useMemo(() => bookings.filter((booking) => overlaps(operationalStart(booking), operationalEnd(booking), cursor, rangeEnd)), [bookings, cursor, rangeEnd]);
   const ganttRows = useMemo(() => buildGanttRows(rooms, visible, cursor, days.length), [rooms, visible, cursor, days.length]);
   const move = (direction: number) => setCursor((current) => addDays(current, direction * (mode === "staff" ? 1 : days.length)));
 
+  const availableWorkOrders = workOrders.filter((workOrder) => workOrder.workType === "internal" && workOrder.status === "in_progress" && !workOrder.bookingId);
   return <div className="space-y-4">
+    {canSubmitOwnTime && availableWorkOrders.length > 0 && <section className="panel border-[#dce6de] bg-[#f8fbf8] p-3"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold text-[#3e5148]">Ready to schedule</p><p className="mt-0.5 text-xs text-[#718078]">Drag an assigned work order onto a free room slot to reserve it. The booking stays linked to the work for actual-time costing.</p></div><span className="rounded-full bg-[#e6f0e8] px-2 py-1 text-[10px] font-semibold text-[#527161]">{availableWorkOrders.length} available</span></div><div className="mt-3 flex gap-2 overflow-x-auto pb-1">{availableWorkOrders.map((workOrder) => <button key={workOrder.id} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", workOrder.id); setDraggedWorkOrder(workOrder); }} onDragEnd={() => setDraggedWorkOrder(null)} className="flex min-w-[230px] max-w-[290px] items-start gap-2 rounded-lg border border-[#dce5de] bg-white px-3 py-2 text-left shadow-sm transition hover:border-[#8ba594] hover:shadow"><GripVertical className="mt-0.5 shrink-0 text-[#93a299]" size={15} /><span className="min-w-0"><span className="block truncate text-xs font-semibold text-[#3f4b45]">{workOrder.title}</span><span className="mt-0.5 block truncate text-[10px] text-[#77827c]">{workOrder.showTitle} · E{String(workOrder.episodeNumber).padStart(2, "0")} · {workOrder.workflowStageName ?? "General work"}</span></span></button>)}</div></section>}
     <section className="panel flex flex-wrap items-center justify-between gap-3 p-3">
       <div className="flex items-center gap-2">
         <Button isIconOnly variant="tertiary" onClick={() => move(-1)} className="min-w-0 border border-[#e0e1dc] text-[#6d7571] hover:bg-[#f4f4f1]" aria-label="Previous period"><ChevronLeft size={16} /></Button>
@@ -78,12 +83,13 @@ export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, in
       <div className="panel overflow-x-auto">
         <div style={{ minWidth: `${ROOM_COLUMN_WIDTH + days.length * DAY_WIDTH}px` }}>
           <GanttHeader days={days} />
-          <GanttTimeline rows={ganttRows} days={days.length} onSelect={setSelectedBooking} />
+          <GanttTimeline rows={ganttRows} days={days.length} rangeStart={cursor} draggedWorkOrder={draggedWorkOrder} onDropWorkOrder={(roomId, startsAt) => { if (draggedWorkOrder) setPendingReservation({ workOrder: draggedWorkOrder, roomId, startsAt }); setDraggedWorkOrder(null); }} onSelect={setSelectedBooking} />
         </div>
       </div>
     </section>
     </> : <StaffDayView people={resources.people} bookings={bookings} cateringRequests={cateringRequests} day={cursor} onSelect={setSelectedBooking} />}
     {selectedBooking && <div className="fixed bottom-5 right-5 z-40 flex flex-wrap gap-2 rounded-lg border border-[#e2e3de] bg-[#fafbf9] p-2 shadow-lg">{canManage && <BookingFormDialog key={selectedBooking.id} resources={resources} initialStart={toInput(cursor)} booking={selectedBooking} onClose={() => setSelectedBooking(null)} />}{canSubmitOwnTime && selectedBooking.personId === currentPersonId && <><ActualTimeDialog booking={selectedBooking} /><BookingConflictFlagDialog bookingId={selectedBooking.id} title={selectedBooking.title} /></>}<Button size="sm" variant="tertiary" onPress={() => setSelectedBooking(null)}>Close</Button></div>}
+    <ScheduleWorkOrderDialog key={pendingReservation ? `${pendingReservation.workOrder.id}-${pendingReservation.roomId}-${pendingReservation.startsAt.toISOString()}` : "no-reservation"} workOrder={pendingReservation?.workOrder ?? null} rooms={rooms} initialRoomId={pendingReservation?.roomId ?? null} initialStart={pendingReservation?.startsAt ?? null} onClose={() => setPendingReservation(null)} />
   </div>;
 }
 
@@ -106,20 +112,20 @@ function GanttHeader({ days }: { days: Date[] }) {
   </div>;
 }
 
-function GanttTimeline({ rows, days, onSelect }: { rows: GanttRow[]; days: number; onSelect: (booking: ScheduleBooking) => void }) {
+function GanttTimeline({ rows, days, rangeStart, draggedWorkOrder, onDropWorkOrder, onSelect }: { rows: GanttRow[]; days: number; rangeStart: Date; draggedWorkOrder: SchedulableWorkOrder | null; onDropWorkOrder: (roomId: string, startsAt: Date) => void; onSelect: (booking: ScheduleBooking) => void }) {
   if (!rows.length) return <p className="px-4 py-6 text-xs text-[#9a9e9b]">No rooms or bookings in this period.</p>;
-  return <div>{rows.map((row) => <GanttRoomRow key={row.id} row={row} days={days} onSelect={onSelect} />)}</div>;
+  return <div>{rows.map((row) => <GanttRoomRow key={row.id} row={row} days={days} rangeStart={rangeStart} canDrop={Boolean(draggedWorkOrder) && !["personnel-availability", "unassigned"].includes(row.id)} onDropWorkOrder={onDropWorkOrder} onSelect={onSelect} />)}</div>;
 }
 
-function GanttRoomRow({ row, days, onSelect }: { row: GanttRow; days: number; onSelect: (booking: ScheduleBooking) => void }) {
+function GanttRoomRow({ row, days, rangeStart, canDrop, onDropWorkOrder, onSelect }: { row: GanttRow; days: number; rangeStart: Date; canDrop: boolean; onDropWorkOrder: (roomId: string, startsAt: Date) => void; onSelect: (booking: ScheduleBooking) => void }) {
   const rowHeight = Math.max(52, row.lanes * 48 + 8);
   const totalMinutes = days * MINUTES_IN_SUITE_DAY;
   return <div className="grid border-b border-[#ebeae6]" style={{ gridTemplateColumns: `${ROOM_COLUMN_WIDTH}px minmax(0, 1fr)`, minHeight: `${rowHeight}px` }}>
     <div className="flex flex-col justify-center border-r border-[#ebeae6] bg-[#fcfcfa] px-3"><p className="truncate text-xs font-semibold text-[#4b5550]">{row.name}</p><p className="mt-0.5 truncate text-[10px] capitalize text-[#959a96]">{row.type.replaceAll("_", " ")}</p></div>
-    <div className="relative bg-[#fafbf9]" style={{ minHeight: `${rowHeight}px` }}>
+    <div className={`relative bg-[#fafbf9] ${canDrop ? "ring-inset ring-1 ring-[#b6cfbd]" : ""}`} style={{ minHeight: `${rowHeight}px` }} onDragOver={(event) => { if (canDrop) event.preventDefault(); }} onDrop={(event) => { if (!canDrop) return; event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); const minute = Math.max(0, Math.min(days * MINUTES_IN_SUITE_DAY - 15, Math.floor(((event.clientX - bounds.left) / bounds.width * days * MINUTES_IN_SUITE_DAY) / 15) * 15)); const day = Math.floor(minute / MINUTES_IN_SUITE_DAY); const startsAt = addDays(rangeStart, day); startsAt.setHours(0, SUITE_DAY_START + minute % MINUTES_IN_SUITE_DAY, 0, 0); onDropWorkOrder(row.id, startsAt); }}>
       <TimelineGrid days={days} />
       {row.bookings.map((placement) => <GanttBookingBar key={placement.booking.id} placement={placement} totalMinutes={totalMinutes} onSelect={onSelect} />)}
-      {!row.bookings.length && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-[#a2a6a2]">Available</span>}
+      {!row.bookings.length && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-[#a2a6a2]">{canDrop ? "Drop work order to reserve" : "Available"}</span>}
     </div>
   </div>;
 }

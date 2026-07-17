@@ -29,6 +29,8 @@ const foreignRoomId = "97000000-0000-4000-8000-000000000020";
 const foreignBookingId = "97000000-0000-4000-8000-000000000021";
 const actualEpisodeId = "97000000-0000-4000-8000-000000000022";
 const optionEpisodeId = "97000000-0000-4000-8000-000000000023";
+const workOrderId = "97000000-0000-4000-8000-000000000024";
+const conflictingWorkOrderId = "97000000-0000-4000-8000-000000000025";
 
 let createdBookingId = "";
 
@@ -101,6 +103,11 @@ test.describe("Booking operations integration", () => {
         (${actualBookingId}, ${organizationId}, ${roomOneId}, ${actualEpisodeId}, ${artistPersonId}, 'Actual-time edit day', '2035-05-25T09:00:00.000Z', '2035-05-25T18:00:00.000Z', 0, 0, 'confirmed', 'edit')
     `;
     await sql`insert into bookings (id, organization_id, room_id, episode_id, title, starts_at, ends_at, status, booking_type) values (${foreignBookingId}, ${foreignOrganizationId}, ${foreignRoomId}, ${foreignEpisodeId}, 'Foreign booking', '2035-05-25T09:00:00.000Z', '2035-05-25T18:00:00.000Z', 'confirmed', 'edit')`;
+    await sql`
+      insert into post_work_orders (id, organization_id, episode_id, assignee_person_id, title, status, work_type, billing_scope, currency) values
+        (${workOrderId}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Colour cleanup pass', 'in_progress', 'internal', 'included', 'GBP'),
+        (${conflictingWorkOrderId}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Second colour cleanup pass', 'in_progress', 'internal', 'included', 'GBP')
+    `;
   });
 
   test.afterAll(async () => {
@@ -197,6 +204,25 @@ test.describe("Booking operations integration", () => {
     expect(booking.approved_overtime_minutes).toBe(0);
     const [budget] = await sql`select category, budgeted_amount, actual_amount, currency from budget_lines where organization_id = ${organizationId} and episode_id = ${actualEpisodeId} and category = 'Edit suite'`;
     expect(budget).toMatchObject({ category: "Edit suite", budgeted_amount: "900.00", actual_amount: "1000.00", currency: "GBP" });
+  });
+
+  test("lets an assigned artist reserve a room from internal work and links actual time", async ({ page }) => {
+    await useSession(page, artistUserId);
+    const reserve = await page.request.post(`/api/work-orders/${workOrderId}/booking`, { data: { roomId: roomTwoId, startsAt: "2035-05-30T14:00:00.000Z", endsAt: "2035-05-30T16:00:00.000Z", notes: "Quick client adjustment." } });
+    expect(reserve.status()).toBe(201);
+    const reserved = await reserve.json() as { id: string; workOrderId: string };
+    expect(reserved.workOrderId).toBe(workOrderId);
+    const [linked] = await sql`select booking_id from post_work_orders where id = ${workOrderId}`;
+    expect(linked.booking_id).toBe(reserved.id);
+    const duplicate = await page.request.post(`/api/work-orders/${workOrderId}/booking`, { data: { roomId: roomTwoId, startsAt: "2035-05-30T14:00:00.000Z", endsAt: "2035-05-30T16:00:00.000Z" } });
+    expect(duplicate.status()).toBe(409);
+    const conflict = await page.request.post(`/api/work-orders/${conflictingWorkOrderId}/booking`, { data: { roomId: roomTwoId, startsAt: "2035-05-30T14:00:00.000Z", endsAt: "2035-05-30T16:00:00.000Z" } });
+    expect(conflict.status()).toBe(409);
+    const actual = await page.request.post(`/api/bookings/${reserved.id}/time-submissions`, { data: { actualStartsAt: "2035-05-30T14:00:00.000Z", actualEndsAt: "2035-05-30T16:15:00.000Z", overtimeMinutes: 15, note: "Completed colour adjustment." } });
+    expect(actual.status()).toBe(201);
+    await expect(actual.json()).resolves.toMatchObject({ confirmed: true, workOrderId });
+    const [logged] = await sql`select action from activity_log where organization_id = ${organizationId} and entity_id = ${workOrderId} and action = 'work_order.time_logged'`;
+    expect(logged.action).toBe("work_order.time_logged");
   });
 
   test("does not permit a foreign booking mutation", async ({ page }) => {

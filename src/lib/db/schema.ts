@@ -488,6 +488,7 @@ export const postWorkOrders = pgTable("post_work_orders", {
   index("post_work_orders_org_assignee_status_idx").on(table.organizationId, table.assigneePersonId, table.status),
   index("post_work_orders_episode_status_idx").on(table.episodeId, table.status),
   index("post_work_orders_organization_stage_idx").on(table.organizationId, table.workflowStageId),
+  index("post_work_orders_org_booking_idx").on(table.organizationId, table.bookingId),
   index("post_work_orders_org_purchase_order_idx").on(table.organizationId, table.purchaseOrderId),
   index("post_work_orders_org_client_purchase_order_idx").on(table.organizationId, table.clientPurchaseOrderId),
 ]);

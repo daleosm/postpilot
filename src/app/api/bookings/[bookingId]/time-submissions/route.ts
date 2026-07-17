@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { bookings, budgetLines, episodes, seasons } from "@/lib/db/schema";
+import { bookings, budgetLines, episodes, postWorkOrders, seasons } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { canRecordBookingActuals } from "@/lib/permissions";
 import { getBookingCostProjection } from "@/server/data";
@@ -20,6 +20,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
   if (!booking) return NextResponse.json({ error: "Booking not found." }, { status: 404 });
   if (booking.personId !== context.person.id) return NextResponse.json({ error: "You can only confirm time for your own booking." }, { status: 403 });
   if (booking.actualStartsAt) return NextResponse.json({ error: "Actual time is already confirmed for this booking." }, { status: 409 });
+  const [workOrder] = await db.select({ id: postWorkOrders.id }).from(postWorkOrders)
+    .where(and(eq(postWorkOrders.organizationId, organizationId), eq(postWorkOrders.bookingId, booking.id))).limit(1);
   const projection = booking.episodeId ? await getBookingCostProjection(organizationId, booking.episodeId, { bookingId: booking.id, actualStartsAt: parsed.data.actualStartsAt, actualEndsAt: parsed.data.actualEndsAt, overtimeMinutes: parsed.data.overtimeMinutes }) : null;
   let budgetLine: { id: string; actualAmount: string | number } | null = null;
   if (projection && booking.episodeId) {
@@ -42,6 +44,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     if (projection && budgetLine) await tx.update(budgetLines).set({ budgetedAmount: String(projection.budgetedAmount), actualAmount: String(projection.actualAmount), currency, updatedAt: recordedAt }).where(and(eq(budgetLines.id, budgetLine.id), eq(budgetLines.organizationId, organizationId)));
   });
   const isBudgetOverrun = Boolean(projection && projection.actualAmount > projection.budgetedAmount + 0.005);
-  await writeAuditEvent({ organizationId, actorUserId: context.userId, action: isBudgetOverrun ? "booking.time_overrun_recorded" : "booking.time_confirmed", entityType: "booking", entityId: booking.id, metadata: { episodeId: booking.episodeId, submittedByPersonId: context.person.id, actualStartsAt: parsed.data.actualStartsAt.toISOString(), actualEndsAt: parsed.data.actualEndsAt.toISOString(), overtimeMinutes: parsed.data.overtimeMinutes, note: parsed.data.note ?? null, bookingCost: projection } });
-  return NextResponse.json({ confirmed: true, budgetOverrun: isBudgetOverrun, budgetLineId: budgetLine?.id ?? null }, { status: 201 });
+  const metadata = { episodeId: booking.episodeId, submittedByPersonId: context.person.id, actualStartsAt: parsed.data.actualStartsAt.toISOString(), actualEndsAt: parsed.data.actualEndsAt.toISOString(), overtimeMinutes: parsed.data.overtimeMinutes, note: parsed.data.note ?? null, bookingCost: projection, workOrderId: workOrder?.id ?? null };
+  await writeAuditEvent({ organizationId, actorUserId: context.userId, action: isBudgetOverrun ? "booking.time_overrun_recorded" : "booking.time_confirmed", entityType: "booking", entityId: booking.id, metadata });
+  if (workOrder) await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "work_order.time_logged", entityType: "post_work_order", entityId: workOrder.id, metadata });
+  return NextResponse.json({ confirmed: true, budgetOverrun: isBudgetOverrun, budgetLineId: budgetLine?.id ?? null, workOrderId: workOrder?.id ?? null }, { status: 201 });
 }
