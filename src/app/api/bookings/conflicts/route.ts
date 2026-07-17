@@ -24,5 +24,5 @@ export async function POST(request: Request) {
   });
   if (missing.length) return NextResponse.json({ error: `Invalid ${missing.join(", ")} for this organization.` }, { status: 404 });
   if (parsed.data.status === "cancelled") return NextResponse.json({ conflicts: [], availableRooms: [], availablePeople: [], nearestSlot: null });
-  return NextResponse.json(await getBookingSuggestions(context.organization.organizationId, { ...parsed.data, excludeId: excludeResult.data }));
+  return NextResponse.json(await getBookingSuggestions(context.organization.organizationId, { ...parsed.data, excludeId: excludeResult.data, includeOptionBookings: parsed.data.isOption }));
 }

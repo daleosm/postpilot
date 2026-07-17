@@ -28,6 +28,7 @@ const foreignEpisodeId = "97000000-0000-4000-8000-000000000019";
 const foreignRoomId = "97000000-0000-4000-8000-000000000020";
 const foreignBookingId = "97000000-0000-4000-8000-000000000021";
 const actualEpisodeId = "97000000-0000-4000-8000-000000000022";
+const optionEpisodeId = "97000000-0000-4000-8000-000000000023";
 
 let createdBookingId = "";
 
@@ -88,6 +89,7 @@ test.describe("Booking operations integration", () => {
         (${targetEpisodeId}, ${organizationId}, ${seasonId}, 2, 'BOS102', 'Target episode', 'assembly', 'not_started'),
         (${emptyEpisodeId}, ${organizationId}, ${seasonId}, 3, 'BOS103', 'Empty episode', 'assembly', 'not_started'),
         (${actualEpisodeId}, ${organizationId}, ${seasonId}, 4, 'BOS104', 'Actual-time episode', 'assembly', 'not_started'),
+        (${optionEpisodeId}, ${organizationId}, ${seasonId}, 5, 'BOS105', 'Option-booking episode', 'assembly', 'not_started'),
         (${foreignEpisodeId}, ${foreignOrganizationId}, ${foreignSeasonId}, 1, 'FBS101', 'Foreign episode', 'assembly', 'not_started')
     `;
     await sql`insert into service_rates (organization_id, name, category, unit, rate, currency) values (${organizationId}, 'Edit suite day', 'Edit suite', 'day', '900.00', 'GBP')`;
@@ -130,6 +132,30 @@ test.describe("Booking operations integration", () => {
     expect(edit.status()).toBe(200);
     const [activity] = await sql`select action from activity_log where organization_id = ${organizationId} and entity_id = ${createdBookingId} and action = 'booking.changed'`;
     expect(activity.action).toBe("booking.changed");
+  });
+
+  test("supports numbered option bookings without blocking a confirmed booking", async ({ page }) => {
+    await useSession(page, managerUserId);
+    const optionWindow = { episodeId: optionEpisodeId, startsAt: "2035-05-10T09:00:00.000Z", endsAt: "2035-05-10T13:00:00.000Z", status: "tentative", isOption: true };
+    const first = await page.request.post("/api/bookings", { data: bookingPayload({ ...optionWindow, title: "First pencil hold" }) });
+    expect(first.status()).toBe(201);
+    const firstBookingId = (await first.json()).id as string;
+    const second = await page.request.post("/api/bookings", { data: bookingPayload({ ...optionWindow, title: "Second pencil hold" }) });
+    expect(second.status()).toBe(201);
+    const secondBookingId = (await second.json()).id as string;
+    const holds = await sql`select id, is_option, option_rank, status from bookings where id in (${firstBookingId}, ${secondBookingId}) order by option_rank`;
+    expect(holds).toEqual([
+      expect.objectContaining({ id: firstBookingId, is_option: true, option_rank: 1, status: "tentative" }),
+      expect.objectContaining({ id: secondBookingId, is_option: true, option_rank: 2, status: "tentative" }),
+    ]);
+
+    const confirmed = await page.request.post("/api/bookings", { data: bookingPayload({ ...optionWindow, title: "Confirmed client booking", status: "confirmed", isOption: false }) });
+    expect(confirmed.status()).toBe(201);
+
+    const withdraw = await page.request.patch(`/api/bookings/${firstBookingId}`, { data: bookingPayload({ ...optionWindow, title: "First pencil hold", status: "cancelled", isOption: true }) });
+    expect(withdraw.status()).toBe(200);
+    const [remaining] = await sql`select option_rank from bookings where id = ${secondBookingId}`;
+    expect(remaining.option_rank).toBe(1);
   });
 
   test("copies a multi-day episode sequence tentatively and rejects unsafe copies", async ({ page }) => {

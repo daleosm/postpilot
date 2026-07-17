@@ -624,6 +624,13 @@
       "when": 1785592800000,
       "tag": "0088_client_po_global_source_integrity",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1785679200000,
+      "tag": "0089_option_bookings",
+      "breakpoints": true
     }
   ]
 }

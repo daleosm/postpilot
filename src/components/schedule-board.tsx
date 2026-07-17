@@ -18,6 +18,8 @@ export type ScheduleBooking = {
   approvedOvertimeMinutes: number;
   setupMinutes: number;
   handoverMinutes: number;
+  isOption: boolean;
+  optionRank: number | null;
   status: string;
   bookingType: string;
   roomId: string | null;
@@ -128,7 +130,8 @@ function TimelineGrid({ days }: { days: number }) {
 
 function GanttBookingBar({ placement, totalMinutes, onSelect }: { placement: GanttBooking; totalMinutes: number; onSelect: (booking: ScheduleBooking) => void }) {
   const { booking } = placement;
-  return <button type="button" onClick={() => onSelect(booking)} aria-label={`Edit ${booking.title}`} title={`Client: ${timeLabel(booking.startsAt)}–${timeLabel(booking.endsAt)}. Operational: ${timeLabel(operationalStart(booking))}–${timeLabel(operationalEnd(booking))}.`} style={{ top: `${placement.lane * 48 + 4}px`, left: `calc(${(placement.start / totalMinutes) * 100}% + 3px)`, width: `calc(${Math.max(1.5, ((placement.end - placement.start) / totalMinutes) * 100)}% - 6px)` }} className={`absolute h-10 overflow-hidden rounded-md border-l-[3px] px-2 py-1.5 text-left shadow-sm transition-shadow hover:z-10 hover:shadow-md focus:z-10 focus:outline-none focus:ring-2 focus:ring-[#66877f] ${bookingColors(booking.bookingType)}`}><p className="truncate text-[11px] font-semibold text-[#414945]">{booking.title}</p><p className="mt-0.5 truncate text-[10px] text-[#68716d]">{booking.actualStartsAt ? `Actual ${timeLabel(booking.actualStartsAt)}–${booking.actualEndsAt ? timeLabel(booking.actualEndsAt) : "—"}` : `Client ${timeLabel(booking.startsAt)}–${timeLabel(booking.endsAt)}`} · {booking.personName ?? "Unassigned"}</p></button>;
+  const optionLabel = booking.isOption ? `Pencil ${booking.optionRank ?? "—"} · ` : "";
+  return <button type="button" onClick={() => onSelect(booking)} aria-label={`Edit ${optionLabel}${booking.title}`} title={`${booking.isOption ? `${optionLabel}provisional hold. ` : ""}Client: ${timeLabel(booking.startsAt)}–${timeLabel(booking.endsAt)}. Operational: ${timeLabel(operationalStart(booking))}–${timeLabel(operationalEnd(booking))}.`} style={{ top: `${placement.lane * 48 + 4}px`, left: `calc(${(placement.start / totalMinutes) * 100}% + 3px)`, width: `calc(${Math.max(1.5, ((placement.end - placement.start) / totalMinutes) * 100)}% - 6px)` }} className={`absolute ${booking.isOption ? "h-7 border-dashed py-1" : "h-10 py-1.5"} overflow-hidden rounded-md border-l-[3px] px-2 text-left shadow-sm transition-shadow hover:z-10 hover:shadow-md focus:z-10 focus:outline-none focus:ring-2 focus:ring-[#66877f] ${booking.isOption ? "border-[#b99143] bg-[#fff9e9]" : bookingColors(booking.bookingType)}`}><p className="truncate text-[11px] font-semibold text-[#414945]">{optionLabel}{booking.title}</p>{!booking.isOption && <p className="mt-0.5 truncate text-[10px] text-[#68716d]">{booking.actualStartsAt ? `Actual ${timeLabel(booking.actualStartsAt)}–${booking.actualEndsAt ? timeLabel(booking.actualEndsAt) : "—"}` : `Client ${timeLabel(booking.startsAt)}–${timeLabel(booking.endsAt)}`} · {booking.personName ?? "Unassigned"}</p>}</button>;
 }
 
 function buildGanttRows(rooms: Array<{ id: string; name: string; type: string }>, bookings: ScheduleBooking[], rangeStart: Date, days: number): GanttRow[] {

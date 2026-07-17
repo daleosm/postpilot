@@ -9,7 +9,7 @@ import { listEpisodes } from "./episodes";
 export async function listSchedule(organizationId: string, from: Date, to: Date, personId?: string) {
   const db = getDb();
   return db.select({
-    id: bookings.id, title: bookings.title, startsAt: bookings.startsAt, endsAt: bookings.endsAt, actualStartsAt: bookings.actualStartsAt, actualEndsAt: bookings.actualEndsAt, approvedOvertimeMinutes: bookings.approvedOvertimeMinutes, setupMinutes: bookings.setupMinutes, handoverMinutes: bookings.handoverMinutes, status: bookings.status, bookingType: bookings.bookingType,
+    id: bookings.id, title: bookings.title, startsAt: bookings.startsAt, endsAt: bookings.endsAt, actualStartsAt: bookings.actualStartsAt, actualEndsAt: bookings.actualEndsAt, approvedOvertimeMinutes: bookings.approvedOvertimeMinutes, setupMinutes: bookings.setupMinutes, handoverMinutes: bookings.handoverMinutes, isOption: bookings.isOption, optionRank: bookings.optionRank, status: bookings.status, bookingType: bookings.bookingType,
     roomId: bookings.roomId, episodeId: bookings.episodeId, personId: bookings.personId, guestPersonId: bookings.guestPersonId, notes: bookings.notes,
     roomName: rooms.name, roomType: rooms.type, episodeTitle: episodes.title, episodeNumber: episodes.number, episodeProductionCode: episodes.productionCode, personName: people.name,
   }).from(bookings)

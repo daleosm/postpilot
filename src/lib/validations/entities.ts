@@ -219,15 +219,17 @@ const bookingFormSchema = z.object({
   endsAt: z.coerce.date(),
   setupMinutes: z.coerce.number().int().min(0).max(480).default(0),
   handoverMinutes: z.coerce.number().int().min(0).max(480).default(0),
+  isOption: z.boolean().default(false),
   status: z.enum(["tentative", "confirmed", "hold", "cancelled"]).default("tentative"),
   bookingType: z.enum(bookingTypes).default("edit"),
   notes: z.string().trim().max(2000).nullable().optional(),
 });
 function validateBooking<T extends z.ZodTypeAny>(schema: T) {
   return schema.superRefine((value: z.infer<T>, context) => {
-    const booking = value as { startsAt?: Date; endsAt?: Date; bookingType?: string; personId?: string | null; guestPersonId?: string | null; episodeId?: string | null; roomId?: string | null };
+    const booking = value as { startsAt?: Date; endsAt?: Date; bookingType?: string; personId?: string | null; guestPersonId?: string | null; episodeId?: string | null; roomId?: string | null; isOption?: boolean };
     if (booking.startsAt && booking.endsAt && booking.endsAt <= booking.startsAt) context.addIssue({ code: z.ZodIssueCode.custom, message: "End time must be after the start time.", path: ["endsAt"] });
     if (booking.guestPersonId && !booking.episodeId) context.addIssue({ code: z.ZodIssueCode.custom, message: "Choose an episode before adding a guest account.", path: ["episodeId"] });
+    if (booking.isOption && !booking.roomId && !booking.personId) context.addIssue({ code: z.ZodIssueCode.custom, message: "An option booking needs a room or assigned person.", path: ["roomId"] });
     if (booking.bookingType && personnelAvailabilityTypes.includes(booking.bookingType as typeof personnelAvailabilityTypes[number])) {
       if (!booking.personId) context.addIssue({ code: z.ZodIssueCode.custom, message: "Choose the person whose availability is affected.", path: ["personId"] });
       if (booking.roomId) context.addIssue({ code: z.ZodIssueCode.custom, message: "Leave, training, sickness, and unavailability cannot reserve a room.", path: ["roomId"] });

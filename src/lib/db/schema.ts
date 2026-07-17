@@ -367,6 +367,10 @@ export const bookings = pgTable("bookings", {
   actualStartsAt: timestamp("actual_starts_at", { withTimezone: true }),
   actualEndsAt: timestamp("actual_ends_at", { withTimezone: true }),
   approvedOvertimeMinutes: integer("approved_overtime_minutes").default(0).notNull(),
+  /** A provisional pencil hold. It may overlap confirmed work without blocking it. */
+  isOption: boolean("is_option").default(false).notNull(),
+  /** First-come position among overlapping pencil holds for the assigned resources. */
+  optionRank: integer("option_rank"),
   status: bookingStatus("status").default("tentative").notNull(),
   bookingType: bookingType("booking_type").default("edit").notNull(),
   notes: text("notes"),
@@ -375,6 +379,7 @@ export const bookings = pgTable("bookings", {
   index("bookings_room_time_idx").on(table.roomId, table.startsAt),
   index("bookings_episode_time_idx").on(table.episodeId, table.startsAt),
   index("bookings_guest_person_time_idx").on(table.guestPersonId, table.startsAt),
+  index("bookings_option_resource_time_idx").on(table.organizationId, table.isOption, table.roomId, table.personId, table.startsAt),
 ]);
 
 /** Internal room-service requests. No payment, vendor, or dietary profile is stored. */

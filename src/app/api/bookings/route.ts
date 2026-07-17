@@ -4,6 +4,7 @@ import { getBookingSuggestions } from "@/lib/booking-conflicts";
 import { addGuestToEpisodeTeam, getGuestAccountForBooking } from "@/lib/booking-guests";
 import { getDb } from "@/lib/db";
 import { bookings } from "@/lib/db/schema";
+import { isActiveOptionBooking, resequenceOptionBookings } from "@/lib/option-bookings";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { canManageBookings } from "@/lib/permissions";
 import { missingTenantReferences } from "@/lib/tenant-resources";
@@ -19,9 +20,11 @@ export async function POST(request: Request) {
   if (missing.length) return NextResponse.json({ error: `Invalid ${missing.join(", ")} for this organization.` }, { status: 404 });
   const guest = parsed.data.guestPersonId ? await getGuestAccountForBooking(context.organization.organizationId, parsed.data.guestPersonId) : null;
   if (parsed.data.guestPersonId && !guest) return NextResponse.json({ error: "Guest account not found for this organization." }, { status: 404 });
-  const availability = parsed.data.status === "cancelled" ? { conflicts: [] } : await getBookingSuggestions(context.organization.organizationId, parsed.data);
-  if (availability.conflicts.length) return NextResponse.json({ error: "This room or artist already has a conflicting booking.", ...availability }, { status: 409 });
-  const [booking] = await getDb().insert(bookings).values({ ...parsed.data, organizationId: context.organization.organizationId }).returning({ id: bookings.id });
+  const values = parsed.data.isOption && parsed.data.status !== "cancelled" ? { ...parsed.data, status: "tentative" as const } : parsed.data;
+  const availability = values.status === "cancelled" ? { conflicts: [] } : await getBookingSuggestions(context.organization.organizationId, { ...values, includeOptionBookings: values.isOption });
+  if (!values.isOption && availability.conflicts.length) return NextResponse.json({ error: "This room or artist already has a conflicting booking.", ...availability }, { status: 409 });
+  const [booking] = await getDb().insert(bookings).values({ ...values, optionRank: isActiveOptionBooking(values) ? 0 : null, organizationId: context.organization.organizationId }).returning({ id: bookings.id });
+  if (isActiveOptionBooking(values)) await resequenceOptionBookings(context.organization.organizationId, values);
   if (guest && parsed.data.episodeId) await addGuestToEpisodeTeam(context.organization.organizationId, parsed.data.episodeId, guest);
   return NextResponse.json(booking, { status: 201 });
 }
