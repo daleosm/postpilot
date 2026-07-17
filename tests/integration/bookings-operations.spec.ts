@@ -9,8 +9,14 @@ const organizationId = "97000000-0000-4000-8000-000000000001";
 const foreignOrganizationId = "97000000-0000-4000-8000-000000000002";
 const managerUserId = "user_booking_operations_manager";
 const artistUserId = "user_booking_operations_artist";
+const unassignedUserId = "user_booking_operations_unassigned";
+const coloristUserId = "user_booking_operations_colorist";
+const guestUserId = "user_booking_operations_guest";
 const managerPersonId = "97000000-0000-4000-8000-000000000003";
 const artistPersonId = "97000000-0000-4000-8000-000000000004";
+const unassignedPersonId = "97000000-0000-4000-8000-000000000026";
+const coloristPersonId = "97000000-0000-4000-8000-000000000027";
+const guestPersonId = "97000000-0000-4000-8000-000000000028";
 const roomOneId = "97000000-0000-4000-8000-000000000006";
 const roomTwoId = "97000000-0000-4000-8000-000000000007";
 const showId = "97000000-0000-4000-8000-000000000008";
@@ -31,6 +37,24 @@ const actualEpisodeId = "97000000-0000-4000-8000-000000000022";
 const optionEpisodeId = "97000000-0000-4000-8000-000000000023";
 const workOrderId = "97000000-0000-4000-8000-000000000024";
 const conflictingWorkOrderId = "97000000-0000-4000-8000-000000000025";
+const unassignedWorkOrderId = "97000000-0000-4000-8000-000000000033";
+const roleWorkOrderId = "97000000-0000-4000-8000-000000000034";
+const externalWorkOrderId = "97000000-0000-4000-8000-000000000035";
+const rebookingWorkOrderId = "97000000-0000-4000-8000-000000000036";
+const managerWorkOrderId = "97000000-0000-4000-8000-000000000037";
+const raceWorkOrderId = "97000000-0000-4000-8000-000000000038";
+const optionWorkOrderId = "97000000-0000-4000-8000-000000000039";
+const foreignWorkOrderId = "97000000-0000-4000-8000-000000000040";
+const foreignRoomWorkOrderId = "97000000-0000-4000-8000-000000000041";
+const statusWorkOrderIds = {
+  open: "97000000-0000-4000-8000-000000000042", awaiting_approval: "97000000-0000-4000-8000-000000000043",
+  ready_for_review: "97000000-0000-4000-8000-000000000044", complete: "97000000-0000-4000-8000-000000000045", cancelled: "97000000-0000-4000-8000-000000000046",
+};
+const colorRoomId = "97000000-0000-4000-8000-000000000047";
+const mixRoomId = "97000000-0000-4000-8000-000000000048";
+const qcRoomId = "97000000-0000-4000-8000-000000000049";
+const officeRoomId = "97000000-0000-4000-8000-000000000050";
+const mappedWorkOrderIds = { edit: "97000000-0000-4000-8000-000000000051", color: "97000000-0000-4000-8000-000000000052", mix: "97000000-0000-4000-8000-000000000053", qc: "97000000-0000-4000-8000-000000000054" };
 
 let createdBookingId = "";
 
@@ -52,6 +76,10 @@ function bookingPayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function reservePayload(roomId: string, startsAt: string, endsAt: string) {
+  return { roomId, startsAt, endsAt, notes: "Reserved from integration test." };
+}
+
 async function useSession(page: Page, userId: string) {
   const user = await page.request.post("/api/debug/user", { data: { userId } });
   expect(user.status()).toBe(200);
@@ -67,21 +95,28 @@ test.describe("Booking operations integration", () => {
     await sql`
       insert into users (id, name, email) values
         (${managerUserId}, 'Booking Operations Manager', 'booking-operations-manager@postpilot.test'),
-        (${artistUserId}, 'Booking Operations Artist', 'booking-operations-artist@postpilot.test')
+        (${artistUserId}, 'Booking Operations Artist', 'booking-operations-artist@postpilot.test'),
+        (${unassignedUserId}, 'Booking Operations Unassigned', 'booking-operations-unassigned@postpilot.test'),
+        (${coloristUserId}, 'Booking Operations Colourist', 'booking-operations-colourist@postpilot.test'),
+        (${guestUserId}, 'Booking Operations Guest', 'booking-operations-guest@postpilot.test')
       on conflict (id) do update set name = excluded.name, email = excluded.email
     `;
     await sql`insert into organizations (id, name, slug, currency) values (${organizationId}, 'Booking Operations Lab', 'booking-operations-lab', 'GBP'), (${foreignOrganizationId}, 'Foreign Booking Operations', 'foreign-booking-operations', 'GBP')`;
-    await sql`insert into organization_members (organization_id, user_id, role) values (${organizationId}, ${managerUserId}, 'admin'), (${organizationId}, ${artistUserId}, 'member')`;
+    await sql`insert into organization_members (organization_id, user_id, role) values (${organizationId}, ${managerUserId}, 'admin'), (${organizationId}, ${artistUserId}, 'member'), (${organizationId}, ${unassignedUserId}, 'member'), (${organizationId}, ${coloristUserId}, 'member'), (${organizationId}, ${guestUserId}, 'guest')`;
     await sql`
       insert into organization_role_policies (organization_id, role, label, permissions) values
-        (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb)
+        (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb),
+        (${organizationId}, 'colorist', 'Colourist', '["update_assigned_work"]'::jsonb)
     `;
     await sql`
       insert into people (id, organization_id, user_id, name, email, role) values
         (${managerPersonId}, ${organizationId}, ${managerUserId}, 'Booking Operations Manager', 'booking-operations-manager@postpilot.test', 'producer'),
-        (${artistPersonId}, ${organizationId}, ${artistUserId}, 'Booking Operations Artist', 'booking-operations-artist@postpilot.test', 'editor')
+        (${artistPersonId}, ${organizationId}, ${artistUserId}, 'Booking Operations Artist', 'booking-operations-artist@postpilot.test', 'editor'),
+        (${unassignedPersonId}, ${organizationId}, ${unassignedUserId}, 'Booking Operations Unassigned', 'booking-operations-unassigned@postpilot.test', 'editor'),
+        (${coloristPersonId}, ${organizationId}, ${coloristUserId}, 'Booking Operations Colourist', 'booking-operations-colourist@postpilot.test', 'colorist'),
+        (${guestPersonId}, ${organizationId}, ${guestUserId}, 'Booking Operations Guest', 'booking-operations-guest@postpilot.test', 'guest')
     `;
-    await sql`insert into rooms (id, organization_id, name, type) values (${roomOneId}, ${organizationId}, 'Operations Edit 1', 'edit_bay'), (${roomTwoId}, ${organizationId}, 'Operations Edit 2', 'edit_bay')`;
+    await sql`insert into rooms (id, organization_id, name, type) values (${roomOneId}, ${organizationId}, 'Operations Edit 1', 'edit_bay'), (${roomTwoId}, ${organizationId}, 'Operations Edit 2', 'edit_bay'), (${colorRoomId}, ${organizationId}, 'Operations Colour', 'color_suite'), (${mixRoomId}, ${organizationId}, 'Operations Mix', 'mix_room'), (${qcRoomId}, ${organizationId}, 'Operations QC', 'qc_room'), (${officeRoomId}, ${organizationId}, 'Operations Office', 'office')`;
     await sql`insert into rooms (id, organization_id, name, type) values (${foreignRoomId}, ${foreignOrganizationId}, 'Foreign Edit 1', 'edit_bay')`;
     await sql`insert into shows (id, organization_id, title, code, time_zone) values (${showId}, ${organizationId}, 'Booking Operations Series', 'BOS', 'Europe/London'), (${foreignShowId}, ${foreignOrganizationId}, 'Foreign Booking Series', 'FBS', 'Europe/London')`;
     await sql`insert into seasons (id, organization_id, show_id, number) values (${seasonId}, ${organizationId}, ${showId}, 1), (${foreignSeasonId}, ${foreignOrganizationId}, ${foreignShowId}, 1)`;
@@ -106,13 +141,32 @@ test.describe("Booking operations integration", () => {
     await sql`
       insert into post_work_orders (id, organization_id, episode_id, assignee_person_id, title, status, work_type, billing_scope, currency) values
         (${workOrderId}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Colour cleanup pass', 'in_progress', 'internal', 'included', 'GBP'),
-        (${conflictingWorkOrderId}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Second colour cleanup pass', 'in_progress', 'internal', 'included', 'GBP')
+        (${conflictingWorkOrderId}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Second colour cleanup pass', 'in_progress', 'internal', 'included', 'GBP'),
+        (${unassignedWorkOrderId}, ${organizationId}, ${optionEpisodeId}, ${managerPersonId}, 'Producer-only work', 'in_progress', 'internal', 'included', 'GBP'),
+        (${roleWorkOrderId}, ${organizationId}, ${optionEpisodeId}, null, 'Role-assigned grade', 'in_progress', 'internal', 'included', 'GBP'),
+        (${externalWorkOrderId}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Vendor grade', 'in_progress', 'external_vendor', 'internal', 'GBP'),
+        (${rebookingWorkOrderId}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Replacement grade slot', 'in_progress', 'internal', 'included', 'GBP'),
+        (${managerWorkOrderId}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Manager scheduled artist work', 'in_progress', 'internal', 'included', 'GBP'),
+        (${raceWorkOrderId}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Concurrent reserve test', 'in_progress', 'internal', 'included', 'GBP'),
+        (${optionWorkOrderId}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Option-safe reserve', 'in_progress', 'internal', 'included', 'GBP'),
+        (${foreignRoomWorkOrderId}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Foreign room rejection', 'in_progress', 'internal', 'included', 'GBP'),
+        (${mappedWorkOrderIds.edit}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Edit mapping', 'in_progress', 'internal', 'included', 'GBP'),
+        (${mappedWorkOrderIds.color}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Colour mapping', 'in_progress', 'internal', 'included', 'GBP'),
+        (${mappedWorkOrderIds.mix}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Mix mapping', 'in_progress', 'internal', 'included', 'GBP'),
+        (${mappedWorkOrderIds.qc}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'QC mapping', 'in_progress', 'internal', 'included', 'GBP'),
+        (${statusWorkOrderIds.open}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Open work', 'open', 'internal', 'included', 'GBP'),
+        (${statusWorkOrderIds.awaiting_approval}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Pending work', 'awaiting_approval', 'internal', 'included', 'GBP'),
+        (${statusWorkOrderIds.ready_for_review}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Review work', 'ready_for_review', 'internal', 'included', 'GBP'),
+        (${statusWorkOrderIds.complete}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Complete work', 'complete', 'internal', 'included', 'GBP'),
+        (${statusWorkOrderIds.cancelled}, ${organizationId}, ${optionEpisodeId}, ${artistPersonId}, 'Cancelled work', 'cancelled', 'internal', 'included', 'GBP'),
+        (${foreignWorkOrderId}, ${foreignOrganizationId}, ${foreignEpisodeId}, null, 'Foreign work order', 'in_progress', 'internal', 'included', 'GBP')
     `;
+    await sql`update post_work_orders set assignee_role = 'colorist' where id = ${roleWorkOrderId}`;
   });
 
   test.afterAll(async () => {
     await sql`delete from organizations where id in (${organizationId}, ${foreignOrganizationId})`;
-    await sql`delete from users where id in (${managerUserId}, ${artistUserId})`;
+    await sql`delete from users where id in (${managerUserId}, ${artistUserId}, ${unassignedUserId}, ${coloristUserId}, ${guestUserId})`;
     await sql.end();
   });
 
@@ -214,6 +268,10 @@ test.describe("Booking operations integration", () => {
     expect(reserved.workOrderId).toBe(workOrderId);
     const [linked] = await sql`select booking_id from post_work_orders where id = ${workOrderId}`;
     expect(linked.booking_id).toBe(reserved.id);
+    const [createdBooking] = await sql`select organization_id, episode_id, person_id, room_id, status, booking_type, is_option, notes from bookings where id = ${reserved.id}`;
+    expect(createdBooking).toMatchObject({ organization_id: organizationId, episode_id: optionEpisodeId, person_id: artistPersonId, room_id: roomTwoId, status: "confirmed", booking_type: "edit", is_option: false, notes: "Quick client adjustment." });
+    const scheduledActions = await sql`select action from activity_log where organization_id = ${organizationId} and entity_id in (${workOrderId}, ${reserved.id}) order by action`;
+    expect(scheduledActions.map((entry) => entry.action)).toEqual(expect.arrayContaining(["booking.created_from_work_order", "work_order.booking_scheduled"]));
     const duplicate = await page.request.post(`/api/work-orders/${workOrderId}/booking`, { data: { roomId: roomTwoId, startsAt: "2035-05-30T14:00:00.000Z", endsAt: "2035-05-30T16:00:00.000Z" } });
     expect(duplicate.status()).toBe(409);
     const conflict = await page.request.post(`/api/work-orders/${conflictingWorkOrderId}/booking`, { data: { roomId: roomTwoId, startsAt: "2035-05-30T14:00:00.000Z", endsAt: "2035-05-30T16:00:00.000Z" } });
@@ -225,9 +283,124 @@ test.describe("Booking operations integration", () => {
     expect(logged.action).toBe("work_order.time_logged");
   });
 
+  test("enforces work-order lifecycle, work type, assignment, and tenant boundaries", async ({ page }) => {
+    await useSession(page, artistUserId);
+    for (const [status, id] of Object.entries(statusWorkOrderIds)) {
+      const response = await page.request.post(`/api/work-orders/${id}/booking`, { data: reservePayload(roomTwoId, `2035-06-10T${String(9 + Object.keys(statusWorkOrderIds).indexOf(status)).padStart(2, "0")}:00:00.000Z`, `2035-06-10T${String(10 + Object.keys(statusWorkOrderIds).indexOf(status)).padStart(2, "0")}:00:00.000Z`) });
+      expect(response.status(), status).toBe(409);
+    }
+    expect((await page.request.post(`/api/work-orders/${externalWorkOrderId}/booking`, { data: reservePayload(roomTwoId, "2035-06-11T09:00:00.000Z", "2035-06-11T10:00:00.000Z") })).status()).toBe(409);
+    expect((await page.request.post(`/api/work-orders/${unassignedWorkOrderId}/booking`, { data: reservePayload(roomTwoId, "2035-06-11T11:00:00.000Z", "2035-06-11T12:00:00.000Z") })).status()).toBe(403);
+    expect((await page.request.post(`/api/work-orders/${foreignWorkOrderId}/booking`, { data: reservePayload(roomTwoId, "2035-06-11T13:00:00.000Z", "2035-06-11T14:00:00.000Z") })).status()).toBe(404);
+    expect((await page.request.post(`/api/work-orders/${foreignRoomWorkOrderId}/booking`, { data: reservePayload(foreignRoomId, "2035-06-11T15:00:00.000Z", "2035-06-11T16:00:00.000Z") })).status()).toBe(404);
+    expect((await page.request.post(`/api/work-orders/${foreignRoomWorkOrderId}/booking`, { data: { roomId: roomTwoId, startsAt: "not-a-date", endsAt: "2035-06-11T16:00:00.000Z" } })).status()).toBe(400);
+
+    await useSession(page, guestUserId);
+    expect((await page.request.post(`/api/work-orders/${foreignRoomWorkOrderId}/booking`, { data: reservePayload(roomTwoId, "2035-06-11T15:00:00.000Z", "2035-06-11T16:00:00.000Z") })).status()).toBe(403);
+  });
+
+  test("uses the assigned person for manager and role-assigned reservations", async ({ page }) => {
+    await useSession(page, managerUserId);
+    const managerReservation = await page.request.post(`/api/work-orders/${managerWorkOrderId}/booking`, { data: reservePayload(roomTwoId, "2035-06-12T09:00:00.000Z", "2035-06-12T10:00:00.000Z") });
+    expect(managerReservation.status()).toBe(201);
+    const managerBooking = await managerReservation.json() as { id: string };
+    const [managerAssigned] = await sql`select person_id from bookings where id = ${managerBooking.id}`;
+    expect(managerAssigned.person_id).toBe(artistPersonId);
+
+    await useSession(page, coloristUserId);
+    const roleReservation = await page.request.post(`/api/work-orders/${roleWorkOrderId}/booking`, { data: reservePayload(colorRoomId, "2035-06-12T11:00:00.000Z", "2035-06-12T12:00:00.000Z") });
+    expect(roleReservation.status()).toBe(201);
+    const roleBooking = await roleReservation.json() as { id: string };
+    const [roleAssigned] = await sql`select person_id, booking_type from bookings where id = ${roleBooking.id}`;
+    expect(roleAssigned).toMatchObject({ person_id: coloristPersonId, booking_type: "color" });
+  });
+
+  test("maps supported room types and keeps pencil holds non-blocking", async ({ page }) => {
+    await useSession(page, artistUserId);
+    const mappings: Array<[string, string, string]> = [[mappedWorkOrderIds.edit, roomTwoId, "edit"], [mappedWorkOrderIds.color, colorRoomId, "color"], [mappedWorkOrderIds.mix, mixRoomId, "mix"], [mappedWorkOrderIds.qc, qcRoomId, "qc"]];
+    for (const [id, roomId, expectedType] of mappings) {
+      const hour = 9 + mappings.findIndex(([workOrderId]) => workOrderId === id) * 2;
+      const result = await page.request.post(`/api/work-orders/${id}/booking`, { data: reservePayload(roomId, `2035-06-13T${String(hour).padStart(2, "0")}:00:00.000Z`, `2035-06-13T${String(hour + 1).padStart(2, "0")}:00:00.000Z`) });
+      expect(result.status()).toBe(201);
+      const reservation = await result.json() as { id: string };
+      const [booking] = await sql`select booking_type from bookings where id = ${reservation.id}`;
+      expect(booking.booking_type).toBe(expectedType);
+    }
+    expect((await page.request.post(`/api/work-orders/${foreignRoomWorkOrderId}/booking`, { data: reservePayload(officeRoomId, "2035-06-14T09:00:00.000Z", "2035-06-14T10:00:00.000Z") })).status()).toBe(400);
+    await useSession(page, managerUserId);
+    const option = await page.request.post("/api/bookings", { data: bookingPayload({ title: "Work-order pencil hold", roomId: roomOneId, episodeId: optionEpisodeId, personId: artistPersonId, startsAt: "2035-06-17T09:00:00.000Z", endsAt: "2035-06-17T13:00:00.000Z", status: "tentative", isOption: true }) });
+    expect(option.status()).toBe(201);
+    await useSession(page, artistUserId);
+    const optionSafe = await page.request.post(`/api/work-orders/${optionWorkOrderId}/booking`, { data: reservePayload(roomOneId, "2035-06-17T09:00:00.000Z", "2035-06-17T13:00:00.000Z") });
+    expect(optionSafe.status()).toBe(201);
+  });
+
+  test("allows a cancelled linked booking to be replaced", async ({ page }) => {
+    await useSession(page, artistUserId);
+    const first = await page.request.post(`/api/work-orders/${rebookingWorkOrderId}/booking`, { data: reservePayload(roomTwoId, "2035-06-15T09:00:00.000Z", "2035-06-15T11:00:00.000Z") });
+    expect(first.status()).toBe(201);
+    const firstBooking = await first.json() as { id: string };
+    await useSession(page, managerUserId);
+    const cancelled = await page.request.patch(`/api/bookings/${firstBooking.id}`, { data: bookingPayload({ title: "Cancelled replacement slot", roomId: roomTwoId, episodeId: optionEpisodeId, personId: artistPersonId, startsAt: "2035-06-15T09:00:00.000Z", endsAt: "2035-06-15T11:00:00.000Z", status: "cancelled" }) });
+    expect(cancelled.status()).toBe(200);
+    await useSession(page, artistUserId);
+    const replacement = await page.request.post(`/api/work-orders/${rebookingWorkOrderId}/booking`, { data: reservePayload(roomTwoId, "2035-06-15T12:00:00.000Z", "2035-06-15T14:00:00.000Z") });
+    expect(replacement.status()).toBe(201);
+    const replacementBooking = await replacement.json() as { id: string };
+    expect(replacementBooking.id).not.toBe(firstBooking.id);
+  });
+
+  test("creates exactly one linked booking under concurrent reserve attempts", async ({ page }) => {
+    await useSession(page, artistUserId);
+    const payload = reservePayload(roomTwoId, "2035-06-16T09:00:00.000Z", "2035-06-16T11:00:00.000Z");
+    const [first, second] = await Promise.all([page.request.post(`/api/work-orders/${raceWorkOrderId}/booking`, { data: payload }), page.request.post(`/api/work-orders/${raceWorkOrderId}/booking`, { data: payload })]);
+    expect([first.status(), second.status()].sort()).toEqual([201, 409]);
+    const rows = await sql`select id from bookings where organization_id = ${organizationId} and title = 'Work order · Concurrent reserve test'`;
+    expect(rows).toHaveLength(1);
+    const [workOrder] = await sql`select booking_id from post_work_orders where id = ${raceWorkOrderId}`;
+    expect(workOrder.booking_id).toBe(rows[0].id);
+  });
+
+  test("shows artists a usable, conflict-aware work-order reservation UI and keeps guests out", async ({ page }) => {
+    await useSession(page, artistUserId);
+    await page.goto("/bookings");
+    await expect(page.getByText("Ready to schedule", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reserve work order Vendor grade" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Reserve work order Open work" })).toHaveCount(0);
+
+    const dragCard = page.getByRole("button", { name: "Reserve work order Foreign room rejection" });
+    await dragCard.dragTo(page.getByTestId(`room-timeline-${roomTwoId}`));
+    await expect(page.getByRole("heading", { name: "Foreign room rejection" })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Suite / room" })).toHaveValue(roomTwoId);
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+    const day = new Date();
+    const start = localDateTime(day, 9); const end = localDateTime(day, 11);
+    await useSession(page, managerUserId);
+    const occupied = await page.request.post("/api/bookings", { data: bookingPayload({ title: "UI reservation conflict", roomId: roomTwoId, episodeId: optionEpisodeId, personId: artistPersonId, startsAt: `${start}:00.000Z`, endsAt: `${end}:00.000Z` }) });
+    expect(occupied.status()).toBe(201);
+    await useSession(page, artistUserId);
+    await page.goto("/bookings");
+    await page.getByRole("button", { name: "Reserve work order Second colour cleanup pass" }).click();
+    await page.getByRole("combobox", { name: "Suite / room" }).selectOption(roomTwoId);
+    await page.locator('input[type="datetime-local"]').nth(0).fill(start);
+    await page.locator('input[type="datetime-local"]').nth(1).fill(end);
+    await page.getByRole("button", { name: "Reserve room", exact: true }).click();
+    await expect(page.locator("p[role='alert']")).toContainText("already booked");
+
+    await useSession(page, guestUserId);
+    await page.goto("/bookings");
+    await expect(page).toHaveURL(/\/episodes$/);
+  });
+
   test("does not permit a foreign booking mutation", async ({ page }) => {
     await useSession(page, managerUserId);
     const foreignUpdate = await page.request.patch(`/api/bookings/${foreignBookingId}`, { data: bookingPayload() });
     expect(foreignUpdate.status()).toBe(404);
   });
 });
+
+function localDateTime(date: Date, hour: number) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(hour)}:00`;
+}

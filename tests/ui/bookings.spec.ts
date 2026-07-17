@@ -1,10 +1,24 @@
 import { expect, test, type Page } from "@playwright/test";
+import postgres from "postgres";
 import { useDebugSession } from "../fixtures/debug-session";
 
 const COPPERLINE_ORGANIZATION_ID = "10000000-0000-4000-8000-000000000005";
+const ACTUAL_EXTENSION_BOOKING_ID = "f5000000-0000-4000-8000-000000000001";
+const ACTUAL_EXTENSION_BOOKING_TITLE = "Actual calendar extension test";
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) throw new Error("DATABASE_URL is required for booking calendar UI tests.");
+const sql = postgres(databaseUrl, { prepare: false });
 
 test.beforeEach(async ({ context }) => {
   await useDebugSession(context, "user_maya", COPPERLINE_ORGANIZATION_ID);
+});
+
+test.afterEach(async () => {
+  await sql`delete from bookings where id = ${ACTUAL_EXTENSION_BOOKING_ID}`;
+});
+
+test.afterAll(async () => {
+  await sql.end();
 });
 
 async function openBookings(page: Page) {
@@ -88,6 +102,25 @@ test.describe("Bookings UI", () => {
     await expect(page.getByRole("button", { name: "Save changes" })).toBeVisible();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Edit booking" })).not.toBeVisible();
+  });
+
+  test("extends a booking bar to its confirmed actual end time", async ({ page }) => {
+    const [[room], [episode], [person]] = await Promise.all([
+      sql<{ id: string }[]>`select id from rooms where organization_id = ${COPPERLINE_ORGANIZATION_ID} and type = 'edit_bay' limit 1`,
+      sql<{ id: string }[]>`select id from episodes where organization_id = ${COPPERLINE_ORGANIZATION_ID} limit 1`,
+      sql<{ id: string }[]>`select id from people where organization_id = ${COPPERLINE_ORGANIZATION_ID} and role = 'editor' limit 1`,
+    ]);
+    if (!room || !episode || !person) throw new Error("Copperline booking test resources are missing.");
+    const start = new Date(); start.setHours(9, 0, 0, 0);
+    const plannedEnd = new Date(start); plannedEnd.setHours(16, 0, 0, 0);
+    const actualEnd = new Date(start); actualEnd.setHours(18, 0, 0, 0);
+    await sql`insert into bookings (id, organization_id, room_id, episode_id, person_id, title, starts_at, ends_at, actual_starts_at, actual_ends_at, status, booking_type) values (${ACTUAL_EXTENSION_BOOKING_ID}, ${COPPERLINE_ORGANIZATION_ID}, ${room.id}, ${episode.id}, ${person.id}, ${ACTUAL_EXTENSION_BOOKING_TITLE}, ${start}, ${plannedEnd}, ${start}, ${actualEnd}, 'confirmed', 'edit')`;
+
+    await openBookings(page);
+    const bar = page.getByTestId(`booking-bar-${ACTUAL_EXTENSION_BOOKING_ID}`);
+    await expect(bar).toBeVisible();
+    await expect(bar).toHaveAttribute("title", /Operational: 09:00–18:00/);
+    expect(await bar.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(240);
   });
 });
 

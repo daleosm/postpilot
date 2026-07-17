@@ -60,9 +60,11 @@ test.describe("My time UI", () => {
     await expect(page.getByLabel("Actual end")).toBeVisible();
   });
 
-  test("redirects an artist away from the scheduler-only facility calendar", async ({ page }) => {
+  test("lets an artist inspect bookings and reserve assigned work without facility booking controls", async ({ page }) => {
     await page.goto("/bookings");
-    await expect(page).toHaveURL(/\/my-time$/);
-    await expect(page.getByRole("heading", { name: "My time", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/bookings$/);
+    await expect(page.getByRole("heading", { name: "Bookings", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "New booking", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Copy episode sequence", exact: true })).toHaveCount(0);
   });
 });
