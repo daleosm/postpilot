@@ -6,7 +6,8 @@ import { budgetLines, episodes, purchaseOrderAllocations, seasons, shows } from 
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { createEpisodeBudgetLineSchema } from "@/lib/validations/entities";
-import { PurchaseOrderError, resolveBudgetLinePurchaseOrder } from "@/server/purchase-orders";
+import { PurchaseOrderError, requirePurchaseOrderOverrunApproval, resolveBudgetLinePurchaseOrder } from "@/server/purchase-orders";
+import { getPurchaseOrderDetailForOrganization } from "@/server/data/purchase-orders";
 
 export async function POST(request: Request) {
   if (!(await can("manage_budget"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
     .where(and(eq(episodes.id, parsed.data.episodeId), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId)))
     .limit(1);
   if (!episode) return NextResponse.json({ error: "Episode not found." }, { status: 404 });
+  const { overrunReason, ...lineInput } = parsed.data;
   let purchaseOrder;
   try {
     purchaseOrder = await resolveBudgetLinePurchaseOrder(organizationId, {
@@ -39,15 +41,30 @@ export async function POST(request: Request) {
     if (error instanceof PurchaseOrderError) return NextResponse.json({ error: error.message }, { status: error.status });
     throw error;
   }
+  if (purchaseOrder) {
+    try {
+      const detail = await getPurchaseOrderDetailForOrganization(organizationId, purchaseOrder.id);
+      if (!detail) return NextResponse.json({ error: "Purchase order not found." }, { status: 404 });
+      await requirePurchaseOrderOverrunApproval({
+        organizationId,
+        purchaseOrderId: purchaseOrder.id,
+        nextCommittedAmount: detail.committedAmount + lineInput.budgetedAmount,
+        overrunReason,
+      });
+    } catch (error) {
+      if (error instanceof PurchaseOrderError) return NextResponse.json({ error: error.message }, { status: error.status });
+      throw error;
+    }
+  }
   const line = await db.transaction(async (tx) => {
     const [created] = await tx.insert(budgetLines).values({
-      ...parsed.data,
+      ...lineInput,
       organizationId,
       showId: episode.showId,
       seasonId: episode.seasonId,
       purchaseOrderId: purchaseOrder?.id ?? null,
-      budgetedAmount: String(parsed.data.budgetedAmount),
-      actualAmount: String(parsed.data.actualAmount),
+      budgetedAmount: String(lineInput.budgetedAmount),
+      actualAmount: String(lineInput.actualAmount),
       currency,
     }).returning({ id: budgetLines.id });
     if (purchaseOrder) await tx.insert(purchaseOrderAllocations).values({
@@ -55,14 +72,14 @@ export async function POST(request: Request) {
       purchaseOrderId: purchaseOrder.id,
       allocationType: "budget_line",
       budgetLineId: created.id,
-      amount: String(parsed.data.budgetedAmount),
+      amount: String(lineInput.budgetedAmount),
       allocationDate: new Date().toISOString().slice(0, 10),
       reference: `Budget line ${created.id.slice(0, 8)}`,
-      description: parsed.data.description ?? parsed.data.category,
+      description: lineInput.description ?? lineInput.category,
       createdByUserId: context.userId,
     });
     return created;
   });
-  await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "budget_line.created", entityType: "budget_line", entityId: line.id, metadata: { episodeId: parsed.data.episodeId, category: parsed.data.category } });
+  await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "budget_line.created", entityType: "budget_line", entityId: line.id, metadata: { episodeId: lineInput.episodeId, category: lineInput.category } });
   return NextResponse.json(line, { status: 201 });
 }

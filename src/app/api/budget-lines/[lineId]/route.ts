@@ -7,7 +7,8 @@ import { budgetLines, episodes, purchaseOrderAllocations, seasons, shows } from 
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { updateBudgetLineSchema } from "@/lib/validations/entities";
-import { PurchaseOrderError, resolveBudgetLinePurchaseOrder } from "@/server/purchase-orders";
+import { PurchaseOrderError, requirePurchaseOrderOverrunApproval, resolveBudgetLinePurchaseOrder } from "@/server/purchase-orders";
+import { getPurchaseOrderDetailForOrganization } from "@/server/data/purchase-orders";
 
 async function getMutableLine(lineId: string, organizationId: string) {
   const [line] = await getDb().select().from(budgetLines)
@@ -28,7 +29,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ li
   const { lineId } = await params;
   const result = await getMutableLine(lineId, organizationId);
   if ("error" in result) return result.error;
-  const { episodeId, showId, seasonId, budgetedAmount, actualAmount, ...rest } = parsed.data;
+  const { episodeId, showId, seasonId, budgetedAmount, actualAmount, overrunReason, ...rest } = parsed.data;
   void showId;
   void seasonId;
   let episodeScope: { showId: string; seasonId: string } | null = null;
@@ -58,6 +59,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ li
     throw error;
   }
   const finalBudgetedAmount = budgetedAmount === undefined ? String(result.line.budgetedAmount) : String(budgetedAmount);
+  const [existingAllocation] = await getDb().select({ id: purchaseOrderAllocations.id, purchaseOrderId: purchaseOrderAllocations.purchaseOrderId, amount: purchaseOrderAllocations.amount })
+    .from(purchaseOrderAllocations).where(and(eq(purchaseOrderAllocations.organizationId, organizationId), eq(purchaseOrderAllocations.budgetLineId, lineId))).limit(1);
+  if (purchaseOrder) {
+    try {
+      const detail = await getPurchaseOrderDetailForOrganization(organizationId, purchaseOrder.id);
+      if (!detail) return NextResponse.json({ error: "Purchase order not found." }, { status: 404 });
+      await requirePurchaseOrderOverrunApproval({
+        organizationId,
+        purchaseOrderId: purchaseOrder.id,
+        nextCommittedAmount: detail.committedAmount - (existingAllocation?.purchaseOrderId === purchaseOrder.id ? Number(existingAllocation.amount) : 0) + Number(finalBudgetedAmount),
+        overrunReason,
+      });
+    } catch (error) {
+      if (error instanceof PurchaseOrderError) return NextResponse.json({ error: error.message }, { status: error.status });
+      throw error;
+    }
+  }
   await getDb().transaction(async (tx) => {
     await tx.update(budgetLines).set({
       ...rest,
@@ -68,13 +86,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ li
       currency,
       updatedAt: new Date(),
     }).where(and(eq(budgetLines.id, lineId), eq(budgetLines.organizationId, organizationId)));
-    const [allocation] = await tx.select({ id: purchaseOrderAllocations.id, purchaseOrderId: purchaseOrderAllocations.purchaseOrderId, allocationDate: purchaseOrderAllocations.allocationDate })
-      .from(purchaseOrderAllocations).where(and(eq(purchaseOrderAllocations.organizationId, organizationId), eq(purchaseOrderAllocations.budgetLineId, lineId))).limit(1);
-    if (!purchaseOrder && allocation) {
-      await tx.delete(purchaseOrderAllocations).where(and(eq(purchaseOrderAllocations.id, allocation.id), eq(purchaseOrderAllocations.organizationId, organizationId)));
-    } else if (purchaseOrder && allocation) {
+    if (!purchaseOrder && existingAllocation) {
+      await tx.delete(purchaseOrderAllocations).where(and(eq(purchaseOrderAllocations.id, existingAllocation.id), eq(purchaseOrderAllocations.organizationId, organizationId)));
+    } else if (purchaseOrder && existingAllocation) {
       await tx.update(purchaseOrderAllocations).set({ purchaseOrderId: purchaseOrder.id, amount: finalBudgetedAmount, description: rest.description === undefined ? result.line.description ?? result.line.category : rest.description ?? result.line.category, updatedAt: new Date() })
-        .where(and(eq(purchaseOrderAllocations.id, allocation.id), eq(purchaseOrderAllocations.organizationId, organizationId)));
+        .where(and(eq(purchaseOrderAllocations.id, existingAllocation.id), eq(purchaseOrderAllocations.organizationId, organizationId)));
     } else if (purchaseOrder) {
       await tx.insert(purchaseOrderAllocations).values({ organizationId, purchaseOrderId: purchaseOrder.id, allocationType: "budget_line", budgetLineId: lineId, amount: finalBudgetedAmount, allocationDate: new Date().toISOString().slice(0, 10), reference: `Budget line ${lineId.slice(0, 8)}`, description: rest.description === undefined ? result.line.description ?? result.line.category : rest.description ?? result.line.category, createdByUserId: context.userId });
     }

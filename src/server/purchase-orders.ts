@@ -59,6 +59,28 @@ async function requireBudgetApprover() {
   return context;
 }
 
+/**
+ * Applies the same finance gate to every path that can increase a live PO
+ * balance. Amounts are calculated server-side; callers supply only the
+ * proposed totals for the current tenant-scoped PO.
+ */
+export async function requirePurchaseOrderOverrunApproval(input: {
+  organizationId: string;
+  purchaseOrderId: string;
+  nextCommittedAmount?: number;
+  nextActualInvoicedAmount?: number;
+  overrunReason?: string | null;
+}) {
+  const detail = await getPurchaseOrderDetailForOrganization(input.organizationId, input.purchaseOrderId);
+  if (!detail) throw new PurchaseOrderError(404, "Purchase order not found.");
+  const proposed = Math.max(input.nextCommittedAmount ?? detail.committedAmount, input.nextActualInvoicedAmount ?? detail.actualInvoicedAmount);
+  const overrunAmount = Math.max(0, proposed - detail.authorisedAmount);
+  if (overrunAmount <= 0) return { detail, overrunAmount: 0 };
+  await requireBudgetApprover();
+  if (!input.overrunReason?.trim()) throw new PurchaseOrderError(400, "Explain the PO overrun before authorising it.");
+  return { detail, overrunAmount };
+}
+
 async function resolvePurchaseOrderScope(organizationId: string, scope: PurchaseOrderScope) {
   const db = getDb();
   const [[vendor], [show], [episode]] = await Promise.all([
@@ -226,7 +248,7 @@ export async function planWorkOrderPurchaseOrderCommitment(input: {
   const db = getDb();
   const [[order], [existing]] = await Promise.all([
     db.select().from(purchaseOrders).where(and(eq(purchaseOrders.id, input.purchaseOrderId), eq(purchaseOrders.organizationId, input.organizationId))).limit(1),
-    db.select({ id: purchaseOrderAllocations.id, amount: purchaseOrderAllocations.amount }).from(purchaseOrderAllocations)
+    db.select({ id: purchaseOrderAllocations.id, purchaseOrderId: purchaseOrderAllocations.purchaseOrderId, amount: purchaseOrderAllocations.amount }).from(purchaseOrderAllocations)
       .where(and(eq(purchaseOrderAllocations.organizationId, input.organizationId), eq(purchaseOrderAllocations.workOrderId, input.workOrderId), eq(purchaseOrderAllocations.allocationType, "work_order"))).limit(1),
   ]);
   if (!order) throw new PurchaseOrderError(404, "Purchase order not found.");
@@ -234,7 +256,7 @@ export async function planWorkOrderPurchaseOrderCommitment(input: {
   await validateAllocationSource(input.organizationId, order, { allocationType: "work_order", workOrderId: input.workOrderId }, { allowAwaitingApproval: true });
   const detail = await getPurchaseOrderDetailForOrganization(input.organizationId, order.id);
   if (!detail) throw new PurchaseOrderError(404, "Purchase order not found.");
-  const nextCommitted = detail.committedAmount - Number(existing?.amount ?? 0) + amount;
+  const nextCommitted = detail.committedAmount - (existing?.purchaseOrderId === order.id ? Number(existing.amount) : 0) + amount;
   const overrunAmount = Math.max(0, nextCommitted - detail.authorisedAmount);
   if (overrunAmount > 0) {
     if (!input.overrunReason?.trim()) throw new PurchaseOrderError(400, `This approval exceeds ${order.poNumber}'s remaining value by ${new Intl.NumberFormat("en-GB", { style: "currency", currency: order.currency }).format(overrunAmount)}. Add an overrun reason.`);
@@ -273,15 +295,17 @@ export async function createActivePurchaseOrderAllocation(purchaseOrderId: strin
       .where(and(eq(purchaseOrderAllocations.organizationId, context.organizationId), eq(purchaseOrderAllocations.budgetLineId, parsed.data.budgetLineId!), eq(purchaseOrderAllocations.allocationType, "budget_line"))).limit(1);
     if (existing) throw new PurchaseOrderError(409, "This budget line already has a PO commitment.");
   }
+  if (parsed.data.allocationType === "vendor_invoice") {
+    const [existing] = await getDb().select({ id: purchaseOrderAllocations.id }).from(purchaseOrderAllocations)
+      .where(and(eq(purchaseOrderAllocations.organizationId, context.organizationId), eq(purchaseOrderAllocations.vendorInvoiceId, parsed.data.vendorInvoiceId!), eq(purchaseOrderAllocations.allocationType, "vendor_invoice"))).limit(1);
+    if (existing) throw new PurchaseOrderError(409, "This supplier invoice already has a PO allocation.");
+  }
   const detail = await getPurchaseOrderDetailForOrganization(context.organizationId, purchaseOrderId);
   if (!detail) throw new PurchaseOrderError(404, "Purchase order not found.");
   const nextCommitted = detail.committedAmount + (parsed.data.allocationType === "vendor_invoice" ? 0 : parsed.data.amount);
   const nextActual = detail.actualInvoicedAmount + (parsed.data.allocationType === "vendor_invoice" ? parsed.data.amount : 0);
   const exceedsAuthorisedValue = Math.max(nextCommitted, nextActual) > detail.authorisedAmount;
-  if (exceedsAuthorisedValue) {
-    await requireBudgetApprover();
-    if (!parsed.data.overrunReason) throw new PurchaseOrderError(400, "Explain the PO overrun before authorising it.");
-  }
+  if (exceedsAuthorisedValue) await requirePurchaseOrderOverrunApproval({ organizationId: context.organizationId, purchaseOrderId, nextCommittedAmount: nextCommitted, nextActualInvoicedAmount: nextActual, overrunReason: parsed.data.overrunReason });
   const [allocation] = await getDb().insert(purchaseOrderAllocations).values({
     organizationId: context.organizationId,
     purchaseOrderId,
@@ -323,6 +347,14 @@ export async function recordActivePurchaseOrderActualCost(purchaseOrderId: strin
     .where(and(eq(episodes.id, episodeId), eq(episodes.organizationId, context.organizationId), eq(seasons.organizationId, context.organizationId), eq(shows.organizationId, context.organizationId))).limit(1);
   if (!episode) throw new PurchaseOrderError(404, "Episode not found in this post house.");
   if (order.showId && order.showId !== episode.showId) throw new PurchaseOrderError(409, "Choose an episode from this purchase order's show.");
+  const detail = await getPurchaseOrderDetailForOrganization(context.organizationId, order.id);
+  if (!detail) throw new PurchaseOrderError(404, "Purchase order not found.");
+  const overrun = await requirePurchaseOrderOverrunApproval({
+    organizationId: context.organizationId,
+    purchaseOrderId: order.id,
+    nextActualInvoicedAmount: detail.actualInvoicedAmount + parsed.data.amount,
+    overrunReason: parsed.data.overrunReason,
+  });
 
   try {
     const result = await db.transaction(async (tx) => {
@@ -370,6 +402,7 @@ export async function recordActivePurchaseOrderActualCost(purchaseOrderId: strin
     await Promise.all([
       writeAuditEvent({ organizationId: context.organizationId, actorUserId: context.userId, action: "vendor_invoice.recorded", entityType: "vendor_invoice", entityId: result.invoice.id, metadata: { purchaseOrderId: order.id, budgetLineId: result.budgetLine.id, allocationId: result.allocation.id } }),
       writeAuditEvent({ organizationId: context.organizationId, actorUserId: context.userId, action: "purchase_order.invoice_recorded", entityType: "purchase_order", entityId: order.id, metadata: { invoiceId: result.invoice.id, allocationId: result.allocation.id, budgetLineId: result.budgetLine.id, amount: parsed.data.amount, invoiceNumber: parsed.data.invoiceNumber } }),
+      ...(overrun.overrunAmount > 0 ? [writeAuditEvent({ organizationId: context.organizationId, actorUserId: context.userId, action: "purchase_order.actual_overrun_authorised", entityType: "purchase_order", entityId: order.id, metadata: { invoiceId: result.invoice.id, amount: parsed.data.amount, overrunAmount: overrun.overrunAmount, overrunReason: parsed.data.overrunReason } })] : []),
     ]);
     return { ...result, purchaseOrder: await getPurchaseOrderDetailForOrganization(context.organizationId, order.id) };
   } catch (error) {

@@ -374,6 +374,7 @@ export const insertBudgetLineSchema = z.object({
   actualAmount: money.default(0),
   costType: z.enum(["billable", "internal"]).default("internal"),
   externalCost: z.boolean().default(false),
+  overrunReason: z.string().trim().min(8, "Explain why this PO needs to exceed its authorised value.").max(2000).nullable().optional(),
 });
 // Do not derive this from the insert schema with `.partial()`: Zod defaults on
 // the insert shape would otherwise be materialised on a PATCH and overwrite
@@ -390,6 +391,7 @@ export const updateBudgetLineSchema = z.object({
   actualAmount: money.optional(),
   costType: z.enum(["billable", "internal"]).optional(),
   externalCost: z.boolean().optional(),
+  overrunReason: z.string().trim().min(8, "Explain why this PO needs to exceed its authorised value.").max(2000).nullable().optional(),
 }).refine((value) => Object.keys(value).length > 0, "Provide at least one budget line change.");
 
 // Costs are tracked at episode level. The broader insert schema remains useful for
@@ -452,6 +454,7 @@ export const createPurchaseOrderActualCostSchema = z.object({
   amount: money.positive("Enter a positive supplier cost."),
   description: z.string().trim().min(1, "Enter a short description.").max(2000),
   externalDocumentUrl: z.string().url("Enter a valid document link.").max(2000).nullable().optional(),
+  overrunReason: z.string().trim().min(8, "Explain why this PO needs to exceed its authorised value.").max(2000).nullable().optional(),
 });
 
 const purchaseOrderFieldsSchema = z.object({

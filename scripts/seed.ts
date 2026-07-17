@@ -495,6 +495,7 @@ async function seedTenant(tenant: TenantSeed) {
     ["Senior editor", "Editorial artists", "day", 690, "Standard editorial day rate."],
     ["Colour suite", "Colour", "day", 980, "Colour suite and colourist day."],
     ["Mix stage", "Sound", "day", 1120, "Mix room and mixer day."],
+    ["Audio suite", "Audio suite", "day", 920, "Audio post suite for sound editorial, ADR, and mix preparation."],
     ["Technical QC", "QC", "episode", 485, "Technical QC pass per episode."],
     ["VFX turnover", "VFX", "fixed", 3200, "Per-episode VFX turnover allowance."],
     ["Client review room", "Client review", "hour", 165, "Client-attended review room hour."],

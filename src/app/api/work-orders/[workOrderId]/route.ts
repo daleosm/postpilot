@@ -86,24 +86,38 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
   const qcHandOff = workOrder[0].kind === "qc_exception" && status === "ready_for_review";
   const verificationRole = qcHandOff ? (await getTenantRolePolicies(organizationId)).find((policy) => policy.permissions.includes("verify_qc"))?.role : null;
   if (qcHandOff && !verificationRole) return NextResponse.json({ error: "Configure a role with QC verification before sending this exception to re-QC." }, { status: 409 });
+  const nextEstimatedAmount = nextWorkType === "external_vendor"
+    ? (parsed.data.estimatedAmount === undefined ? workOrder[0].estimatedAmount : parsed.data.estimatedAmount)
+    : null;
+  const [existingPoCommitment] = await db.select({ id: purchaseOrderAllocations.id, purchaseOrderId: purchaseOrderAllocations.purchaseOrderId })
+    .from(purchaseOrderAllocations)
+    .where(and(eq(purchaseOrderAllocations.organizationId, organizationId), eq(purchaseOrderAllocations.workOrderId, workOrderId), eq(purchaseOrderAllocations.allocationType, "work_order")))
+    .limit(1);
+  const shouldReleasePoCommitment = Boolean(existingPoCommitment && (nextWorkType !== "external_vendor" || !nextPurchaseOrderId));
+  const shouldSynchronisePoCommitment = Boolean(nextWorkType === "external_vendor" && nextPurchaseOrderId && (
+    (approvalDecision && status === "in_progress")
+    || (existingPoCommitment && (parsed.data.purchaseOrderId !== undefined || parsed.data.estimatedAmount !== undefined || parsed.data.workType !== undefined))
+  ));
   let poCommitment: Awaited<ReturnType<typeof planWorkOrderPurchaseOrderCommitment>> | null = null;
-  if (approvalDecision && status === "in_progress" && workOrder[0].workType === "external_vendor" && workOrder[0].purchaseOrderId) {
+  if (shouldSynchronisePoCommitment) {
     try {
-      poCommitment = await planWorkOrderPurchaseOrderCommitment({ organizationId, workOrderId, purchaseOrderId: workOrder[0].purchaseOrderId, estimatedAmount: workOrder[0].estimatedAmount, overrunReason: parsed.data.overrunReason });
+      poCommitment = await planWorkOrderPurchaseOrderCommitment({ organizationId, workOrderId, purchaseOrderId: nextPurchaseOrderId!, estimatedAmount: nextEstimatedAmount, overrunReason: parsed.data.overrunReason });
     } catch (error) {
       if (error instanceof PurchaseOrderError) return NextResponse.json({ error: error.message }, { status: error.status });
       throw error;
     }
   }
-  const { estimatedAmount, clientQuoteAmount, approvalNote, overrunReason: _overrunReason, items, ...workOrderUpdate } = parsed.data;
+  const { estimatedAmount: _estimatedAmount, clientQuoteAmount, approvalNote, overrunReason: _overrunReason, items, ...workOrderUpdate } = parsed.data;
+  void _estimatedAmount;
   void _overrunReason;
   const completionChanged = status !== undefined;
   await db.transaction(async (tx) => {
-    await tx.update(postWorkOrders).set({ ...workOrderUpdate, workType: nextWorkType, vendorCompanyId: nextVendorCompanyId, purchaseOrderId: nextPurchaseOrderId, clientPurchaseOrderId: nextClientPurchaseOrderId, estimatedAmount: nextWorkType === "external_vendor" && estimatedAmount !== undefined && estimatedAmount !== null ? String(estimatedAmount) : nextWorkType === "internal" ? null : workOrder[0].estimatedAmount, clientQuoteAmount: clientQuoteAmount === undefined || clientQuoteAmount === null ? clientQuoteAmount : String(clientQuoteAmount), billingStatus, assigneePersonId: qcHandOff ? null : parsed.data.assigneePersonId, assigneeRole: qcHandOff ? verificationRole : parsed.data.assigneeRole, approvedByPersonId: approvalDecision && status === "in_progress" ? person[0]?.id ?? null : workOrder[0].approvedByPersonId, approvedAt: approvalDecision && status === "in_progress" ? new Date() : workOrder[0].approvedAt, approvalNote: approvalDecision ? approvalNote ?? null : workOrder[0].approvalNote, completedByPersonId: completionChanged ? (isComplete ? person[0]?.id ?? null : null) : workOrder[0].completedByPersonId, completedAt: completionChanged ? (isComplete ? new Date() : null) : workOrder[0].completedAt, updatedAt: new Date() }).where(and(eq(postWorkOrders.id, workOrderId), eq(postWorkOrders.organizationId, organizationId)));
+    await tx.update(postWorkOrders).set({ ...workOrderUpdate, workType: nextWorkType, vendorCompanyId: nextVendorCompanyId, purchaseOrderId: nextPurchaseOrderId, clientPurchaseOrderId: nextClientPurchaseOrderId, estimatedAmount: nextEstimatedAmount === null ? null : String(nextEstimatedAmount), clientQuoteAmount: clientQuoteAmount === undefined || clientQuoteAmount === null ? clientQuoteAmount : String(clientQuoteAmount), billingStatus, assigneePersonId: qcHandOff ? null : parsed.data.assigneePersonId, assigneeRole: qcHandOff ? verificationRole : parsed.data.assigneeRole, approvedByPersonId: approvalDecision && status === "in_progress" ? person[0]?.id ?? null : workOrder[0].approvedByPersonId, approvedAt: approvalDecision && status === "in_progress" ? new Date() : workOrder[0].approvedAt, approvalNote: approvalDecision ? approvalNote ?? null : workOrder[0].approvalNote, completedByPersonId: completionChanged ? (isComplete ? person[0]?.id ?? null : null) : workOrder[0].completedByPersonId, completedAt: completionChanged ? (isComplete ? new Date() : null) : workOrder[0].completedAt, updatedAt: new Date() }).where(and(eq(postWorkOrders.id, workOrderId), eq(postWorkOrders.organizationId, organizationId)));
     if (poCommitment) {
-      if (poCommitment.allocationId) await tx.update(purchaseOrderAllocations).set({ amount: poCommitment.amount, allocationDate: poCommitment.allocationDate, reference: poCommitment.reference, description: poCommitment.description, updatedAt: new Date() }).where(and(eq(purchaseOrderAllocations.id, poCommitment.allocationId), eq(purchaseOrderAllocations.organizationId, organizationId)));
+      if (poCommitment.allocationId) await tx.update(purchaseOrderAllocations).set({ purchaseOrderId: poCommitment.purchaseOrderId, amount: poCommitment.amount, allocationDate: poCommitment.allocationDate, reference: poCommitment.reference, description: poCommitment.description, updatedAt: new Date() }).where(and(eq(purchaseOrderAllocations.id, poCommitment.allocationId), eq(purchaseOrderAllocations.organizationId, organizationId)));
       else await tx.insert(purchaseOrderAllocations).values({ organizationId, purchaseOrderId: poCommitment.purchaseOrderId, allocationType: "work_order", workOrderId, amount: poCommitment.amount, allocationDate: poCommitment.allocationDate, reference: poCommitment.reference, description: poCommitment.description, createdByUserId: context.userId });
     }
+    if (shouldReleasePoCommitment && existingPoCommitment) await tx.delete(purchaseOrderAllocations).where(and(eq(purchaseOrderAllocations.id, existingPoCommitment.id), eq(purchaseOrderAllocations.organizationId, organizationId)));
     if (items !== undefined) {
       await tx.delete(postWorkOrderItems).where(and(eq(postWorkOrderItems.organizationId, organizationId), eq(postWorkOrderItems.workOrderId, workOrderId)));
       if (items.length) await tx.insert(postWorkOrderItems).values(items.map((item, index) => ({ organizationId, workOrderId, type: item.type, description: item.description, quantity: String(item.quantity), unit: item.unit, unitRate: String(item.unitRate), discountPercent: String(item.discountPercent), notes: item.notes ?? null, position: index + 1 })));
@@ -111,6 +125,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
   });
   if (workOrder[0].kind === "qc_exception" && isComplete && workOrder[0].qcIssueId) await db.update(qcIssues).set({ status: "resolved", resolution: "Verified through linked QC correction work order.", resolvedAt: new Date(), updatedAt: new Date() }).where(and(eq(qcIssues.id, workOrder[0].qcIssueId), eq(qcIssues.organizationId, organizationId)));
   if (poCommitment) await writeAuditEvent({ organizationId, actorUserId: context.userId, action: poCommitment.overrunAmount > 0 ? "purchase_order.work_order_overrun_authorised" : "purchase_order.work_order_committed", entityType: "purchase_order", entityId: poCommitment.purchaseOrderId, metadata: { workOrderId, allocationId: poCommitment.allocationId, amount: poCommitment.amount, overrunAmount: poCommitment.overrunAmount, overrunReason: poCommitment.overrunReason } });
+  if (shouldReleasePoCommitment && existingPoCommitment) await writeAuditEvent({ organizationId, actorUserId: context.userId, action: "purchase_order.work_order_commitment_released", entityType: "purchase_order", entityId: existingPoCommitment.purchaseOrderId, metadata: { workOrderId, allocationId: existingPoCommitment.id } });
   await writeAuditEvent({ organizationId, actorUserId: context.userId, action: isComplete ? "work_order.completed" : approvalDecision && status === "in_progress" ? "work_order.approved" : approvalDecision ? "work_order.returned" : status === "awaiting_approval" ? "work_order.submitted" : "work_order.updated", entityType: "post_work_order", entityId: workOrderId, metadata: { episodeId: workOrder[0].episodeId, status: status ?? workOrder[0].status, billingStatus } });
   return NextResponse.json({ ok: true });
 }
