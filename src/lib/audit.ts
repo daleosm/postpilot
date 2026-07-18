@@ -1,4 +1,5 @@
-import { activityLog, notifications } from "@/lib/db/schema";
+import { activityLog, crmContacts, notifications } from "@/lib/db/schema";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 
 /** Keep mutation audit entries consistent without leaking audit writes into UI code. */
@@ -19,5 +20,15 @@ export async function writeAuditEvent(input: {
     metadata: input.metadata ?? {},
   }).returning({ id: activityLog.id });
   const recipients = input.metadata?.recipientPersonIds;
-  if (Array.isArray(recipients)) await getDb().insert(notifications).values(recipients.filter((id): id is string => typeof id === "string").map((personId) => ({ organizationId: input.organizationId, personId, activityId: activity.id, title: String(input.metadata?.notificationTitle ?? "Booking updated"), body: String(input.metadata?.notificationBody ?? input.action) })));
+  const personIds = Array.isArray(recipients) ? [...new Set(recipients.filter((id): id is string => typeof id === "string"))] : [];
+  const contactIds = Array.isArray(input.metadata?.recipientContactIds) ? [...new Set(input.metadata.recipientContactIds.filter((id): id is string => typeof id === "string"))] : [];
+  const title = String(input.metadata?.notificationTitle ?? "PostPilot update");
+  const body = String(input.metadata?.notificationBody ?? input.action);
+  const contacts = contactIds.length ? await getDb().select({ id: crmContacts.id, email: crmContacts.email }).from(crmContacts)
+    .where(and(eq(crmContacts.organizationId, input.organizationId), inArray(crmContacts.id, contactIds))) : [];
+  const notificationRows = [
+    ...personIds.map((personId) => ({ organizationId: input.organizationId, personId, activityId: activity.id, title, body })),
+    ...contacts.filter((contact) => Boolean(contact.email)).map((contact) => ({ organizationId: input.organizationId, personId: null, crmContactId: contact.id, recipientEmail: contact.email, activityId: activity.id, title, body })),
+  ];
+  if (notificationRows.length) await getDb().insert(notifications).values(notificationRows);
 }

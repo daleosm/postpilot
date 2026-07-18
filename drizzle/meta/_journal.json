@@ -638,6 +638,48 @@
       "when": 1785765600000,
       "tag": "0090_work_order_booking_link",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1784313600000,
+      "tag": "0091_delivery_manifest_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1784390400000,
+      "tag": "0092_delivery_item_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1784486800000,
+      "tag": "0093_delivery_workflow_gates",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1784573200000,
+      "tag": "0094_delivery_permissions_and_sharing",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1784659600000,
+      "tag": "0095_delivery_crm_recipients",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1784746000000,
+      "tag": "0096_delivery_audit_notifications",
+      "breakpoints": true
     }
   ]
 }

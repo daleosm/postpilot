@@ -7,6 +7,7 @@ import { activityLog, crmCompanies, episodeTeamAssignments, episodeWorkflowAppro
 import { getBudgetData } from "./budget";
 import { listSchedule } from "./schedule";
 import { listEpisodeWorkOrders } from "./work-orders";
+import { getEpisodeDeliveryManifestForOrganization, listDeliveryProfilesForOrganization } from "../delivery-manifests";
 
 const editors = aliasedTable(people, "episode_editors");
 const producers = aliasedTable(people, "episode_producers");
@@ -37,14 +38,14 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
   const db = getDb();
   const episode = await getEpisode(organizationId, episodeId);
   if (!episode) return null;
-  const [schedule, budget, activity, stages, approvalRules, approvals, workflowTracks, workflowApprovers, workOrders, episodeTeam, qcHistory, qcIssueHistory, vendorOptions] = await Promise.all([
+  const [schedule, budget, activity, stages, approvalRules, approvals, workflowTracks, workflowApprovers, workOrders, episodeTeam, qcHistory, qcIssueHistory, vendorOptions, deliveryManifest, deliveryProfiles] = await Promise.all([
     listSchedule(organizationId, new Date(Date.now() - 90 * 86_400_000), new Date(Date.now() + 120 * 86_400_000)),
     getBudgetData(organizationId),
     db.select({ id: activityLog.id, action: activityLog.action, entityType: activityLog.entityType, entityId: activityLog.entityId, metadata: activityLog.metadata, createdAt: activityLog.createdAt })
       .from(activityLog)
       .where(and(eq(activityLog.organizationId, organizationId), or(eq(activityLog.entityId, episodeId), sql`${activityLog.metadata}->>'episodeId' = ${episodeId}`)))
       .orderBy(desc(activityLog.createdAt)).limit(30),
-    db.select({ id: workflowStages.id, name: workflowStages.name, key: workflowStages.key, position: workflowStages.position, canStartEarly: workflowStages.canStartEarly, requiresQcPass: workflowStages.requiresQcPass })
+    db.select({ id: workflowStages.id, name: workflowStages.name, key: workflowStages.key, position: workflowStages.position, canStartEarly: workflowStages.canStartEarly, requiresQcPass: workflowStages.requiresQcPass, deliveryGate: workflowStages.deliveryGate })
       .from(workflowStages).innerJoin(postWorkflows, eq(workflowStages.workflowId, postWorkflows.id))
       .where(and(eq(postWorkflows.organizationId, organizationId), eq(workflowStages.organizationId, organizationId), eq(postWorkflows.isDefault, true))).orderBy(asc(workflowStages.position)),
     db.select({ id: workflowStageApprovalRules.id, workflowStageId: workflowStageApprovalRules.workflowStageId, approverRole: workflowStageApprovalRules.approverRole, label: workflowStageApprovalRules.label, approvalOrder: workflowStageApprovalRules.approvalOrder, isRequired: workflowStageApprovalRules.isRequired })
@@ -62,6 +63,8 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
       .innerJoin(qcReports, eq(qcIssues.qcReportId, qcReports.id))
       .where(and(eq(qcIssues.organizationId, organizationId), eq(qcReports.organizationId, organizationId), eq(qcReports.episodeId, episodeId))).orderBy(desc(qcIssues.createdAt)),
     db.select({ id: crmCompanies.id, name: crmCompanies.name }).from(crmCompanies).where(and(eq(crmCompanies.organizationId, organizationId), eq(crmCompanies.type, "vendor"))).orderBy(asc(crmCompanies.name)),
+    getEpisodeDeliveryManifestForOrganization(organizationId, episodeId),
+    listDeliveryProfilesForOrganization(organizationId),
   ]);
 
   return {
@@ -79,5 +82,7 @@ export async function getEpisodeWorkspace(organizationId: string, episodeId: str
     qcHistory,
     qcIssueHistory,
     vendorOptions,
+    deliveryManifest,
+    deliveryProfiles: deliveryProfiles.filter((profile) => profile.isActive).map((profile) => ({ id: profile.id, name: profile.name })),
   };
 }

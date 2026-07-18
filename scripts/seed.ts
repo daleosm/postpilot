@@ -14,6 +14,10 @@ import {
   clientInvoices,
   crmCompanies,
   crmContacts,
+  deliveryProfileItems,
+  deliveryProfiles,
+  episodeDeliveryItems,
+  episodeDeliveryManifests,
   episodeTeamAssignments,
   episodes,
   invoiceSettings,
@@ -109,8 +113,8 @@ const specialistRoleSeeds: Array<{ role: PersonRole; title: string }> = [
 
 const defaultRolePolicies: Record<string, string[]> = {
   guest: ["view_assigned"],
-  post_supervisor: ["manage_shows", "manage_bookings", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "view_assigned"],
-  producer: ["manage_shows", "manage_bookings", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "view_assigned"],
+  post_supervisor: ["manage_shows", "manage_bookings", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "authorize_delivery_exceptions", "manage_delivery_profiles", "manage_episode_manifests", "update_delivery_items", "confirm_delivery_receipt", "manage_budget", "manage_users", "request_catering", "view_assigned"],
+  producer: ["manage_shows", "manage_bookings", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "authorize_delivery_exceptions", "manage_delivery_profiles", "manage_episode_manifests", "update_delivery_items", "confirm_delivery_receipt", "manage_budget", "manage_users", "request_catering", "view_assigned"],
   head_of_production: ["manage_shows", "manage_bookings", "manage_work_orders", "manage_budget", "request_catering", "view_assigned"],
   finance: ["manage_budget", "approve_time", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "view_assigned"],
   runner: ["request_catering", "manage_catering", "view_assigned"],
@@ -127,7 +131,7 @@ const defaultRolePolicies: Record<string, string[]> = {
   director: ["view_assigned"],
   network_client_executive: ["view_assigned"],
   network_client_representative: ["view_assigned"],
-  client: ["view_assigned"],
+  client: ["view_assigned", "view_shared_delivery_status"],
 };
 
 function roleLabel(role: string) { return role.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
@@ -338,6 +342,10 @@ async function seedTenant(tenant: TenantSeed) {
   const bookingId = (position: number) => id(tenant.number, "29", position);
   const companyId = (position: number) => id(tenant.number, "42", position);
   const contactId = (position: number) => id(tenant.number, "43", position);
+  const deliveryProfileId = (position: number) => id(tenant.number, "4b", position);
+  const deliveryProfileItemId = (position: number) => id(tenant.number, "4c", position);
+  const deliveryManifestId = (position: number) => id(tenant.number, "4d", position);
+  const deliveryItemId = (position: number) => id(tenant.number, "4e", position);
   // Each facility person has a tenant-local Auth.js identity and membership.
   // Maya is intentionally the only shared debug platform administrator.
   const sourcePeople: PersonSeed[] = [...tenant.people, ...specialistRoleSeeds.map((specialist, index) => ({ name: `${tenant.name} ${specialist.title}`, email: `${specialist.role}.${index + 1}@${tenant.slug}.test`, role: specialist.role, isFreelancer: true }))];
@@ -370,7 +378,7 @@ async function seedTenant(tenant: TenantSeed) {
   await db.insert(organizationRolePolicies).values([...new Set(tenantPeople.map((person) => person.role).filter((role) => role !== "guest"))].map((role) => ({ organizationId: tenant.id, role, label: roleLabel(role), permissions: defaultRolePolicies[role] ?? [] })));
 
   await db.insert(postWorkflows).values({ id: workflowId, organizationId: tenant.id, name: tenant.workflowName, description: tenant.workflowDescription, isDefault: true });
-  await db.insert(workflowStages).values(stages.map(([name, key, color], index) => ({ id: stageId(index + 1), organizationId: tenant.id, workflowId, name, key, color, position: index + 1, isTerminal: key === "archive_closeout", requiresQcPass: key === "quality_control" })));
+  await db.insert(workflowStages).values(stages.map(([name, key, color], index) => ({ id: stageId(index + 1), organizationId: tenant.id, workflowId, name, key, color, position: index + 1, isTerminal: key === "archive_closeout", requiresQcPass: key === "quality_control", deliveryGate: (key === "delivery" ? "facility_dispatch" : key === "client_network_acceptance" ? "client_acceptance" : "none") as "none" | "facility_dispatch" | "client_acceptance" })));
   await db.insert(workflowStageApprovalRules).values(stages.map(([, , , approverRole], index) => ({ id: ruleId(index + 1), organizationId: tenant.id, workflowStageId: stageId(index + 1), approverRole, label: `${approverRole.replaceAll("_", " ")} sign-off`, approvalOrder: 1, isRequired: true })));
   await db.insert(workflowStageWorkOrderTemplates).values([
     { id: id(tenant.number, "37", 1), organizationId: tenant.id, workflowStageId: stageId(12), title: "Confirm VFX, graphics and titles turnover", department: "VFX", assigneeRole: "vfx_coordinator", priority: "normal", isBlocking: false, position: 1 },
@@ -391,7 +399,24 @@ async function seedTenant(tenant: TenantSeed) {
     { id: contactId(5), organizationId: tenant.id, companyId: companyId(1), name: `${primaryNetwork} Review Office`, title: "Client Review Coordinator", email: `review@${tenant.slug}.client.test`, phone: "+44 20 7000 1005", contactType: "client_review" },
   ]);
 
-  await db.insert(shows).values(tenant.shows.map((show, index) => ({ id: showId(index + 1), organizationId: tenant.id, title: show.title, code: show.code, network: tenant.networks[index] ?? primaryNetwork, productionCompany: show.company, clientCompanyId: companyId(1), productionCompanyId: companyId(2), timeZone: "Europe/London" })));
+  // Delivery remains metadata-only: these profiles describe external handoff
+  // requirements and link to the client's own specifications/portals.
+  const deliveryProfileItemsSeed = [
+    { componentType: "picture_master", label: "Network / streamer picture master", required: true, formatSpecification: "Apple ProRes 422 HQ, 1920×1080, 25fps; use AS-11/DPP package where the network specification requires it", version: "TX", territory: "UK", language: "English", requiresExternalRecipient: true, qcRequired: true, defaultDeadlineOffsetDays: -5, position: 1 },
+    { componentType: "textless_master", label: "Textless master and clean elements", required: true, formatSpecification: "Apple ProRes 422 HQ, clean titles and textless elements", version: "International", territory: "All territories", language: "English", requiresExternalRecipient: true, qcRequired: true, defaultDeadlineOffsetDays: -5, position: 2 },
+    { componentType: "me_mix", label: "M&E mix", required: true, formatSpecification: "24-bit WAV, discrete 5.1 and stereo M&E", version: "International", territory: "All territories", language: "English", requiresExternalRecipient: true, qcRequired: true, defaultDeadlineOffsetDays: -4, position: 3 },
+    { componentType: "audio_mix_5_1", label: "5.1 final mix", required: true, formatSpecification: "24-bit WAV, 5.1 full mix", version: "TX", territory: "UK", language: "English", requiresExternalRecipient: true, qcRequired: true, defaultDeadlineOffsetDays: -4, position: 4 },
+    { componentType: "stereo_mix", label: "Stereo final mix", required: true, formatSpecification: "24-bit WAV, stereo Lt/Rt or Lo/Ro as specified", version: "TX", territory: "UK", language: "English", requiresExternalRecipient: true, qcRequired: true, defaultDeadlineOffsetDays: -4, position: 5 },
+    { componentType: "captions", label: "Timed captions", required: true, formatSpecification: "EBU-TT-D for broadcast and WebVTT for streamer delivery", version: "TX", territory: "UK", language: "English", requiresExternalRecipient: true, qcRequired: true, defaultDeadlineOffsetDays: -3, position: 6 },
+    { componentType: "subtitles", label: "International subtitles", required: false, formatSpecification: "Timed Text / WebVTT in approved localisation languages", version: "International", territory: "Selected territories", language: "As commissioned", requiresExternalRecipient: true, qcRequired: true, defaultDeadlineOffsetDays: -3, position: 7 },
+    { componentType: "qc_report", label: "Final QC report", required: true, formatSpecification: "Signed external QC report reference and exception summary", version: "TX", territory: "UK", language: "English", requiresExternalRecipient: true, qcRequired: false, defaultDeadlineOffsetDays: -2, position: 8 },
+    { componentType: "artwork", label: "Episode thumbnail and artwork", required: true, formatSpecification: "Network/streamer-approved JPEG/PNG artwork package", version: "TX", territory: "UK", language: "English", requiresExternalRecipient: true, qcRequired: false, defaultDeadlineOffsetDays: -2, position: 9 },
+    { componentType: "metadata", label: "Editorial metadata sheet", required: true, formatSpecification: "Network or streamer metadata template, including runtime, ratings and language fields", version: "TX", territory: "UK", language: "English", requiresExternalRecipient: true, qcRequired: false, defaultDeadlineOffsetDays: -2, position: 10 },
+  ];
+  await db.insert(deliveryProfiles).values({ id: deliveryProfileId(1), organizationId: tenant.id, clientCompanyId: companyId(1), network: primaryNetwork, name: `${primaryNetwork} network & streamer delivery`, specificationUrl: `https://example.com/${tenant.slug}/delivery-specification`, isActive: true });
+  await db.insert(deliveryProfileItems).values(deliveryProfileItemsSeed.map((item) => ({ ...item, id: deliveryProfileItemId(item.position), organizationId: tenant.id, deliveryProfileId: deliveryProfileId(1), recipientContactId: contactId(2) })));
+
+  await db.insert(shows).values(tenant.shows.map((show, index) => ({ id: showId(index + 1), organizationId: tenant.id, title: show.title, code: show.code, network: tenant.networks[index] ?? primaryNetwork, productionCompany: show.company, clientCompanyId: companyId(1), productionCompanyId: companyId(2), deliveryProfileId: (tenant.networks[index] ?? primaryNetwork) === primaryNetwork ? deliveryProfileId(1) : null, timeZone: "Europe/London" })));
   await db.insert(showContacts).values(tenant.shows.flatMap((_, index) => [
     { organizationId: tenant.id, showId: showId(index + 1), contactId: contactId(1), responsibility: "creative_approvals" as const, relationship: "creative approval", isApprovalContact: true },
     { organizationId: tenant.id, showId: showId(index + 1), contactId: contactId(2), responsibility: "delivery_qc" as const, relationship: "delivery and QC", isApprovalContact: false },
@@ -423,6 +448,22 @@ async function seedTenant(tenant: TenantSeed) {
   // in the debug workspace without weakening the workflow/time export gate.
   if (episodeRows[5]) episodeRows[5].workflowStageId = stageId(22);
   await db.insert(episodes).values(episodeRows);
+  const deliveryManifestEpisodes = episodeRows.slice(0, tenant.shows[0]?.episodes.length ?? 0);
+  await db.insert(episodeDeliveryManifests).values(deliveryManifestEpisodes.map((episode, index) => ({ id: deliveryManifestId(index + 1), organizationId: tenant.id, episodeId: episode.id, deliveryProfileId: deliveryProfileId(1), profileName: `${primaryNetwork} network & streamer delivery`, specificationUrl: `https://example.com/${tenant.slug}/delivery-specification`, appliedByUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId })));
+  await db.insert(episodeDeliveryItems).values(deliveryManifestEpisodes.flatMap((episode, episodeIndex) => deliveryProfileItemsSeed.map((item) => {
+    const dueDate = new Date(episode.deliveryDeadline);
+    dueDate.setUTCDate(dueDate.getUTCDate() + item.defaultDeadlineOffsetDays);
+    const delivered = episode.status === "delivered";
+    return {
+      id: deliveryItemId((episodeIndex + 1) * 20 + item.position), organizationId: tenant.id, episodeDeliveryManifestId: deliveryManifestId(episodeIndex + 1), episodeId: episode.id,
+      deliveryProfileItemId: deliveryProfileItemId(item.position), componentType: item.componentType, label: item.label, required: item.required, formatSpecification: item.formatSpecification,
+      version: item.version, territory: item.territory, language: item.language, recipientContactId: contactId(2), recipientName: `${primaryNetwork} Delivery Desk`, recipientEmail: `delivery@${tenant.slug}.client.test`, requiresExternalRecipient: item.requiresExternalRecipient,
+      qcRequired: item.qcRequired, status: delivered ? "receipt_confirmed" as const : "not_started" as const, dueDate: dueDate.toISOString().slice(0, 10),
+      externalUrl: delivered ? `https://example.com/${tenant.slug}/delivery/${episode.productionCode}/${item.componentType}` : null, externalReference: delivered ? `${episode.productionCode}-${item.componentType.toUpperCase()}` : null,
+      submissionMethod: delivered ? "Client delivery portal" : null, qcResult: item.qcRequired ? delivered ? "passed" as const : "not_started" as const : "not_required" as const,
+      receiptConfirmedAt: delivered ? at(-1, 16) : null, receiptConfirmedBy: delivered ? `${primaryNetwork} Delivery Desk` : null, recipientSnapshotAt: delivered ? at(-2, 16) : null, position: item.position,
+    };
+  })));
   await db.insert(episodeTeamAssignments).values(episodeRows.flatMap((episode, index) => {
     const roles = ["producer", "editor", "assistant_editor"];
     if (["locked", "online", "delivered"].includes(episode.status)) roles.push("colorist", "sound_mixer");

@@ -10,6 +10,7 @@ import { isDebugDemoMode } from "@/lib/runtime";
 import { createStageWorkOrders } from "@/lib/work-orders";
 import { resolveEpisodeWorkflowSigners } from "@/lib/workflow-signoffs";
 import { getQcGateReadiness, qcGateBlockedMessage } from "@/lib/qc-gate";
+import { getDeliveryWorkflowGateReadiness } from "@/lib/delivery-workflow-gate";
 
 const stageUpdateSchema = z.object({ workflowStageId: z.string().min(1) });
 const approvalActionSchema = z.object({ workflowStageId: z.string().min(1), approvalRuleId: z.string().uuid().optional(), action: z.literal("sign_off"), comment: z.string().trim().max(2000).optional() });
@@ -40,11 +41,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ep
   if (unresolvedRule) return NextResponse.json({ error: `Choose the episode workflow signer for ${unresolvedRule.approverRole.replaceAll("_", " ")} before moving to this stage.` }, { status: 409 });
   let startedEarly = false;
   if (episode.workflowStageId && episode.workflowStageId !== stage.id) {
-    const [currentStage] = await db.select({ id: workflowStages.id, position: workflowStages.position, requiresQcPass: workflowStages.requiresQcPass }).from(workflowStages).where(and(eq(workflowStages.id, episode.workflowStageId), eq(workflowStages.organizationId, organizationId))).limit(1);
+    const [currentStage] = await db.select({ id: workflowStages.id, position: workflowStages.position, requiresQcPass: workflowStages.requiresQcPass, deliveryGate: workflowStages.deliveryGate }).from(workflowStages).where(and(eq(workflowStages.id, episode.workflowStageId), eq(workflowStages.organizationId, organizationId))).limit(1);
     if (!currentStage) return NextResponse.json({ error: "Current workflow stage not found." }, { status: 404 });
     const isNextStage = stage.position === currentStage.position + 1;
     if (isNextStage) {
       if (currentStage.requiresQcPass && !(await getQcGateReadiness(organizationId, episode.id)).ready) return NextResponse.json({ error: qcGateBlockedMessage }, { status: 409 });
+      if (currentStage.deliveryGate !== "none") {
+        const readiness = await getDeliveryWorkflowGateReadiness({ organizationId, episodeId: episode.id, workflowStageId: currentStage.id, deliveryGate: currentStage.deliveryGate });
+        if (!readiness.ready) return NextResponse.json({ error: readiness.message ?? "Required delivery items are not ready for sign-off." }, { status: 409 });
+      }
       const [rules, approvals] = await Promise.all([
         db.select({ id: workflowStageApprovalRules.id, isRequired: workflowStageApprovalRules.isRequired }).from(workflowStageApprovalRules).where(and(eq(workflowStageApprovalRules.organizationId, organizationId), eq(workflowStageApprovalRules.workflowStageId, episode.workflowStageId))),
         db.select({ approvalRuleId: episodeWorkflowApprovals.approvalRuleId, status: episodeWorkflowApprovals.status }).from(episodeWorkflowApprovals).where(and(eq(episodeWorkflowApprovals.organizationId, organizationId), eq(episodeWorkflowApprovals.episodeId, episode.id), eq(episodeWorkflowApprovals.workflowStageId, episode.workflowStageId))),
@@ -78,7 +83,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ epi
   const db = getDb();
   const [[episode], [stage], [person], [track]] = await Promise.all([
     db.select({ id: episodes.id, workflowStageId: episodes.workflowStageId, qcStatus: episodes.qcStatus }).from(episodes).innerJoin(seasons, eq(episodes.seasonId, seasons.id)).innerJoin(shows, eq(seasons.showId, shows.id)).where(and(eq(episodes.id, episodeId), eq(episodes.organizationId, context.organization.organizationId), eq(seasons.organizationId, context.organization.organizationId), eq(shows.organizationId, context.organization.organizationId))).limit(1),
-    db.select({ id: workflowStages.id, workflowId: workflowStages.workflowId, name: workflowStages.name, key: workflowStages.key, position: workflowStages.position, requiresQcPass: workflowStages.requiresQcPass }).from(workflowStages).innerJoin(postWorkflows, eq(workflowStages.workflowId, postWorkflows.id)).where(and(eq(workflowStages.id, parsed.data.workflowStageId), eq(workflowStages.organizationId, context.organization.organizationId), eq(postWorkflows.organizationId, context.organization.organizationId))).limit(1),
+    db.select({ id: workflowStages.id, workflowId: workflowStages.workflowId, name: workflowStages.name, key: workflowStages.key, position: workflowStages.position, requiresQcPass: workflowStages.requiresQcPass, deliveryGate: workflowStages.deliveryGate }).from(workflowStages).innerJoin(postWorkflows, eq(workflowStages.workflowId, postWorkflows.id)).where(and(eq(workflowStages.id, parsed.data.workflowStageId), eq(workflowStages.organizationId, context.organization.organizationId), eq(postWorkflows.organizationId, context.organization.organizationId))).limit(1),
     db.select({ id: people.id }).from(people).where(and(eq(people.organizationId, context.organization.organizationId), eq(people.userId, context.userId))).limit(1),
     db.select({ id: episodeWorkflowTracks.id, status: episodeWorkflowTracks.status }).from(episodeWorkflowTracks).where(and(eq(episodeWorkflowTracks.organizationId, context.organization.organizationId), eq(episodeWorkflowTracks.episodeId, episodeId), eq(episodeWorkflowTracks.workflowStageId, parsed.data.workflowStageId))).limit(1),
   ]);
@@ -86,6 +91,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ epi
   const isActiveEarlyTrack = track && ["in_progress", "submitted", "blocked"].includes(track.status);
   if (episode.workflowStageId !== stage.id && !isActiveEarlyTrack) return NextResponse.json({ error: "Only the current workflow stage or an active early-start track can be signed off." }, { status: 409 });
   if (stage.requiresQcPass && !(await getQcGateReadiness(organizationId, episodeId)).ready) return NextResponse.json({ error: qcGateBlockedMessage }, { status: 409 });
+  if (stage.deliveryGate !== "none") {
+    const readiness = await getDeliveryWorkflowGateReadiness({ organizationId, episodeId, workflowStageId: stage.id, deliveryGate: stage.deliveryGate });
+    if (!readiness.ready) return NextResponse.json({ error: readiness.message ?? "Required delivery items are not ready for sign-off." }, { status: 409 });
+  }
 
   const blockers = await db.select({ id: postWorkOrders.id }).from(postWorkOrders).where(and(
     eq(postWorkOrders.organizationId, organizationId),

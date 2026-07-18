@@ -30,11 +30,12 @@ export const clientInvoiceStatus = pgEnum("client_invoice_status", ["issued", "p
 export const costType = pgEnum("cost_type", ["billable", "internal"]);
 export const availabilityStatus = pgEnum("availability_status", ["available", "limited", "booked_out", "away"]);
 export const workflowTrackStatus = pgEnum("workflow_track_status", ["not_started", "in_progress", "submitted", "approved", "changes_requested", "blocked"]);
+export const deliveryWorkflowGate = pgEnum("delivery_workflow_gate", ["none", "facility_dispatch", "client_acceptance"]);
 export const qcReportStatus = pgEnum("qc_report_status", ["draft", "in_progress", "passed", "failed", "waived"]);
 export const qcIssueStatus = pgEnum("qc_issue_status", ["open", "resolved", "waived"]);
 export const workOrderStatus = pgEnum("work_order_status", ["open", "awaiting_approval", "in_progress", "ready_for_review", "complete", "rejected", "cancelled"]);
 export const workOrderPriority = pgEnum("work_order_priority", ["blocker", "high", "normal", "low"]);
-export const workOrderKind = pgEnum("work_order_kind", ["work_order", "qc_exception"]);
+export const workOrderKind = pgEnum("work_order_kind", ["work_order", "qc_exception", "delivery_correction"]);
 export const workOrderItemType = pgEnum("work_order_item_type", ["service", "material", "expense"]);
 export const workOrderWorkType = pgEnum("work_order_work_type", ["internal", "external_vendor"]);
 export const workOrderBillingScope = pgEnum("work_order_billing_scope", ["included", "billable_change", "internal"]);
@@ -46,6 +47,9 @@ export const purchaseOrderStatus = pgEnum("purchase_order_status", ["draft", "ap
 export const purchaseOrderAllocationType = pgEnum("purchase_order_allocation_type", ["work_order", "budget_line", "vendor_invoice"]);
 export const clientPurchaseOrderStatus = pgEnum("client_purchase_order_status", ["draft", "active", "closed", "cancelled"]);
 export const clientPurchaseOrderAllocationType = pgEnum("client_purchase_order_allocation_type", ["billable", "client_invoice", "change_order"]);
+/** Operational delivery states; files remain in the facility's own transfer/storage tools. */
+export const deliveryItemStatus = pgEnum("delivery_item_status", ["not_started", "preparing", "ready_for_qc", "qc_failed", "qc_passed", "dispatched", "receipt_confirmed", "rejected", "waived"]);
+export const deliveryQcResult = pgEnum("delivery_qc_result", ["not_required", "not_started", "passed", "failed", "waived"]);
 
 /** Auth.js adapter tables */
 export const users = pgTable("users", {
@@ -153,6 +157,10 @@ export const shows = pgTable("shows", {
   productionCompany: text("production_company"),
   clientCompanyId: uuid("client_company_id").references(() => crmCompanies.id, { onDelete: "set null" }),
   productionCompanyId: uuid("production_company_id").references(() => crmCompanies.id, { onDelete: "set null" }),
+  /** The selected delivery profile is copied to each new episode, never read live. */
+  // The database migration owns this FK. Keeping the column scalar here avoids
+  // a circular Drizzle table initializer with delivery_profiles -> shows.
+  deliveryProfileId: uuid("delivery_profile_id"),
   description: text("description"),
   /** IANA zone used for facility bookings and delivery deadlines. */
   timeZone: text("time_zone").default("Europe/London").notNull(),
@@ -160,6 +168,143 @@ export const shows = pgTable("shows", {
 }, (table) => [
   uniqueIndex("shows_organization_code_idx").on(table.organizationId, table.code),
   index("shows_organization_id_idx").on(table.organizationId),
+  index("shows_organization_delivery_profile_idx").on(table.organizationId, table.deliveryProfileId),
+]);
+
+/**
+ * Reusable, tenant-owned delivery specifications. They are templates only:
+ * applying one creates independent episode manifest snapshots.
+ */
+export const deliveryProfiles = pgTable("delivery_profiles", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  clientCompanyId: uuid("client_company_id").references(() => crmCompanies.id, { onDelete: "set null" }),
+  network: text("network"),
+  showId: uuid("show_id").references(() => shows.id, { onDelete: "set null" }),
+  name: text("name").notNull(),
+  specificationUrl: text("specification_url"),
+  isActive: boolean("is_active").default(true).notNull(),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("delivery_profiles_org_name_idx").on(table.organizationId, table.name),
+  index("delivery_profiles_org_show_active_idx").on(table.organizationId, table.showId, table.isActive),
+  index("delivery_profiles_org_client_network_idx").on(table.organizationId, table.clientCompanyId, table.network),
+]);
+
+/** Default delivery components configured on a reusable profile. */
+export const deliveryProfileItems = pgTable("delivery_profile_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  deliveryProfileId: uuid("delivery_profile_id").notNull().references(() => deliveryProfiles.id, { onDelete: "cascade" }),
+  componentType: text("component_type").notNull(),
+  label: text("label").notNull(),
+  required: boolean("required").default(true).notNull(),
+  formatSpecification: text("format_specification"),
+  version: text("version"),
+  territory: text("territory"),
+  language: text("language"),
+  recipientContactId: uuid("recipient_contact_id").references(() => crmContacts.id, { onDelete: "set null" }),
+  /** An external recipient must be selected before this component can dispatch. */
+  requiresExternalRecipient: boolean("requires_external_recipient").default(false).notNull(),
+  qcRequired: boolean("qc_required").default(false).notNull(),
+  defaultDeadlineOffsetDays: integer("default_deadline_offset_days"),
+  position: integer("position").default(1).notNull(),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("delivery_profile_items_profile_position_idx").on(table.deliveryProfileId, table.position),
+  index("delivery_profile_items_org_profile_idx").on(table.organizationId, table.deliveryProfileId),
+  index("delivery_profile_items_org_recipient_idx").on(table.organizationId, table.recipientContactId),
+]);
+
+/** One generated manifest per episode. Profile fields are copied for traceability. */
+export const episodeDeliveryManifests = pgTable("episode_delivery_manifests", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
+  deliveryProfileId: uuid("delivery_profile_id").references(() => deliveryProfiles.id, { onDelete: "set null" }),
+  profileName: text("profile_name").notNull(),
+  specificationUrl: text("specification_url"),
+  appliedByUserId: text("applied_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  appliedAt: timestamp("applied_at", { withTimezone: true }).defaultNow().notNull(),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("episode_delivery_manifests_episode_idx").on(table.episodeId),
+  index("episode_delivery_manifests_org_episode_idx").on(table.organizationId, table.episodeId),
+  index("episode_delivery_manifests_org_profile_idx").on(table.organizationId, table.deliveryProfileId),
+]);
+
+/** Explicit external visibility. A share belongs to one named tenant person. */
+export const episodeDeliveryManifestShares = pgTable("episode_delivery_manifest_shares", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  episodeDeliveryManifestId: uuid("episode_delivery_manifest_id").notNull().references(() => episodeDeliveryManifests.id, { onDelete: "cascade" }),
+  personId: uuid("person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
+  sharedByUserId: text("shared_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("episode_delivery_manifest_shares_manifest_person_idx").on(table.episodeDeliveryManifestId, table.personId),
+  index("episode_delivery_manifest_shares_org_person_idx").on(table.organizationId, table.personId),
+]);
+
+/**
+ * A fully copied delivery checklist line. It stores references/links only—no
+ * media payloads, uploads, or facility assets are kept in PostPilot.
+ */
+export const episodeDeliveryItems = pgTable("episode_delivery_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  episodeDeliveryManifestId: uuid("episode_delivery_manifest_id").notNull().references(() => episodeDeliveryManifests.id, { onDelete: "cascade" }),
+  episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
+  deliveryProfileItemId: uuid("delivery_profile_item_id").references(() => deliveryProfileItems.id, { onDelete: "set null" }),
+  componentType: text("component_type").notNull(),
+  label: text("label").notNull(),
+  required: boolean("required").default(true).notNull(),
+  formatSpecification: text("format_specification"),
+  version: text("version"),
+  territory: text("territory"),
+  language: text("language"),
+  recipientContactId: uuid("recipient_contact_id").references(() => crmContacts.id, { onDelete: "set null" }),
+  recipientName: text("recipient_name"),
+  recipientEmail: text("recipient_email"),
+  requiresExternalRecipient: boolean("requires_external_recipient").default(false).notNull(),
+  /** Immutable CRM recipient snapshot captured at facility dispatch. */
+  recipientSnapshotAt: timestamp("recipient_snapshot_at", { withTimezone: true }),
+  qcRequired: boolean("qc_required").default(false).notNull(),
+  status: deliveryItemStatus("status").default("not_started").notNull(),
+  dueDate: date("due_date"),
+  externalUrl: text("external_url"),
+  externalReference: text("external_reference"),
+  /** External users see reference details only when the delivery manager shares them. */
+  isExternallyShared: boolean("is_externally_shared").default(false).notNull(),
+  submissionMethod: text("submission_method"),
+  submittedByPersonId: uuid("submitted_by_person_id").references(() => people.id, { onDelete: "set null" }),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  qcResult: deliveryQcResult("qc_result").default("not_required").notNull(),
+  receiptConfirmedAt: timestamp("receipt_confirmed_at", { withTimezone: true }),
+  receiptConfirmedBy: text("receipt_confirmed_by"),
+  rejectionReason: text("rejection_reason"),
+  waiverReason: text("waiver_reason"),
+  position: integer("position").default(1).notNull(),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("episode_delivery_items_manifest_position_idx").on(table.episodeDeliveryManifestId, table.position),
+  index("episode_delivery_items_org_episode_due_idx").on(table.organizationId, table.episodeId, table.dueDate),
+  index("episode_delivery_items_org_manifest_status_idx").on(table.organizationId, table.episodeDeliveryManifestId, table.status),
+]);
+
+/** A local, capability-authorised exception to recipient receipt confirmation. */
+export const episodeDeliveryAcceptanceExceptions = pgTable("episode_delivery_acceptance_exceptions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
+  workflowStageId: uuid("workflow_stage_id").notNull().references(() => workflowStages.id, { onDelete: "cascade" }),
+  reason: text("reason").notNull(),
+  authorisedByUserId: text("authorised_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  authorisedAt: timestamp("authorised_at", { withTimezone: true }).defaultNow().notNull(),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("episode_delivery_acceptance_exception_episode_stage_idx").on(table.episodeId, table.workflowStageId),
+  index("episode_delivery_acceptance_exception_org_episode_idx").on(table.organizationId, table.episodeId),
 ]);
 
 export const showContactResponsibility = pgEnum("show_contact_responsibility", ["creative_approvals", "delivery_qc", "finance_billing", "legal_compliance"]);
@@ -201,11 +346,14 @@ export const workflowStages = pgTable("workflow_stages", {
   canStartEarly: boolean("can_start_early").default(false).notNull(),
   /** A passing or authorised-waived QC report is required before this stage can progress. */
   requiresQcPass: boolean("requires_qc_pass").default(false).notNull(),
+  /** Configured manifest gate, independent from the editable stage name/key. */
+  deliveryGate: deliveryWorkflowGate("delivery_gate").default("none").notNull(),
   ...auditColumns,
 }, (table) => [
   uniqueIndex("workflow_stages_workflow_key_idx").on(table.workflowId, table.key),
   uniqueIndex("workflow_stages_workflow_position_idx").on(table.workflowId, table.position),
   index("workflow_stages_organization_id_idx").on(table.organizationId),
+  index("workflow_stages_organization_delivery_gate_idx").on(table.organizationId, table.deliveryGate),
 ]);
 
 export const workflowStageApprovalRules = pgTable("workflow_stage_approval_rules", {
@@ -455,6 +603,7 @@ export const postWorkOrders = pgTable("post_work_orders", {
   purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "set null" }),
   clientPurchaseOrderId: uuid("client_purchase_order_id").references(() => clientPurchaseOrders.id, { onDelete: "set null" }),
   qcIssueId: uuid("qc_issue_id").references(() => qcIssues.id, { onDelete: "set null" }),
+  deliveryItemId: uuid("delivery_item_id").references(() => episodeDeliveryItems.id, { onDelete: "set null" }),
   kind: workOrderKind("kind").default("work_order").notNull(),
   title: text("title").notNull(),
   description: text("description"),
@@ -491,6 +640,7 @@ export const postWorkOrders = pgTable("post_work_orders", {
   index("post_work_orders_org_booking_idx").on(table.organizationId, table.bookingId),
   index("post_work_orders_org_purchase_order_idx").on(table.organizationId, table.purchaseOrderId),
   index("post_work_orders_org_client_purchase_order_idx").on(table.organizationId, table.clientPurchaseOrderId),
+  index("post_work_orders_org_delivery_item_idx").on(table.organizationId, table.deliveryItemId),
 ]);
 
 /** Cost and scope breakdown kept inside the operational work order. These do
@@ -784,6 +934,11 @@ export const activityLog = pgTable("activity_log", {
 
 export const notifications = pgTable("notifications", {
   id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-  personId: uuid("person_id").notNull().references(() => people.id, { onDelete: "cascade" }), activityId: uuid("activity_id").references(() => activityLog.id, { onDelete: "cascade" }),
+  /** Internal app recipient. External CRM contacts use the contact snapshot below instead. */
+  personId: uuid("person_id").references(() => people.id, { onDelete: "cascade" }),
+  /** A queued delivery notification for a CRM delivery contact; it is never a substitute for a user account. */
+  crmContactId: uuid("crm_contact_id").references(() => crmContacts.id, { onDelete: "set null" }),
+  recipientEmail: text("recipient_email"),
+  activityId: uuid("activity_id").references(() => activityLog.id, { onDelete: "cascade" }),
   title: text("title").notNull(), body: text("body").notNull(), readAt: timestamp("read_at", { withTimezone: true }), ...auditColumns,
-}, (table) => [index("notifications_person_unread_idx").on(table.personId, table.readAt)]);
+}, (table) => [index("notifications_person_unread_idx").on(table.personId, table.readAt), index("notifications_contact_pending_idx").on(table.crmContactId, table.readAt)]);

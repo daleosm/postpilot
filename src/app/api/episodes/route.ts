@@ -8,6 +8,7 @@ import { canManageEpisodes } from "@/lib/permissions";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { insertEpisodeSchema } from "@/lib/validations/entities";
 import { missingTenantReferences } from "@/lib/tenant-resources";
+import { createDeliveryManifestForNewEpisode } from "@/server/delivery-manifests";
 import { createStageWorkOrders } from "@/lib/work-orders";
 
 export async function POST(request: Request) {
@@ -32,18 +33,20 @@ export async function POST(request: Request) {
   const validAssignees = assigneeIds.length ? await db.select({ id: people.id }).from(people).where(and(eq(people.organizationId, context.organization.organizationId), inArray(people.id, assigneeIds))) : [];
   if (missing.length || validAssignees.length !== assigneeIds.length) return NextResponse.json({ error: "A workflow stage or assigned person is not in this organization." }, { status: 404 });
 
+  const { team, ...episodeData } = parsed.data;
+  let episode: { id: string };
   try {
-    const { team, ...episodeData } = parsed.data;
-    const [episode] = await db.insert(episodes).values({
+    [episode] = await db.insert(episodes).values({
       ...episodeData,
       organizationId: context.organization.organizationId,
       airDate: parsed.data.airDate ? parsed.data.airDate.toISOString().slice(0, 10) : null,
       lockedCutDate: parsed.data.lockedCutDate ? parsed.data.lockedCutDate.toISOString().slice(0, 10) : null,
     }).returning({ id: episodes.id });
-    if (team.length) { const teamPeople = await db.select({ id: people.id }).from(people).where(and(eq(people.organizationId, organizationId), inArray(people.id, team))); await db.insert(episodeTeamAssignments).values(teamPeople.map((person) => ({ organizationId, episodeId: episode.id, personId: person.id }))); }
-    if (parsed.data.workflowStageId) await createStageWorkOrders({ organizationId: context.organization.organizationId, episodeId: episode.id, workflowStageId: parsed.data.workflowStageId, createdByUserId: context.userId });
-    return NextResponse.json(episode, { status: 201 });
   } catch {
     return NextResponse.json({ error: "An episode with that number already exists in this season." }, { status: 409 });
   }
+  if (team.length) { const teamPeople = await db.select({ id: people.id }).from(people).where(and(eq(people.organizationId, organizationId), inArray(people.id, team))); await db.insert(episodeTeamAssignments).values(teamPeople.map((person) => ({ organizationId, episodeId: episode.id, personId: person.id }))); }
+  if (parsed.data.workflowStageId) await createStageWorkOrders({ organizationId: context.organization.organizationId, episodeId: episode.id, workflowStageId: parsed.data.workflowStageId, createdByUserId: context.userId });
+  await createDeliveryManifestForNewEpisode({ organizationId, episodeId: episode.id, appliedByUserId: context.userId });
+  return NextResponse.json(episode, { status: 201 });
 }

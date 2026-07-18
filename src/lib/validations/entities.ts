@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { deliveryItemStatuses } from "@/lib/delivery-lifecycle";
+
 const id = z.string().uuid();
 const nullableId = id.nullable().optional();
 const optionalDate = z.coerce.date().optional();
@@ -19,6 +21,7 @@ const purchaseOrderStatuses = ["draft", "approved", "closed", "cancelled"] as co
 const purchaseOrderAllocationTypes = ["work_order", "budget_line", "vendor_invoice"] as const;
 const clientPurchaseOrderStatuses = ["draft", "active", "closed", "cancelled"] as const;
 const clientPurchaseOrderAllocationTypes = ["billable", "client_invoice", "change_order"] as const;
+const deliveryWorkflowGates = ["none", "facility_dispatch", "client_acceptance"] as const;
 const roleKey = z.string().trim().min(2).max(80).regex(/^[a-z0-9_]+$/, "Use lowercase letters, numbers, and underscores.");
 
 export const insertUserSchema = z.object({
@@ -63,6 +66,91 @@ export const showFormSchema = z.object({
 });
 export const insertShowSchema = showFormSchema.extend({ organizationId: id });
 export const updateShowSchema = showFormSchema.partial();
+
+const deliveryProfileFieldsSchema = z.object({
+  clientCompanyId: nullableId,
+  network: z.string().trim().max(120).nullable().optional(),
+  showId: nullableId,
+  name: z.string().trim().min(2, "Profile name is required.").max(160),
+  specificationUrl: z.string().url("Enter a valid specification link.").max(2000).nullable().optional(),
+  isActive: z.boolean().default(true),
+});
+
+/** Server-owned organisation ID keeps delivery templates tenant-safe. */
+export const createDeliveryProfileSchema = deliveryProfileFieldsSchema;
+export const updateDeliveryProfileSchema = deliveryProfileFieldsSchema.partial()
+  .refine((value) => Object.keys(value).length > 0, "Provide at least one delivery profile change.");
+export const insertDeliveryProfileSchema = deliveryProfileFieldsSchema.extend({ organizationId: id });
+
+const deliveryProfileItemFieldsSchema = z.object({
+  componentType: z.string().trim().min(2, "Component type is required.").max(80),
+  label: z.string().trim().min(2, "Delivery item label is required.").max(240),
+  required: z.boolean().default(true),
+  formatSpecification: z.string().trim().max(4000).nullable().optional(),
+  version: z.string().trim().max(120).nullable().optional(),
+  territory: z.string().trim().max(120).nullable().optional(),
+  language: z.string().trim().max(120).nullable().optional(),
+  recipientContactId: nullableId,
+  requiresExternalRecipient: z.boolean().default(false),
+  qcRequired: z.boolean().default(false),
+  defaultDeadlineOffsetDays: z.coerce.number().int().min(-365).max(3650).nullable().optional(),
+  position: z.coerce.number().int().positive().default(1),
+});
+
+export const createDeliveryProfileItemSchema = deliveryProfileItemFieldsSchema;
+export const updateDeliveryProfileItemSchema = deliveryProfileItemFieldsSchema.partial()
+  .refine((value) => Object.keys(value).length > 0, "Provide at least one delivery profile item change.");
+export const insertDeliveryProfileItemSchema = deliveryProfileItemFieldsSchema.extend({ organizationId: id, deliveryProfileId: id });
+
+export const applyDeliveryProfileSchema = z.object({
+  deliveryProfileId: id,
+  reason: z.string().trim().min(3, "Explain why this delivery profile is being applied.").max(2000),
+});
+
+const episodeDeliveryItemFieldsSchema = z.object({
+  componentType: z.string().trim().min(2, "Component type is required.").max(80),
+  label: z.string().trim().min(2, "Delivery item label is required.").max(240),
+  required: z.boolean().default(true),
+  formatSpecification: z.string().trim().max(4000).nullable().optional(),
+  version: z.string().trim().max(120).nullable().optional(),
+  territory: z.string().trim().max(120).nullable().optional(),
+  language: z.string().trim().max(120).nullable().optional(),
+  recipientContactId: nullableId,
+  requiresExternalRecipient: z.boolean().default(false),
+  qcRequired: z.boolean().default(false),
+  dueDate: optionalDate.nullable(),
+  externalUrl: z.string().url("Enter a valid external link.").max(2000).nullable().optional(),
+  externalReference: z.string().trim().max(500).nullable().optional(),
+  isExternallyShared: z.boolean().default(false),
+  submissionMethod: z.string().trim().max(120).nullable().optional(),
+  position: z.coerce.number().int().positive().default(1),
+});
+
+/** Manual additions and every item-level override require a traceable reason. */
+export const addEpisodeDeliveryItemSchema = episodeDeliveryItemFieldsSchema.extend({
+  reason: z.string().trim().min(3, "Explain why this delivery item is being added.").max(2000),
+});
+export const updateEpisodeDeliveryItemSchema = episodeDeliveryItemFieldsSchema.partial().extend({
+  reason: z.string().trim().min(3, "Explain why this delivery item is being overridden.").max(2000),
+}).refine((value) => Object.keys(value).some((key) => key !== "reason"), "Provide at least one delivery item change.");
+export const removeEpisodeDeliveryItemSchema = z.object({
+  reason: z.string().trim().min(3, "Explain why this delivery item is being removed.").max(2000),
+});
+export const transitionEpisodeDeliveryItemSchema = z.object({
+  status: z.enum(deliveryItemStatuses),
+  reason: z.string().trim().min(3, "Add a reason for this delivery lifecycle update.").max(4000),
+  externalUrl: z.string().url("Enter a valid external link.").max(2000).nullable().optional(),
+  externalReference: z.string().trim().max(500).nullable().optional(),
+  submissionMethod: z.string().trim().max(120).nullable().optional(),
+  receiptConfirmedBy: z.string().trim().max(240).nullable().optional(),
+});
+export const authorizeDeliveryAcceptanceExceptionSchema = z.object({
+  workflowStageId: id,
+  reason: z.string().trim().min(8, "Explain the local acceptance exception.").max(4000),
+});
+export const shareEpisodeDeliveryManifestSchema = z.object({
+  personId: id,
+});
 
 /** Internal account-management fields. The account identity itself remains controlled at creation. */
 export const updateCrmCompanySchema = z.object({
@@ -122,6 +210,7 @@ export const insertWorkflowStageSchema = z.object({
   isTerminal: z.boolean().default(false),
   canStartEarly: z.boolean().default(false),
   requiresQcPass: z.boolean().default(false),
+  deliveryGate: z.enum(deliveryWorkflowGates).default("none"),
 });
 export const updateWorkflowStageSchema = insertWorkflowStageSchema.omit({ workflowId: true }).partial();
 
@@ -137,9 +226,14 @@ export const updateWorkflowTemplateSchema = z.object({
     isTerminal: z.boolean(),
     canStartEarly: z.boolean(),
     requiresQcPass: z.boolean(),
+    deliveryGate: z.enum(deliveryWorkflowGates),
   })).min(1)
     .refine((stages) => new Set(stages.map((stage) => stage.key)).size === stages.length, { message: "Workflow stage keys must be unique." })
-    .refine((stages) => new Set(stages.map((stage) => stage.position)).size === stages.length, { message: "Workflow stage positions must be unique." }),
+    .refine((stages) => new Set(stages.map((stage) => stage.position)).size === stages.length, { message: "Workflow stage positions must be unique." })
+    .refine((stages) => {
+      const gates = stages.filter((stage) => stage.deliveryGate !== "none").map((stage) => stage.deliveryGate);
+      return new Set(gates).size === gates.length;
+    }, { message: "Only one stage may use each delivery manifest gate." }),
   rules: z.array(z.object({
     id: id.optional(),
     workflowStageId: id,

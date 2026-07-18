@@ -26,6 +26,8 @@
     "test:work-orders": "playwright test tests/integration/work-orders.spec.ts",
     "test:budget": "playwright test tests/integration/budget.spec.ts",
     "test:qc": "playwright test tests/integration/qc-lifecycle.spec.ts",
+    "test:delivery-permissions": "playwright test tests/integration/delivery-permissions.spec.ts",
+    "test:delivery-lifecycle": "tsx --test tests/unit/delivery-lifecycle.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx scripts/seed.ts"

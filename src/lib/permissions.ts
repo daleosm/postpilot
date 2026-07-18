@@ -4,10 +4,10 @@ import { db } from "@/lib/db";
 import { episodeTeamAssignments, episodes, organizationRolePolicies } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 
-export const permissions = ["manage_shows", "manage_bookings", "manage_work_orders", "approve_work_orders", "update_assigned_work", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "manage_qc", "verify_qc", "waive_qc", "manage_budget", "manage_users", "request_catering", "manage_catering", "view_assigned"] as const;
+export const permissions = ["manage_shows", "manage_bookings", "manage_work_orders", "approve_work_orders", "update_assigned_work", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "manage_qc", "verify_qc", "waive_qc", "authorize_delivery_exceptions", "manage_delivery_profiles", "manage_episode_manifests", "update_delivery_items", "confirm_delivery_receipt", "view_shared_delivery_status", "manage_budget", "manage_users", "request_catering", "manage_catering", "view_assigned"] as const;
 export type Permission = (typeof permissions)[number];
 export type TenantRolePolicy = { role: string; label: string; permissions: Permission[] };
-export const guestRolePolicy: TenantRolePolicy = { role: "guest", label: "Guest", permissions: ["view_assigned"] };
+export const guestRolePolicy: TenantRolePolicy = { role: "guest", label: "Guest", permissions: ["view_assigned", "view_shared_delivery_status"] };
 export const isFixedRole = (role: string) => role === guestRolePolicy.role;
 
 /** Roles are tenant data, apart from the fixed external Guest role. */
@@ -28,6 +28,7 @@ export async function can(permission: Permission) {
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return false;
   if (["owner", "admin"].includes(context.organization.role ?? "")) return true;
+  if (context.organization.role === "guest") return guestRolePolicy.permissions.includes(permission);
   if (!context.person) return false;
   const policy = (await getTenantRolePolicies(context.organization.organizationId)).find((item) => item.role === context.person?.role);
   return policy?.permissions.includes(permission) ?? false;

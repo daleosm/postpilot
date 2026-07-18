@@ -11,7 +11,7 @@ export async function getDefaultWorkflowConfig(organizationId: string) {
     .from(postWorkflows).where(and(eq(postWorkflows.organizationId, organizationId), eq(postWorkflows.isDefault, true))).limit(1);
   if (!workflow) return null;
   const [stages, rules, workOrderTemplates] = await Promise.all([
-    db.select({ id: workflowStages.id, name: workflowStages.name, key: workflowStages.key, position: workflowStages.position, color: workflowStages.color, isTerminal: workflowStages.isTerminal, canStartEarly: workflowStages.canStartEarly, requiresQcPass: workflowStages.requiresQcPass })
+    db.select({ id: workflowStages.id, name: workflowStages.name, key: workflowStages.key, position: workflowStages.position, color: workflowStages.color, isTerminal: workflowStages.isTerminal, canStartEarly: workflowStages.canStartEarly, requiresQcPass: workflowStages.requiresQcPass, deliveryGate: workflowStages.deliveryGate })
       .from(workflowStages).where(and(eq(workflowStages.organizationId, organizationId), eq(workflowStages.workflowId, workflow.id))).orderBy(asc(workflowStages.position)),
     db.select({ id: workflowStageApprovalRules.id, workflowStageId: workflowStageApprovalRules.workflowStageId, approverRole: workflowStageApprovalRules.approverRole, label: workflowStageApprovalRules.label, approvalOrder: workflowStageApprovalRules.approvalOrder, isRequired: workflowStageApprovalRules.isRequired })
       .from(workflowStageApprovalRules).innerJoin(workflowStages, eq(workflowStageApprovalRules.workflowStageId, workflowStages.id)).where(and(eq(workflowStageApprovalRules.organizationId, organizationId), eq(workflowStages.organizationId, organizationId), eq(workflowStages.workflowId, workflow.id))).orderBy(asc(workflowStageApprovalRules.approvalOrder)),
