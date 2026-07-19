@@ -11,7 +11,7 @@ test.describe("Approvals UI", () => {
 
     await expect(page.getByRole("heading", { name: "Approvals" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Awaiting my sign-off" })).toBeVisible();
-    await expect(page.getByText("Current workflow stages that have reached your configured sign-off role.")).toBeVisible();
+    await expect(page.getByText("Current workflow stages where you are the named sign-off person.")).toBeVisible();
   });
 
   test("explains the workflow and assigned-work approval inbox", async ({ page }) => {

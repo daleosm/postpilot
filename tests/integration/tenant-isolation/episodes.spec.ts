@@ -17,12 +17,12 @@ test.describe("Episodes tenant isolation", () => {
   test("rejects a cross-tenant episode workflow update", async ({ page }) => {
     await page.goto("/episodes");
 
-    const response = await page.request.patch(`/api/episodes/${LANTERN_EPISODE_ID}`, {
-      data: { workflowStageId: COPPERLINE_ASSEMBLY_STAGE_ID },
+    const response = await page.request.post(`/api/episodes/${LANTERN_EPISODE_ID}`, {
+      data: { workflowStageId: COPPERLINE_ASSEMBLY_STAGE_ID, action: "start" },
     });
 
     expect(response.status()).toBe(404);
-    await expect(response.json()).resolves.toMatchObject({ error: "Episode or workflow stage not found." });
+    await expect(response.json()).resolves.toMatchObject({ error: "Episode not found." });
 
     await page.goto(`/episodes/${LANTERN_EPISODE_ID}`);
     await expect(page.getByText("Smoke Test")).not.toBeVisible();

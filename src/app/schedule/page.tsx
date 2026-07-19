@@ -2,13 +2,13 @@ import { BookingFormDialog } from "@/components/booking-form-dialog";
 import { CopyEpisodeBookingsDialog } from "@/components/copy-episode-bookings-dialog";
 import { ScheduleBoard } from "@/components/schedule-board";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { canManageBookings, canRecordBookingActuals, roleHome } from "@/lib/permissions";
+import { canManageBookings, canRecordBookingActuals, canViewAllOperations, roleHome } from "@/lib/permissions";
 import { getScheduleResources, listCateringRequests, listSchedule, listWorkOrderInbox } from "@/server/data";
 import { redirect } from "next/navigation";
 
 export default async function SchedulePage() {
-  const [mayManage, maySubmitOwnTime] = await Promise.all([canManageBookings(), canRecordBookingActuals()]);
-  if (!mayManage && !maySubmitOwnTime) redirect(await roleHome());
+  const [mayManage, maySubmitOwnTime, mayViewAll] = await Promise.all([canManageBookings(), canRecordBookingActuals(), canViewAllOperations()]);
+  if (!mayManage && !maySubmitOwnTime && !mayViewAll) redirect(await roleHome());
   const context = await getActiveOrganizationContext();
   const data = await getScheduleData();
   const initialStart = inputDate(new Date());

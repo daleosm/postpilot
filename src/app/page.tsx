@@ -38,7 +38,7 @@ function formatMoney(value: number, currency: string) {
 }
 
 export default async function DashboardPage() {
-  const [organizationContext, mayManageShows, mayViewAssigned, mayManageBudget, mayManageCatering] = await Promise.all([getActiveOrganizationContext(), can("manage_shows"), can("view_assigned"), can("manage_budget"), can("manage_catering")]);
+  const [organizationContext, mayManageShows, mayManageBudget, mayManageCatering] = await Promise.all([getActiveOrganizationContext(), can("manage_shows"), can("manage_budget"), can("manage_catering")]);
   if (!organizationContext?.organization && !isDebugDemoMode) {
     return (
       <div className="panel mx-auto mt-20 max-w-lg p-8 text-center">
@@ -49,7 +49,7 @@ export default async function DashboardPage() {
     );
   }
   if (organizationContext?.organization?.role === "client") {
-    if (mayManageShows || mayViewAssigned) redirect("/episodes");
+    if (organizationContext.person) redirect("/episodes");
     return <div className="panel mx-auto mt-20 max-w-lg p-8 text-center"><h1 className="text-xl font-semibold tracking-[-0.03em]">No episodes shared</h1><p className="mt-2 text-sm leading-6 text-[#737776]">Ask the post-production team to add you to an episode before you can view its workspace.</p></div>;
   }
   if (!mayManageShows && mayManageCatering) redirect("/runner");

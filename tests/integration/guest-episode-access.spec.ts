@@ -7,7 +7,9 @@ const sql = postgres(databaseUrl, { prepare: false });
 
 const organizationId = "94000000-0000-4000-8000-000000000001";
 const guestUserId = "user_guest_episode_lab";
+const managerUserId = "user_guest_episode_manager";
 const guestPersonId = "94000000-0000-4000-8000-000000000002";
+const managerPersonId = "94000000-0000-4000-8000-000000000010";
 const showId = "94000000-0000-4000-8000-000000000003";
 const seasonId = "94000000-0000-4000-8000-000000000004";
 const assignedEpisodeId = "94000000-0000-4000-8000-000000000005";
@@ -23,6 +25,13 @@ async function useGuestSession(page: Page) {
   expect(tenant.status()).toBe(200);
 }
 
+async function useManagerSession(page: Page) {
+  const user = await page.request.post("/api/debug/user", { data: { userId: managerUserId } });
+  expect(user.status()).toBe(200);
+  const tenant = await page.request.post("/api/organizations/active", { data: { organizationId, pathname: "/episodes" } });
+  expect(tenant.status()).toBe(200);
+}
+
 test.describe("Guest episode access", () => {
   test.describe.configure({ mode: "serial" });
 
@@ -30,7 +39,7 @@ test.describe("Guest episode access", () => {
     await sql`delete from organizations where id = ${organizationId}`;
     await sql`
       insert into users (id, name, email)
-      values (${guestUserId}, 'Episode Guest', 'episode-guest@postpilot.test')
+      values (${guestUserId}, 'Episode Guest', 'episode-guest@postpilot.test'), (${managerUserId}, 'Episode Guest Manager', 'episode-guest-manager@postpilot.test')
       on conflict (id) do update set name = excluded.name, email = excluded.email
     `;
     await sql`
@@ -39,11 +48,11 @@ test.describe("Guest episode access", () => {
     `;
     await sql`
       insert into organization_members (organization_id, user_id, role)
-      values (${organizationId}, ${guestUserId}, 'client')
+      values (${organizationId}, ${guestUserId}, 'client'), (${organizationId}, ${managerUserId}, 'admin')
     `;
     await sql`
       insert into people (id, organization_id, user_id, name, email, role)
-      values (${guestPersonId}, ${organizationId}, ${guestUserId}, 'Episode Guest', 'episode-guest@postpilot.test', 'client')
+      values (${guestPersonId}, ${organizationId}, ${guestUserId}, 'Episode Guest', 'episode-guest@postpilot.test', 'client'), (${managerPersonId}, ${organizationId}, ${managerUserId}, 'Episode Guest Manager', 'episode-guest-manager@postpilot.test', 'producer')
     `;
     await sql`
       insert into post_workflows (id, organization_id, name, is_default)
@@ -79,7 +88,7 @@ test.describe("Guest episode access", () => {
 
   test.afterAll(async () => {
     await sql`delete from organizations where id = ${organizationId}`;
-    await sql`delete from users where id = ${guestUserId}`;
+    await sql`delete from users where id in (${guestUserId}, ${managerUserId})`;
     await sql.end();
   });
 
@@ -112,8 +121,8 @@ test.describe("Guest episode access", () => {
 
   test("does not let a guest change an episode they cannot see", async ({ page }) => {
     await useGuestSession(page);
-    const response = await page.request.patch(`/api/episodes/${privateEpisodeId}`, {
-      data: { workflowStageId: "not-a-stage" },
+    const response = await page.request.patch(`/api/episodes/${privateEpisodeId}/details`, {
+      data: { title: "Private episode", productionCode: null, airDate: null, lockedCutDate: null, deliveryDeadline: null },
     });
 
     expect(response.status()).toBe(404);
@@ -130,7 +139,7 @@ test.describe("Guest episode access", () => {
   test("does not let an assigned guest use episode-management endpoints", async ({ page }) => {
     await useGuestSession(page);
 
-    const workflow = await page.request.patch(`/api/episodes/${assignedEpisodeId}`, { data: { workflowStageId: "00000000-0000-4000-8000-000000000001" } });
+    const workflow = await page.request.post(`/api/episodes/${assignedEpisodeId}`, { data: { workflowStageId, action: "start" } });
     expect(workflow.status()).toBe(403);
     const details = await page.request.patch(`/api/episodes/${assignedEpisodeId}/details`, { data: { title: "Should not change", productionCode: null, status: "assembly", airDate: null, lockedCutDate: null, deliveryDeadline: null } });
     expect(details.status()).toBe(403);
@@ -141,12 +150,16 @@ test.describe("Guest episode access", () => {
   });
 
   test("lets an assigned Guest sign off a Guest-configured workflow gate", async ({ page }) => {
+    await useManagerSession(page);
+    expect((await page.request.patch(`/api/episodes/${assignedEpisodeId}/team`, { data: { approvalRuleId, personId: guestPersonId } })).status()).toBe(200);
+    expect((await page.request.post(`/api/episodes/${assignedEpisodeId}`, { data: { workflowStageId, action: "start" } })).status()).toBe(200);
+    expect((await page.request.post(`/api/episodes/${assignedEpisodeId}`, { data: { workflowStageId, action: "submit" } })).status()).toBe(200);
     await useGuestSession(page);
     const response = await page.request.post(`/api/episodes/${assignedEpisodeId}`, {
       data: { workflowStageId, approvalRuleId, action: "sign_off" },
     });
 
     expect(response.status()).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ ok: true, status: "approved", stageComplete: true });
+    await expect(response.json()).resolves.toMatchObject({ ok: true, stageComplete: true });
   });
 });

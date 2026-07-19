@@ -2,21 +2,21 @@ import Link from "next/link";
 import { Building2, CalendarRange, Clock3, Coffee, Clapperboard, DollarSign, FileCheck2, House, Layers3, Settings, Truck, UsersRound } from "lucide-react";
 import { LogoutButton } from "@/components/logout-button";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can, getCurrentPerson, type Permission } from "@/lib/permissions";
+import { can, getCurrentPerson } from "@/lib/permissions";
 import { hasApprovalWorkspace, listWorkOrderInbox, listWorkflowSignOffInbox } from "@/server/data";
 
 const navigation = [
   { label: "Dashboard", icon: House, href: "/" },
-  { label: "Shows", icon: Clapperboard, href: "/shows", permissions: ["manage_shows"] as Permission[] },
-  { label: "Episodes", icon: Layers3, href: "/episodes", permissions: ["manage_shows", "view_assigned"] as Permission[] },
-  { label: "Bookings", icon: CalendarRange, href: "/bookings", permissions: ["manage_bookings"] as Permission[] },
-  { label: "My time", icon: Clock3, href: "/my-time", permissions: ["update_assigned_work"] as Permission[] },
-  { label: "Catering", icon: Coffee, href: "/catering", permissions: ["request_catering"] as Permission[] },
-  { label: "Runner desk", icon: Coffee, href: "/runner", permissions: ["manage_catering"] as Permission[] },
-  { label: "Budget", icon: DollarSign, href: "/budget", permissions: ["manage_budget"] as Permission[] },
-  { label: "Deliveries", icon: Truck, href: "/deliveries", permissions: ["manage_episode_manifests", "update_delivery_items", "confirm_delivery_receipt"] as Permission[] },
-  { label: "Clients & vendors", icon: Building2, href: "/crm", permissions: ["manage_shows", "manage_budget"] as Permission[] },
-  { label: "Team", icon: UsersRound, href: "/team", permissions: ["manage_shows"] as Permission[] },
+  { label: "Shows", icon: Clapperboard, href: "/shows", permissions: ["manage_shows", "view_all_operations"] },
+  { label: "Episodes", icon: Layers3, href: "/episodes", permissions: ["manage_shows", "view_assigned", "view_all_operations"] },
+  { label: "Bookings", icon: CalendarRange, href: "/bookings", permissions: ["manage_bookings", "view_all_operations"] },
+  { label: "My time", icon: Clock3, href: "/my-time", permissions: ["update_assigned_work"] },
+  { label: "Catering", icon: Coffee, href: "/catering", permissions: ["request_catering"] },
+  { label: "Runner desk", icon: Coffee, href: "/runner", permissions: ["manage_catering"] },
+  { label: "Budget", icon: DollarSign, href: "/budget", permissions: ["manage_budget"] },
+  { label: "Deliveries", icon: Truck, href: "/deliveries", permissions: ["manage_episode_manifests", "update_delivery_items", "confirm_delivery_receipt"] },
+  { label: "Clients & vendors", icon: Building2, href: "/crm", permissions: ["manage_shows", "manage_budget"] },
+  { label: "Team", icon: UsersRound, href: "/team", permissions: ["manage_shows"] },
 ];
 
 export async function AppSidebar() {

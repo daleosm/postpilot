@@ -180,7 +180,7 @@ test.describe("Budget integration", () => {
 
     await useSession(page, financeUserId);
     expect((await page.request.post("/api/service-rates", { data: { name: "Finance service", category: "Finance", unit: "fixed", rate: 10, isActive: true } })).status()).toBe(201);
-    expect((await page.request.post("/api/rate-card-overrides", { data: { scope: { type: "network", network: "Budget Network" }, serviceRateId: facilityRateId, rate: 120 } })).status()).toBe(403);
+    expect((await page.request.post("/api/rate-card-overrides", { data: { scope: { type: "network", network: "Budget Network" }, serviceRateId: facilityRateId, rate: 120 } })).status()).toBe(200);
 
     await useSession(page, rateUserId);
     expect((await page.request.post("/api/rate-card-overrides", { data: { scope: { type: "network", network: "Budget Network" }, serviceRateId: facilityRateId, rate: 120 } })).status()).toBe(200);

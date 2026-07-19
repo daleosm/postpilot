@@ -231,7 +231,34 @@ function SimpleWorkflowPanel({ episodeId, currentStageId, currentStatus, stages,
   return <div className="space-y-4">
     <section aria-label="Episode workflow" className="overflow-hidden rounded-2xl border border-[#dde4df] bg-[radial-gradient(circle_at_top_right,_#edf6f1,_transparent_42%),#fbfcfa]">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#e5eae6] px-5 py-4"><div><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#728079]">Workflow path</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-[#314139]">{currentStage.name}</h2><p className="mt-1 text-xs text-[#75817a]">Stage {currentStage.position} of {orderedStages.length}</p></div><WorkflowStateBadge status={currentStatus} /></div>
-      <div className="grid gap-2 p-4 sm:grid-cols-2 xl:grid-cols-4">{orderedStages.map((stage) => { const current = stage.id === currentStage.id; const completed = stage.position < currentStage.position || currentStatus === "complete"; const startedEarly = earlyStartedIds.has(stage.id); const selected = stage.id === selectedStage.id; return <button key={stage.id} type="button" onClick={() => { setSelectedStageId(stage.id); setMessage(""); }} className={`min-w-0 rounded-xl border px-3 py-2.5 text-left transition focus:outline-none focus:ring-2 focus:ring-[#87a89a] ${current ? "border-[#9ec2ad] bg-[#eaf4ed] text-[#315f52]" : selected ? "border-[#bfd5c8] bg-white text-[#405148]" : completed ? "border-[#dce5df] bg-[#f4f7f4] text-[#678076]" : "border-[#e5e9e5] bg-white/65 text-[#6e7873] hover:bg-white"}`}><span className="flex items-center justify-between gap-2"><span className="truncate text-xs font-semibold">{stage.position}. {stage.name}</span><span className={`shrink-0 text-[10px] font-semibold ${current ? "text-[#39715d]" : completed ? "text-[#6f8b7b]" : "text-[#8a938e]"}`}>{current ? "Current" : completed ? "Complete" : startedEarly ? "Started early" : "Upcoming"}</span></span></button>; })}</div>
+      <div className="relative px-5 py-5 sm:px-7">
+        <span aria-hidden="true" className="absolute bottom-8 left-[2.55rem] top-8 w-px bg-gradient-to-b from-[#8cb09d] via-[#d7e1db] to-[#e4e8e4] sm:left-[3.05rem]" />
+        <div className="space-y-1">
+          {orderedStages.map((stage) => {
+            const current = stage.id === currentStage.id;
+            const completed = stage.position < currentStage.position || currentStatus === "complete";
+            const startedEarly = earlyStartedIds.has(stage.id);
+            const selected = stage.id === selectedStage.id;
+            const stageRules = rules.filter((rule) => rule.workflowStageId === stage.id);
+            const requiredSignOffs = stageRules.filter((rule) => rule.isRequired).length;
+            const state = completed ? "Complete" : current ? currentStatus.replaceAll("_", " ") : startedEarly ? "Started early" : "Upcoming";
+            const nodeClass = completed
+              ? "bg-[#5f917a] text-white shadow-[0_0_0_5px_#edf6f0]"
+              : current
+                ? "bg-[#315f52] text-white shadow-[0_0_0_6px_#dbece3]"
+                : startedEarly
+                  ? "bg-[#9a7647] text-white shadow-[0_0_0_5px_#f6eee3]"
+                  : "border border-[#d6ddd8] bg-[#fbfcfa] text-[#849089]";
+            return <div key={stage.id} className="relative grid grid-cols-[2.25rem_minmax(0,1fr)] gap-3 sm:grid-cols-[2.75rem_minmax(0,1fr)] sm:gap-4">
+              <div className="relative z-10 flex justify-center pt-3"><span className={`grid h-6 w-6 place-items-center rounded-full text-[10px] font-bold ${nodeClass}`}>{completed ? "✓" : stage.position}</span></div>
+              <button type="button" aria-label={`Select ${stage.name}`} aria-pressed={selected} onClick={() => { setSelectedStageId(stage.id); setMessage(""); }} className={`mb-2 flex min-w-0 items-start justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus:ring-2 focus:ring-[#87a89a] focus:ring-offset-2 ${current ? "bg-[#eef6f1]" : selected ? "bg-[#f1f6f3]" : "hover:bg-[#f5f8f5]"}`}>
+                <span className="min-w-0"><span className={`block text-sm font-semibold ${current ? "text-[#315f52]" : completed ? "text-[#547866]" : "text-[#48554f]"}`}>{stage.name}</span><span className="mt-1 block text-[11px] text-[#7a8580]">{requiredSignOffs ? `${requiredSignOffs} required sign-off${requiredSignOffs === 1 ? "" : "s"}` : "No sign-off gate"}</span></span>
+                <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold capitalize ${completed ? "bg-[#e1eee6] text-[#467460]" : current ? "bg-[#d2e7dc] text-[#356d58]" : startedEarly ? "bg-[#f6eee3] text-[#906a3b]" : "bg-[#edf0ed] text-[#77847e]"}`}>{state}</span>
+              </button>
+            </div>;
+          })}
+        </div>
+      </div>
     </section>
     <section className="rounded-xl border border-[#e2e8e3] bg-white/70 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.12em] text-[#77827c]">{selectedIsCurrent ? "Current stage" : "Selected stage"}</p><h3 className="mt-1 text-base font-semibold text-[#35433d]">{selectedStage.name}</h3><p className="mt-1 text-xs text-[#738078]">{selectedState === "complete" ? "This stage is complete." : selectedState === "started early" ? "Work has been authorised to begin early. The episode remains at its current stage." : selectedIsCurrent && currentStatus === "not_started" ? "Start when the work begins." : selectedIsCurrent && currentStatus === "in_progress" ? "Submit when the work is ready for sign-off." : selectedIsCurrent && currentStatus === "awaiting_sign_off" ? "Awaiting the configured sign-off." : selectedIsCurrent && currentStatus === "blocked" ? "This stage is blocked until it is resumed." : "This stage will become current after the earlier stages are complete."}</p></div><span className="rounded-full bg-[#eef2ee] px-2.5 py-1 text-[10px] font-semibold capitalize text-[#68756e]">{selectedState.replaceAll("_", " ")}</span></div>
       {selectedIsCurrent && currentRules.length > 0 && <div className="mt-4 space-y-2">{currentRules.map((rule) => { const signer = workflowSigners.find((item) => item.approvalRuleId === rule.id); const signed = signedRuleIds.has(rule.id); return <div key={rule.id} className="flex items-center gap-2 text-xs text-[#55625b]"><span className={`grid h-4 w-4 place-items-center rounded-full text-[9px] font-bold ${signed ? "bg-[#5f917a] text-white" : "border border-[#cfd8d2] bg-white text-transparent"}`}>✓</span><span>{rule.label}{rule.isRequired ? "" : " · optional"}{signer ? <span className="text-[#829088]"> · {signer.name}</span> : rule.isRequired ? <span className="text-[#a16941]"> · signer needed</span> : null}</span></div>; })}</div>}

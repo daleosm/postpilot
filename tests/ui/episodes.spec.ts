@@ -23,7 +23,7 @@ test.describe("Episodes UI", () => {
     await expect(page.getByRole("link", { name: /Westbound/ })).toBeVisible();
     await expect(page.getByRole("link", { name: /Relay/ })).not.toBeVisible();
 
-    await page.getByLabel("Status").selectOption("locked");
+    await page.getByLabel("Workflow").selectOption({ label: "Picture lock" });
     await expect(page.getByText("1 episodes", { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: /Night Ferry/ })).toBeVisible();
   });

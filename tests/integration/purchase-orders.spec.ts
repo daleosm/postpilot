@@ -161,9 +161,6 @@ test.describe("Purchase order foundation", () => {
     expect(create.status()).toBe(201);
     const purchaseOrderId = (await create.json()).id as string;
     expect((await page.request.get("/api/purchase-orders")).status()).toBe(200);
-    expect((await page.request.patch(`/api/purchase-orders/${purchaseOrderId}`, { data: { status: "approved" } })).status()).toBe(403);
-
-    await useSession(page, approverUserId);
     expect((await page.request.patch(`/api/purchase-orders/${purchaseOrderId}`, { data: { status: "approved" } })).status()).toBe(200);
 
     await useSession(page, managerUserId);
@@ -172,8 +169,6 @@ test.describe("Purchase order foundation", () => {
     let detail = await (await page.request.get(`/api/purchase-orders/${purchaseOrderId}`)).json();
     expect(detail).toMatchObject({ authorisedAmount: 1000, committedAmount: 600, actualInvoicedAmount: 600, remainingAmount: 400, varianceAmount: -400 });
 
-    expect((await page.request.post(`/api/purchase-orders/${purchaseOrderId}/allocations`, { data: { allocationType: "budget_line", budgetLineId, amount: 500, allocationDate: "2035-07-04", overrunReason: "The supplier added a required mastering pass." } })).status()).toBe(403);
-    await useSession(page, approverUserId);
     expect((await page.request.post(`/api/purchase-orders/${purchaseOrderId}/allocations`, { data: { allocationType: "budget_line", budgetLineId, amount: 500, allocationDate: "2035-07-04", overrunReason: "The supplier added a required mastering pass." } })).status()).toBe(201);
     detail = await (await page.request.get(`/api/purchase-orders/${purchaseOrderId}`)).json();
     expect(detail).toMatchObject({ committedAmount: 1100, actualInvoicedAmount: 600, remainingAmount: -100, varianceAmount: -400 });
@@ -269,7 +264,7 @@ test.describe("Purchase order foundation", () => {
     const create = await page.request.post("/api/budget-lines", { data: { episodeId, category: "External finishing", description: "Initial vendor scope", budgetedAmount: 80, actualAmount: 0, costType: "internal", externalCost: true, purchaseOrderId } });
     expect(create.status()).toBe(201);
     const lineId = (await create.json()).id as string;
-    expect((await page.request.patch(`/api/budget-lines/${lineId}`, { data: { budgetedAmount: 120 } })).status()).toBe(403);
+    expect((await page.request.patch(`/api/budget-lines/${lineId}`, { data: { budgetedAmount: 120 } })).status()).toBe(400);
     await useSession(page, approverUserId);
     expect((await page.request.patch(`/api/budget-lines/${lineId}`, { data: { budgetedAmount: 120 } })).status()).toBe(400);
     expect((await page.request.patch(`/api/budget-lines/${lineId}`, { data: { budgetedAmount: 120, overrunReason: "Approved supplier finishing scope increased after review." } })).status()).toBe(200);
@@ -329,7 +324,7 @@ test.describe("Purchase order foundation", () => {
 
   test("requires budget approval before a supplier actual exceeds the authorised PO value", async ({ page }) => {
     const purchaseOrderId = await createApprovedPurchaseOrder(page, { poNumber: "PO-LAB-ACTUAL-OVERRUN", approvedAmount: 100 });
-    expect((await page.request.post(`/api/purchase-orders/${purchaseOrderId}/actual-costs`, { data: { invoiceNumber: "OVERRUN-ACTUAL-001", invoiceDate: "2035-07-08", amount: 120, description: "Over-authorised supplier actual" } })).status()).toBe(403);
+    expect((await page.request.post(`/api/purchase-orders/${purchaseOrderId}/actual-costs`, { data: { invoiceNumber: "OVERRUN-ACTUAL-001", invoiceDate: "2035-07-08", amount: 120, description: "Over-authorised supplier actual" } })).status()).toBe(400);
     const detail = await (await page.request.get(`/api/purchase-orders/${purchaseOrderId}`)).json();
     expect(detail).toMatchObject({ actualInvoicedAmount: 0, varianceAmount: -100 });
   });

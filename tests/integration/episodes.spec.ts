@@ -97,20 +97,21 @@ test.describe("Episode lifecycle integration", () => {
     await sql.end();
   });
 
-  test("creates a complete episode with its selected team and stage work orders", async ({ page }) => {
+  test("creates a complete episode with its selected team at the first workflow stage", async ({ page }) => {
     await useManagerSession(page);
     const response = await page.request.post("/api/episodes", { data: episodePayload() });
     expect(response.status()).toBe(201);
     createdEpisodeId = (await response.json()).id as string;
 
     const [episode] = await sql`select number, production_code, title, workflow_stage_id, editor_id, colorist_id, status, air_date, locked_cut_date from episodes where id = ${createdEpisodeId}`;
-    expect(episode).toMatchObject({ number: 2, production_code: "EPL102", title: "New episode workflow", workflow_stage_id: workflowStageId, editor_id: editorOneId, colorist_id: coloristId, status: "assembly" });
+    expect(episode).toMatchObject({ number: 2, production_code: "EPL102", title: "New episode workflow", workflow_stage_id: workflowStageId, editor_id: editorOneId, colorist_id: coloristId, status: "development" });
     expect(new Date(episode.air_date).toISOString().slice(0, 10)).toBe("2035-03-11");
     expect(new Date(episode.locked_cut_date).toISOString().slice(0, 10)).toBe("2035-03-04");
     const team = await sql`select person_id from episode_team_assignments where organization_id = ${organizationId} and episode_id = ${createdEpisodeId} order by person_id`;
     expect(team).toEqual(expect.arrayContaining([{ person_id: editorOneId }, { person_id: coloristId }]));
-    const [workOrder] = await sql`select title, workflow_stage_id, is_blocking from post_work_orders where organization_id = ${organizationId} and episode_id = ${createdEpisodeId}`;
-    expect(workOrder).toMatchObject({ title: "Prepare editorial turnover", workflow_stage_id: workflowStageId, is_blocking: true });
+    // Stage-linked work orders are created when that stage starts, rather than
+    // prematurely when an episode is merely created.
+    expect(await sql`select id from post_work_orders where organization_id = ${organizationId} and episode_id = ${createdEpisodeId}`).toHaveLength(0);
   });
 
   test("rejects duplicate numbers and foreign episode references", async ({ page }) => {
@@ -130,7 +131,7 @@ test.describe("Episode lifecycle integration", () => {
     const update = await page.request.patch(`/api/episodes/${createdEpisodeId}/details`, { data: { title: "Renamed episode", productionCode: "EPL102A", status: "review", airDate: "2035-03-12", lockedCutDate: "2035-03-05", deliveryDeadline: "2035-03-21T17:30:00.000Z" } });
     expect(update.status()).toBe(200);
     const [episode] = await sql`select title, production_code, status, air_date, locked_cut_date, delivery_deadline from episodes where id = ${createdEpisodeId}`;
-    expect(episode).toMatchObject({ title: "Renamed episode", production_code: "EPL102A", status: "review" });
+    expect(episode).toMatchObject({ title: "Renamed episode", production_code: "EPL102A", status: "development" });
     expect(new Date(episode.air_date).toISOString().slice(0, 10)).toBe("2035-03-12");
     expect(new Date(episode.locked_cut_date).toISOString().slice(0, 10)).toBe("2035-03-05");
     expect(new Date(episode.delivery_deadline).toISOString()).toBe("2035-03-21T17:30:00.000Z");
@@ -167,8 +168,9 @@ test.describe("Episode lifecycle integration", () => {
     await sql`insert into episode_workflow_approvals (organization_id, episode_id, workflow_stage_id, approval_rule_id, approver_role, required_person_id, status) values (${organizationId}, ${createdEpisodeId}, ${workflowStageId}, ${approvalRuleId}, 'editor', ${editorTwoId}, 'pending')`;
     const remove = await page.request.delete(`/api/episodes/${createdEpisodeId}/team?assignmentId=${editorTwoAssignment.id}`);
     expect(remove.status()).toBe(409);
-    await expect(remove.json()).resolves.toMatchObject({ error: expect.stringContaining("replacement workflow signer") });
+    await expect(remove.json()).resolves.toMatchObject({ error: expect.stringContaining("replacement sign-off person") });
     await sql`update episode_workflow_approvals set status = 'approved' where organization_id = ${organizationId} and episode_id = ${createdEpisodeId} and approval_rule_id = ${approvalRuleId}`;
+    expect((await page.request.patch(`/api/episodes/${createdEpisodeId}/team`, { data: { approvalRuleId, personId: editorOneId } })).status()).toBe(200);
     const removeAfterSignOff = await page.request.delete(`/api/episodes/${createdEpisodeId}/team?assignmentId=${editorTwoAssignment.id}`);
     expect(removeAfterSignOff.status()).toBe(200);
     const [removed] = await sql`select id from episode_team_assignments where id = ${editorTwoAssignment.id}`;

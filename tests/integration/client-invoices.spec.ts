@@ -80,7 +80,7 @@ test.describe("Client invoice issuance", () => {
     expect(workflowBlocked.status()).toBe(409);
     expect((await workflowBlocked.json()).error).toContain("Complete the episode workflow");
 
-    await sql`update episodes set workflow_stage_id = ${terminalStageId} where id = ${episodeId}`;
+    await sql`update episodes set workflow_stage_id = ${terminalStageId}, workflow_status = 'complete' where id = ${episodeId}`;
     const timeBlocked = await page.request.post("/api/client-invoices", { data: { episodeId } });
     expect(timeBlocked.status()).toBe(409);
     expect((await timeBlocked.json()).error).toContain("actual time confirmed");
@@ -143,9 +143,9 @@ test.describe("Client invoice issuance", () => {
     expect((await expiredPoPdf.json()).error).toContain("expired");
     await sql`update client_purchase_orders set expiry_date = null where id = ${clientPurchaseOrderId}`;
 
-    await sql`update episodes set workflow_stage_id = ${activeStageId} where id = ${episodeId}`;
+    await sql`update episodes set workflow_stage_id = ${activeStageId}, workflow_status = 'in_progress' where id = ${episodeId}`;
     expect((await page.request.get(`/api/client-invoices/${invoice.id}/pdf`)).status()).toBe(409);
-    await sql`update episodes set workflow_stage_id = ${terminalStageId} where id = ${episodeId}`;
+    await sql`update episodes set workflow_stage_id = ${terminalStageId}, workflow_status = 'complete' where id = ${episodeId}`;
     await sql`update client_invoices set status = 'void' where id = ${invoice.id}`;
     expect((await page.request.get(`/api/client-invoices/${invoice.id}/pdf`)).status()).toBe(409);
 

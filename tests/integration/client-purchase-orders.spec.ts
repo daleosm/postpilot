@@ -132,9 +132,6 @@ test.describe("Client purchase order foundation", () => {
     expect(create.status()).toBe(201);
     const purchaseOrderId = (await create.json()).id as string;
     expect((await page.request.patch(`/api/client-purchase-orders/${purchaseOrderId}`, { data: { authorisedAmount: 1 } })).status()).toBe(400);
-    expect((await page.request.patch(`/api/client-purchase-orders/${purchaseOrderId}`, { data: { status: "active" } })).status()).toBe(403);
-
-    await setTestSession(page, approverUserId);
     expect((await page.request.patch(`/api/client-purchase-orders/${purchaseOrderId}`, { data: { status: "active" } })).status()).toBe(200);
 
     await setTestSession(page, managerUserId);
@@ -144,8 +141,6 @@ test.describe("Client purchase order foundation", () => {
     expect(detail).toMatchObject({ authorisedAmount: 1000, committedToBillAmount: 600, invoicedAmount: 900, remainingAmount: 400, varianceAmount: -100 });
 
     expect((await page.request.post(`/api/client-purchase-orders/${purchaseOrderId}/allocations`, { data: { allocationType: "change_order", changeOrderReference: "CPL-CO-002", amount: 500, allocationDate: "2035-07-05" } })).status()).toBe(400);
-    expect((await page.request.post(`/api/client-purchase-orders/${purchaseOrderId}/allocations`, { data: { allocationType: "change_order", changeOrderReference: "CPL-CO-002", amount: 500, allocationDate: "2035-07-05", overrunReason: "Client approved an additional finishing pass." } })).status()).toBe(403);
-    await setTestSession(page, approverUserId);
     expect((await page.request.post(`/api/client-purchase-orders/${purchaseOrderId}/allocations`, { data: { allocationType: "change_order", changeOrderReference: "CPL-CO-002", amount: 500, allocationDate: "2035-07-05", overrunReason: "Client approved an additional finishing pass." } })).status()).toBe(201);
     detail = await (await page.request.get(`/api/client-purchase-orders/${purchaseOrderId}`)).json();
     expect(detail).toMatchObject({ committedToBillAmount: 1100, invoicedAmount: 900, remainingAmount: -100, varianceAmount: -100 });

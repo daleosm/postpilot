@@ -7,7 +7,7 @@ All automated browser tests use Playwright and the database-backed debug environ
 | Folder | Purpose | Current coverage |
 | --- | --- | --- |
 | `ui/` | Screen-level user journeys: visible controls, filtering, validation, navigation, and role-specific workspace access. | Shows, Episodes, Bookings, Approvals, My time, Users & access. |
-| `integration/` | Business rules exercised through real API routes with isolated database fixtures. | Configurable workflow, work orders/commercial rules, QC lifecycle. |
+| `integration/` | Business rules exercised through real API routes with isolated database fixtures. | Configurable workflow, work orders/commercial rules, QC lifecycle, tenant context, OTP boundaries, role policies, user access, and management-route permissions. |
 | `integration/tenant-isolation/` | Tenant-boundary checks for pages, mutations, and safe route switching. | Shows, Episodes, Bookings, Approvals. |
 | `fixtures/` | Shared test helpers only; these are not test specs. | Debug user and active-tenant session helper. |
 
@@ -44,4 +44,5 @@ pnpm test:booking-guests
 | Work orders | episode work-order form and assigned-work queue | covered through tenant-scoped APIs | `integration/work-orders` |
 | Budget | episode budget drill-down and manual-line form | `integration/budget` | manual ledger, service rates, rate inheritance, booking roll-up, and commercial source locks |
 | QC | episode QC UI is covered through the episode workspace | `integration/qc-lifecycle` | `integration/qc-lifecycle` |
-| Users & access | `ui/users` | tenant-local creation exercised in the journey | — |
+| Users & access | `ui/users`, role-policy editor | tenant-local creation and cross-tenant update/delete denial | membership, owner/self-protection, fixed Client role, live policy grants/revocations |
+| Tenant context & access | top-bar and protected-route behaviour | forged/stale/removed tenant context; show selection/reset | debug-user membership and OTP request boundaries |

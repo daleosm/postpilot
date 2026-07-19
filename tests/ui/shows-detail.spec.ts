@@ -16,7 +16,7 @@ test.describe("Show detail UI", () => {
     await expect(page.getByRole("heading", { name: "Crossing Point" })).toBeVisible();
     await expect(page.getByText("Show contacts", { exact: true })).toBeVisible();
     await expect(page.getByText("Episode board", { exact: true })).toBeVisible();
-    await expect(page.getByText("Recent activity", { exact: true })).toBeVisible();
+    await expect(page.getByText("Recent workflow completions", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Edit show" }).click();
     await expect(page.getByRole("heading", { name: "Edit show" })).toBeVisible();
     await expect(page.getByLabel("Show title")).toHaveValue("Crossing Point");
