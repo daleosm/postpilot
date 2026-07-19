@@ -66,9 +66,9 @@ const stages = [
   ["Ingest, verification and editorial preparation", "ingest_verification_editorial_preparation", "#5f7ee6", "assistant_editor"],
   ["Assembly cut", "assembly_cut", "#7b8eb3", "editor"],
   ["Editor’s cut", "editor_cut", "#5f7ee6", "editor"],
-  ["Director’s cut / review", "director_review", "#9b70e5", "guest"],
+  ["Director’s cut / review", "director_review", "#9b70e5", "client"],
   ["Producer review", "producer_review", "#a7785d", "producer"],
-  ["Studio, network or client review", "studio_network_client_review", "#9c6fb9", "guest"],
+  ["Studio, network or client review", "studio_network_client_review", "#9c6fb9", "client"],
   ["Legal, compliance and clearances", "legal_compliance_clearances", "#977a67", "producer"],
   ["Fine cut and final creative approval", "fine_cut_final_creative_approval", "#c58a52", "producer"],
   ["Picture lock", "picture_lock", "#d99a45", "producer"],
@@ -82,7 +82,7 @@ const stages = [
   ["Mastering and versioning", "mastering_versioning", "#647c70", "post_supervisor"],
   ["Quality control", "quality_control", "#b56d54", "qc"],
   ["Delivery", "delivery", "#607b70", "post_supervisor"],
-  ["Client or network acceptance", "client_network_acceptance", "#8c719d", "guest"],
+  ["Client or network acceptance", "client_network_acceptance", "#8c719d", "client"],
   ["Archive and closeout", "archive_closeout", "#6d7671", "post_supervisor"],
 ] as const;
 
@@ -128,7 +128,6 @@ const defaultRolePolicies: Record<string, string[]> = {
   vfx_coordinator: ["update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "request_catering", "view_assigned"],
   vfx_supervisor: ["update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "request_catering", "view_assigned"],
   director: ["sign_off_workflow_stages", "view_assigned"],
-  client: ["view_assigned", "view_shared_delivery_status"],
 };
 
 function roleLabel(role: string) { return role.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
@@ -157,7 +156,7 @@ const tenants: TenantSeed[] = [
       { name: "Noah Chen", email: "noah@northstar-post.test", role: "sound_mixer", userId: "user_noah", membershipRole: "member" },
       { name: "Ruth Okafor", email: "ruth@northstar-post.test", role: "qc", userId: "user_ruth", membershipRole: "member" },
       { name: "Vik Grant", email: "vik@northstar-post.test", role: "vfx_coordinator" },
-      { name: "Mara Voss", email: "mara@northstar-post.test", role: "director", userId: "user_mara", membershipRole: "guest" },
+      { name: "Mara Voss", email: "mara@northstar-post.test", role: "director", userId: "user_mara", membershipRole: "client" },
       { name: "Iman Patel", email: "iman@northstar-post.test", role: "finance", userId: "user_iman", membershipRole: "member" },
       { name: "Jules Reed", email: "jules@northstar-post.test", role: "runner" },
       { name: "Northstar Network Review", email: "review@northstar-network.test", role: "client" },
@@ -192,7 +191,7 @@ const tenants: TenantSeed[] = [
       { name: "Lloyd Finch", email: "lloyd@riverside-post.test", role: "director" },
       { name: "Amal Webb", email: "amal@riverside-post.test", role: "finance" },
       { name: "Sam Walker", email: "sam@riverside-post.test", role: "runner", userId: "user_sam", membershipRole: "member" },
-      { name: "Casey Reed", email: "casey@client.test", role: "client", userId: "user_casey", membershipRole: "guest" },
+      { name: "Casey Reed", email: "casey@client.test", role: "client", userId: "user_casey", membershipRole: "client" },
     ],
     budgetProfile: { currency: "GBP", multiplier: 0.78, vendor: "Meridian Graphics" },
   },
@@ -255,7 +254,7 @@ const tenants: TenantSeed[] = [
       { name: "Jo Bell", email: "jo@lantern-post.test", role: "director" },
       { name: "Priya Dean", email: "priya.dean@lantern-post.test", role: "finance", userId: "user_lantern_finance", membershipRole: "member" },
       { name: "Finn Cole", email: "finn@lantern-post.test", role: "runner", userId: "user_lantern_runner", membershipRole: "member" },
-      { name: "Meridian Review", email: "review@meridian.test", role: "client", userId: "user_lantern_client", membershipRole: "guest" },
+      { name: "Meridian Review", email: "review@meridian.test", role: "client", userId: "user_lantern_client", membershipRole: "client" },
     ],
     budgetProfile: { currency: "GBP", multiplier: 0.88, vendor: "Lantern Screen VFX" },
   },
@@ -286,7 +285,7 @@ const tenants: TenantSeed[] = [
       { name: "Isa Rowe", email: "isa@copperline.test", role: "director" },
       { name: "Peter Vale", email: "peter@copperline.test", role: "finance", userId: "user_copper_finance", membershipRole: "member" },
       { name: "Nia Park", email: "nia@copperline.test", role: "runner", userId: "user_copper_runner", membershipRole: "member" },
-      { name: "Slate+ Review", email: "review@slateplus.test", role: "client", userId: "user_copper_client", membershipRole: "guest" },
+      { name: "Slate+ Review", email: "review@slateplus.test", role: "client", userId: "user_copper_client", membershipRole: "client" },
     ],
     budgetProfile: { currency: "USD", multiplier: 1.18, vendor: "Copperline VFX" },
   },
@@ -470,7 +469,7 @@ async function seedTenant(tenant: TenantSeed) {
     if (["locked", "online", "delivered"].includes(episodeWorkflowSeed.get(episode.id)?.lifecycle ?? "")) roles.push("colorist", "sound_mixer");
     if (index % 3 === 0) roles.push("qc");
     const stagePosition = lifecyclePatterns[index % lifecyclePatterns.length][2];
-    if ([5, 7, 21].includes(stagePosition)) roles.push("guest");
+    if ([5, 7, 21].includes(stagePosition)) roles.push("client");
     return [...new Set(roles)].map((role) => ({ organizationId: tenant.id, episodeId: episode.id, personId: byRole(role), isLead: false }));
   }));
   await db.insert(episodeWorkflowSigners).values(episodeRows.flatMap((episode) => stages.map((stage, index) => ({ organizationId: tenant.id, episodeId: episode.id, workflowStageApprovalRuleId: ruleId(index + 1), personId: byRole(stage[3]) }))));

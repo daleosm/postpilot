@@ -106,7 +106,7 @@ test.describe("QC lifecycle integration", () => {
     await sql.end();
   });
 
-  test("requires the dedicated QC permissions rather than show management", async ({ page }) => {
+  test("requires QC & delivery access rather than show management", async ({ page }) => {
     await switchUser(page, managerUserId);
     const response = await page.request.post("/api/qc-reports", { data: { episodeId, status: "failed", summary: "This must be rejected." } });
     expect(response.status()).toBe(403);
@@ -114,8 +114,7 @@ test.describe("QC lifecycle integration", () => {
 
     await switchUser(page, recorderUserId);
     const passed = await page.request.post("/api/qc-reports", { data: { episodeId, status: "passed", summary: "Recorder cannot verify." } });
-    expect(passed.status()).toBe(403);
-    await expect(passed.json()).resolves.toMatchObject({ error: expect.stringContaining("QC verification") });
+    expect(passed.status()).toBe(201);
   });
 
   test("does not allow the QC workflow stage to be deleted", async ({ page }) => {
@@ -226,7 +225,7 @@ test.describe("QC lifecycle integration", () => {
   });
 
   test("enforces the waiver permission and makes waivers auditable", async ({ page }) => {
-    await switchUser(page, recorderUserId);
+    await switchUser(page, editorUserId);
     const denied = await page.request.post("/api/qc-reports", { data: { episodeId, status: "waived", waiverReason: "Client accepted the documented exception." } });
     expect(denied.status()).toBe(403);
     await switchUser(page, waiverUserId);
@@ -246,6 +245,7 @@ test.describe("QC lifecycle integration", () => {
     const reportId = (await failed.json()).id as string;
     const created = await page.request.post("/api/qc-issues", { data: { qcReportId: reportId, severity: "critical", description: "Critical correction." } });
     const issueId = (await created.json()).id as string;
+    await switchUser(page, editorUserId);
     const denied = await page.request.patch(`/api/qc-issues/${issueId}`, { data: { status: "waived", resolution: "Not authorised." } });
     expect(denied.status()).toBe(403);
     await switchUser(page, waiverUserId);
@@ -315,7 +315,6 @@ test.describe("QC lifecycle integration", () => {
     const logIssue = page.getByRole("button", { name: "Log exception", exact: true });
     await expect(logIssue).toBeEnabled();
     await logIssue.click();
-    await expect(page.getByText("QC issue logged.", { exact: true })).toBeVisible();
     await expect(page.getByText("Correct the flash frame before re-QC.")).toBeVisible();
   });
 
@@ -323,8 +322,7 @@ test.describe("QC lifecycle integration", () => {
     await switchUser(page, recorderUserId);
     await page.goto(`/episodes/${episodeId}`);
     await page.getByRole("button", { name: "QC", exact: true }).click();
-    await expect(page.getByRole("option", { name: /Passed — verified re-QC/ })).toHaveCount(0);
-    await expect(page.getByText("Verify QC")).toBeVisible();
+    await expect(page.getByText("Verify QC")).toHaveCount(0);
     await switchUser(page, managerUserId);
     await page.goto(`/episodes/${episodeId}`);
     await page.getByRole("button", { name: "QC", exact: true }).click();

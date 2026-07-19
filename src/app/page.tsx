@@ -48,7 +48,7 @@ export default async function DashboardPage() {
       </div>
     );
   }
-  if (organizationContext?.organization?.role === "guest") {
+  if (organizationContext?.organization?.role === "client") {
     if (mayManageShows || mayViewAssigned) redirect("/episodes");
     return <div className="panel mx-auto mt-20 max-w-lg p-8 text-center"><h1 className="text-xl font-semibold tracking-[-0.03em]">No episodes shared</h1><p className="mt-2 text-sm leading-6 text-[#737776]">Ask the post-production team to add you to an episode before you can view its workspace.</p></div>;
   }

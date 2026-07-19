@@ -161,6 +161,7 @@ test.describe("Post work orders integration", () => {
     expect(invalidClose.status()).toBe(403);
     await expect(invalidClose.json()).resolves.toMatchObject({ error: expect.stringContaining("QC verification permission") });
 
+    expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "in_progress" } })).status()).toBe(200);
     const handOff = await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "ready_for_review" } });
     expect(handOff.status()).toBe(200);
     const switchUser = await page.request.post("/api/debug/user", { data: { userId: qcUserId } });

@@ -5,7 +5,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { organizationRolePolicies, people } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can, guestRolePolicy, isFixedRole, permissions } from "@/lib/permissions";
+import { can, clientRolePolicy, isFixedRole, permissions } from "@/lib/permissions";
 import { updateOrganizationRolePoliciesSchema } from "@/lib/validations/entities";
 
 export async function PATCH(request: Request) {
@@ -17,13 +17,13 @@ export async function PATCH(request: Request) {
   const allowedPermissions = new Set<string>(permissions);
   const rolePattern = /^[a-z0-9_]+$/;
   if (parsed.data.policies.some((policy) => !rolePattern.test(policy.role) || policy.permissions.some((permission) => !allowedPermissions.has(permission))) || new Set(parsed.data.policies.map((policy) => policy.role)).size !== parsed.data.policies.length) return NextResponse.json({ error: "Role settings contain a duplicate or unsupported role or permission." }, { status: 400 });
-  const submittedGuest = parsed.data.policies.find((policy) => isFixedRole(policy.role));
-  if (submittedGuest && (submittedGuest.label !== guestRolePolicy.label || submittedGuest.permissions.length !== guestRolePolicy.permissions.length || submittedGuest.permissions.some((permission) => !guestRolePolicy.permissions.includes(permission as typeof guestRolePolicy.permissions[number])))) return NextResponse.json({ error: "Guest is a fixed system role and its permissions cannot be changed." }, { status: 400 });
+  const submittedClient = parsed.data.policies.find((policy) => isFixedRole(policy.role));
+  if (submittedClient && (submittedClient.label !== clientRolePolicy.label || submittedClient.permissions.length !== clientRolePolicy.permissions.length || submittedClient.permissions.some((permission) => !clientRolePolicy.permissions.includes(permission as typeof clientRolePolicy.permissions[number])))) return NextResponse.json({ error: "Client is a fixed system role and its permissions cannot be changed." }, { status: 400 });
   const policies = parsed.data.policies.filter((policy) => !isFixedRole(policy.role));
   const db = getDb();
   const organizationId = context.organization.organizationId;
   const assignedRoles = await db.select({ role: people.role }).from(people).where(eq(people.organizationId, organizationId));
-  const configuredRoles = new Set([guestRolePolicy.role, ...policies.map((policy) => policy.role)]);
+  const configuredRoles = new Set([clientRolePolicy.role, ...policies.map((policy) => policy.role)]);
   const removedInUse = [...new Set(assignedRoles.map((person) => person.role))].find((role) => !configuredRoles.has(role));
   if (removedInUse) return NextResponse.json({ error: `Reassign people using the ${removedInUse.replaceAll("_", " ")} role before removing it.` }, { status: 409 });
   await db.transaction(async (tx) => {

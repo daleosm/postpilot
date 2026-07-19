@@ -84,7 +84,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
   // to post. There is no intermediate Accounts approval state.
   const billingStatus = billingScope !== "billable_change" ? "not_billable" : workOrder[0].billingStatus;
   const qcHandOff = workOrder[0].kind === "qc_exception" && status === "ready_for_review";
-  const verificationRole = qcHandOff ? (await getTenantRolePolicies(organizationId)).find((policy) => policy.permissions.includes("verify_qc"))?.role : null;
+  const verificationRole = qcHandOff ? (await getTenantRolePolicies(organizationId)).find((policy) => policy.permissions.includes("manage_qc_delivery"))?.role : null;
   if (qcHandOff && !verificationRole) return NextResponse.json({ error: "Configure a role with QC verification before sending this exception to re-QC." }, { status: 409 });
   const nextEstimatedAmount = nextWorkType === "external_vendor"
     ? (parsed.data.estimatedAmount === undefined ? workOrder[0].estimatedAmount : parsed.data.estimatedAmount)

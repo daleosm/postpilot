@@ -30,3 +30,19 @@ test("complete is explicit and does not infer state from previous stages", () =>
   assert.equal(state.displayStatus, "complete");
   assert.equal(state.primaryStageName, "Client review");
 });
+
+test("the resolver exposes one current-stage contract, not legacy graph or track state", () => {
+  const state = resolveCurrentEpisodeWorkflowState({ workflowStageId: "assembly", workflowStatus: "not_started", stages });
+
+  assert.deepEqual(Object.keys(state).sort(), ["displayStatus", "label", "primaryStageId", "primaryStageName"]);
+  assert.equal("tracks" in state, false);
+  assert.equal("dependencies" in state, false);
+});
+
+test("an invalid stage pointer cannot invent a current stage", () => {
+  const state = resolveCurrentEpisodeWorkflowState({ workflowStageId: "foreign-stage", workflowStatus: "in_progress", stages });
+
+  assert.equal(state.primaryStageId, null);
+  assert.equal(state.primaryStageName, null);
+  assert.equal(state.label, "Not started");
+});

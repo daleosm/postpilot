@@ -31,7 +31,7 @@ export async function getScheduleResources(organizationId: string) {
     db.select({ id: rooms.id, name: rooms.name, type: rooms.type }).from(rooms).where(eq(rooms.organizationId, organizationId)).orderBy(asc(rooms.name)),
     db.select({ id: people.id, name: people.name, role: people.role, availability: people.availability, isFreelancer: people.isFreelancer }).from(people).where(eq(people.organizationId, organizationId)).orderBy(asc(people.name)),
     listEpisodes(organizationId),
-    db.select({ id: people.id, name: people.name, role: people.role, email: people.email }).from(people).innerJoin(organizationMembers, and(eq(organizationMembers.organizationId, organizationId), eq(organizationMembers.userId, people.userId))).where(and(eq(people.organizationId, organizationId), eq(people.isActive, true), eq(organizationMembers.role, "guest"))).orderBy(asc(people.name)),
+    db.select({ id: people.id, name: people.name, role: people.role, email: people.email }).from(people).innerJoin(organizationMembers, and(eq(organizationMembers.organizationId, organizationId), eq(organizationMembers.userId, people.userId))).where(and(eq(people.organizationId, organizationId), eq(people.isActive, true), eq(organizationMembers.role, "client"))).orderBy(asc(people.name)),
   ]);
   return { rooms: roomRows, people: peopleRows, guestAccounts, episodes: episodeRows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}` })) };
 }

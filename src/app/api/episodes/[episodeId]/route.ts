@@ -73,7 +73,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ episodeId:
   const { episodeId } = await params;
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (context.organization.role === "guest") return NextResponse.json({ error: "Episode not found." }, { status: 404 });
+  if (context.organization.role === "client") return NextResponse.json({ error: "Episode not found." }, { status: 404 });
   if (!(await can("manage_shows")) && !(await isAssignedToEpisode(episodeId))) return NextResponse.json({ error: "Episode not found." }, { status: 404 });
   const episode = await getEpisode(context.organization.organizationId, episodeId);
   return episode ? NextResponse.json({ episode }) : NextResponse.json({ error: "Episode not found." }, { status: 404 });

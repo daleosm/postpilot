@@ -14,7 +14,7 @@ import { getClientPurchaseOrderCommercialLinksForOrganization, listClientPurchas
 
 export default async function ShowDetailPage({ params }: { params: Promise<{ showId: string }> }) {
   const [mayManageShows, mayManageBudget, mayViewDelivery, organizationContext] = await Promise.all([can("manage_shows"), can("manage_budget"), Promise.all([can("manage_episode_manifests"), can("update_delivery_items"), can("confirm_delivery_receipt")]).then((permissions) => permissions.some(Boolean)), getActiveOrganizationContext()]);
-  if (!mayManageShows || organizationContext?.organization?.role === "guest") notFound();
+  if (!mayManageShows || organizationContext?.organization?.role === "client") notFound();
   const { showId } = await params;
   const data = await getShowDetail(showId);
   if (!data) notFound();

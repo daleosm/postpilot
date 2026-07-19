@@ -39,11 +39,11 @@ test.describe("Guest episode access", () => {
     `;
     await sql`
       insert into organization_members (organization_id, user_id, role)
-      values (${organizationId}, ${guestUserId}, 'guest')
+      values (${organizationId}, ${guestUserId}, 'client')
     `;
     await sql`
       insert into people (id, organization_id, user_id, name, email, role)
-      values (${guestPersonId}, ${organizationId}, ${guestUserId}, 'Episode Guest', 'episode-guest@postpilot.test', 'guest')
+      values (${guestPersonId}, ${organizationId}, ${guestUserId}, 'Episode Guest', 'episode-guest@postpilot.test', 'client')
     `;
     await sql`
       insert into post_workflows (id, organization_id, name, is_default)
@@ -55,7 +55,7 @@ test.describe("Guest episode access", () => {
     `;
     await sql`
       insert into workflow_stage_approval_rules (id, organization_id, workflow_stage_id, approver_role, label, approval_order, is_required)
-      values (${approvalRuleId}, ${organizationId}, ${workflowStageId}, 'guest', 'Guest sign-off', 1, true)
+      values (${approvalRuleId}, ${organizationId}, ${workflowStageId}, 'client', 'Client sign-off', 1, true)
     `;
     await sql`
       insert into shows (id, organization_id, title, code, time_zone)

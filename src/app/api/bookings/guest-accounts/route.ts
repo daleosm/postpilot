@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   // Booking-created accounts are deliberately always external guest accounts.
   // Their episode assignment limits what they can access; a scheduler cannot
   // accidentally create an internal post-house role from this compact form.
-  const input = { ...parsed.data, email: parsed.data.email.toLowerCase().trim(), personRole: "guest" };
+  const input = { ...parsed.data, email: parsed.data.email.toLowerCase().trim(), personRole: "client" };
   if ((await missingTenantReferences(organizationId, { episodeId: input.episodeId })).length) return NextResponse.json({ error: "Episode not found for this post house." }, { status: 404 });
 
   const db = getDb();
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
 
   const person = await db.transaction(async (tx) => {
     if (!existingUser) await tx.insert(users).values({ id: userId, name: input.name, email: input.email });
-    await tx.insert(organizationMembers).values({ organizationId, userId, role: "guest" });
+    await tx.insert(organizationMembers).values({ organizationId, userId, role: "client" });
     const [guest] = existingPerson
       ? await tx.update(people).set({ userId, name: input.name, role: input.personRole, isActive: true, updatedAt: new Date() }).where(and(eq(people.id, existingPerson.id), eq(people.organizationId, organizationId))).returning({ id: people.id, name: people.name, role: people.role, email: people.email })
       : await tx.insert(people).values({ organizationId, userId, name: input.name, email: input.email, role: input.personRole }).returning({ id: people.id, name: people.name, role: people.role, email: people.email });

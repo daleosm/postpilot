@@ -41,7 +41,7 @@ export const updateOrganizationSchema = insertOrganizationSchema.partial();
 export const insertOrganizationMemberSchema = z.object({
   organizationId: id,
   userId: z.string().min(1),
-  role: z.enum(["owner", "admin", "member", "guest"]).default("member"),
+  role: z.enum(["owner", "admin", "member", "client"]).default("member"),
 });
 export const updateOrganizationMemberSchema = insertOrganizationMemberSchema.pick({ role: true });
 
@@ -49,7 +49,7 @@ export const createOrganizationUserSchema = z.object({
   name: z.string().trim().min(2, "Enter the user's name.").max(120),
   email: z.string().email("Enter a valid work email.").max(320),
   personRole: roleKey,
-  membershipRole: z.enum(["admin", "member", "guest"]).default("member"),
+  membershipRole: z.enum(["admin", "member", "client"]).default("member"),
 });
 export const updateOrganizationUserSchema = createOrganizationUserSchema.pick({ personRole: true, membershipRole: true });
 

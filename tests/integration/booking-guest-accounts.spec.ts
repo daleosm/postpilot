@@ -63,7 +63,7 @@ test.describe("Booking guest accounts", () => {
     await sql`
       insert into organization_members (organization_id, user_id, role) values
         (${organizationId}, ${managerUserId}, 'admin'),
-        (${organizationId}, ${guestUserId}, 'guest'),
+        (${organizationId}, ${guestUserId}, 'client'),
         (${organizationId}, ${memberUserId}, 'member')
     `;
     await sql`
@@ -134,7 +134,7 @@ test.describe("Booking guest accounts", () => {
 
     expect(response.status()).toBe(201);
     const guest = await response.json() as { id: string; name: string; role: string; email: string };
-    expect(guest).toMatchObject({ name: "New Booking Guest", role: "guest", email: createdGuestEmail });
+    expect(guest).toMatchObject({ name: "New Booking Guest", role: "client", email: createdGuestEmail });
 
     const [membership] = await sql`
       select organization_members.role
@@ -143,7 +143,7 @@ test.describe("Booking guest accounts", () => {
       where organization_members.organization_id = ${organizationId}
         and people.id = ${guest.id}
     `;
-    expect(membership.role).toBe("guest");
+    expect(membership.role).toBe("client");
 
     const [assignment] = await sql`
       select person_id

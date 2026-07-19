@@ -102,7 +102,7 @@ test.describe("Booking operations integration", () => {
       on conflict (id) do update set name = excluded.name, email = excluded.email
     `;
     await sql`insert into organizations (id, name, slug, currency) values (${organizationId}, 'Booking Operations Lab', 'booking-operations-lab', 'GBP'), (${foreignOrganizationId}, 'Foreign Booking Operations', 'foreign-booking-operations', 'GBP')`;
-    await sql`insert into organization_members (organization_id, user_id, role) values (${organizationId}, ${managerUserId}, 'admin'), (${organizationId}, ${artistUserId}, 'member'), (${organizationId}, ${unassignedUserId}, 'member'), (${organizationId}, ${coloristUserId}, 'member'), (${organizationId}, ${guestUserId}, 'guest')`;
+    await sql`insert into organization_members (organization_id, user_id, role) values (${organizationId}, ${managerUserId}, 'admin'), (${organizationId}, ${artistUserId}, 'member'), (${organizationId}, ${unassignedUserId}, 'member'), (${organizationId}, ${coloristUserId}, 'member'), (${organizationId}, ${guestUserId}, 'client')`;
     await sql`
       insert into organization_role_policies (organization_id, role, label, permissions) values
         (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb),
@@ -114,7 +114,7 @@ test.describe("Booking operations integration", () => {
         (${artistPersonId}, ${organizationId}, ${artistUserId}, 'Booking Operations Artist', 'booking-operations-artist@postpilot.test', 'editor'),
         (${unassignedPersonId}, ${organizationId}, ${unassignedUserId}, 'Booking Operations Unassigned', 'booking-operations-unassigned@postpilot.test', 'editor'),
         (${coloristPersonId}, ${organizationId}, ${coloristUserId}, 'Booking Operations Colourist', 'booking-operations-colourist@postpilot.test', 'colorist'),
-        (${guestPersonId}, ${organizationId}, ${guestUserId}, 'Booking Operations Guest', 'booking-operations-guest@postpilot.test', 'guest')
+        (${guestPersonId}, ${organizationId}, ${guestUserId}, 'Booking Operations Guest', 'booking-operations-guest@postpilot.test', 'client')
     `;
     await sql`insert into rooms (id, organization_id, name, type) values (${roomOneId}, ${organizationId}, 'Operations Edit 1', 'edit_bay'), (${roomTwoId}, ${organizationId}, 'Operations Edit 2', 'edit_bay'), (${colorRoomId}, ${organizationId}, 'Operations Colour', 'color_suite'), (${mixRoomId}, ${organizationId}, 'Operations Mix', 'mix_room'), (${qcRoomId}, ${organizationId}, 'Operations QC', 'qc_room'), (${officeRoomId}, ${organizationId}, 'Operations Office', 'office')`;
     await sql`insert into rooms (id, organization_id, name, type) values (${foreignRoomId}, ${foreignOrganizationId}, 'Foreign Edit 1', 'edit_bay')`;

@@ -19,7 +19,7 @@ export async function getGuestAccountForBooking(organizationId: string, personId
       eq(people.id, personId),
       eq(people.organizationId, organizationId),
       eq(people.isActive, true),
-      eq(organizationMembers.role, "guest"),
+      eq(organizationMembers.role, "client"),
     ))
     .limit(1);
   return guest ?? null;

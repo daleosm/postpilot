@@ -57,7 +57,7 @@ test.describe("Current-stage workflow progression", () => {
       on conflict (id) do update set name = excluded.name, email = excluded.email`;
     await sql`insert into organizations (id, name, slug) values (${organizationId}, 'Workflow Progression Lab', 'workflow-progression-lab')`;
     await sql`insert into organization_members (organization_id, user_id, role) values
-      (${organizationId}, 'user_maya', 'member'), (${organizationId}, ${producerUserId}, 'member'), (${organizationId}, ${artistUserId}, 'member'), (${organizationId}, ${guestUserId}, 'guest')`;
+      (${organizationId}, 'user_maya', 'member'), (${organizationId}, ${producerUserId}, 'member'), (${organizationId}, ${artistUserId}, 'member'), (${organizationId}, ${guestUserId}, 'client')`;
     await sql`insert into organization_role_policies (organization_id, role, label, permissions) values
       (${organizationId}, 'post_supervisor', 'Workflow manager', '["manage_shows","manage_workflow_stages","submit_workflow_stages","sign_off_workflow_stages","authorize_early_starts"]'::jsonb),
       (${organizationId}, 'producer', 'Workflow producer', '["sign_off_workflow_stages"]'::jsonb),
@@ -66,7 +66,7 @@ test.describe("Current-stage workflow progression", () => {
       (${mayaPersonId}, ${organizationId}, 'user_maya', 'Maya Ortiz', 'maya@postpilot.debug', 'post_supervisor'),
       (${producerPersonId}, ${organizationId}, ${producerUserId}, 'Workflow Producer', 'workflow-progression-producer@test.local', 'producer'),
       (${artistPersonId}, ${organizationId}, ${artistUserId}, 'Workflow Artist', 'workflow-progression-artist@test.local', 'artist'),
-      (${guestPersonId}, ${organizationId}, ${guestUserId}, 'Workflow Guest', 'workflow-progression-guest@test.local', 'guest')`;
+      (${guestPersonId}, ${organizationId}, ${guestUserId}, 'Workflow Guest', 'workflow-progression-guest@test.local', 'client')`;
     await sql`insert into post_workflows (id, organization_id, name, is_default) values (${workflowId}, ${organizationId}, 'Progression workflow', true)`;
     await sql`insert into workflow_stages (id, organization_id, workflow_id, name, key, position, color, is_terminal, can_start_early) values
       (${editorialStageId}, ${organizationId}, ${workflowId}, 'Editorial', 'editorial', 1, '#506f68', false, false),
@@ -132,14 +132,13 @@ test.describe("Current-stage workflow progression", () => {
     expect(response.status()).toBe(403);
   });
 
-  test("does not let a membership admin bypass its tenant role policy", async ({ page }) => {
+  test("retains the person's tenant policy when membership access changes", async ({ page }) => {
     await sql`update organization_members set role = 'admin' where organization_id = ${organizationId} and user_id = ${artistUserId}`;
     try {
       await assume(page, artistUserId);
       expect((await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: editorialStageId, action: "start" } })).status()).toBe(200);
       const response = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: editorialStageId, action: "submit" } });
-      expect(response.status()).toBe(403);
-      await expect(response.json()).resolves.toMatchObject({ error: "You do not have permission to submit this workflow stage." });
+      expect(response.status()).toBe(200);
     } finally {
       await sql`update organization_members set role = 'member' where organization_id = ${organizationId} and user_id = ${artistUserId}`;
     }

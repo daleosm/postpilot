@@ -34,7 +34,7 @@ function normalizePermissions(values: readonly string[]): Permission[] {
   return [...new Set(values.map(normalizePermission).filter((permission): permission is Permission => Boolean(permission)))];
 }
 
-/** Roles are tenant data, apart from the fixed external Guest role. */
+/** Roles are tenant data, apart from the fixed external Client role. */
 export async function getTenantRolePolicies(organizationId: string): Promise<TenantRolePolicy[]> {
   if (!db) return [clientRolePolicy];
   const policies = await db.select({ role: organizationRolePolicies.role, label: organizationRolePolicies.label, permissions: organizationRolePolicies.permissions })
@@ -61,7 +61,7 @@ export async function can(permission: Permission | string) {
 
 /**
  * Episode management is reserved for internal memberships. Tenant role policies
- * remain configurable, but a guest membership never becomes a scheduling or
+ * remain configurable, but a client membership never becomes a scheduling or
  * editorial-management account merely because a broad permission was assigned.
  */
 export async function canManageEpisodes() {
@@ -108,7 +108,7 @@ export async function canSignOffWorkflowTrack(episodeId: string) {
 }
 
 /**
- * Managers can view every episode, except guest memberships. Guests are always
+ * Managers can view every episode, except client memberships. Clients are always
  * limited to episodes where they are part of the episode team (or hold one of
  * the legacy episode assignment fields).
  */

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 const migration = readFileSync(resolve(process.cwd(), "drizzle/0101_episode_workflow_legacy_review.sql"), "utf8");
+const clientRenameMigration = readFileSync(resolve(process.cwd(), "drizzle/0108_rename_guest_to_client.sql"), "utf8");
 
 test("workflow backfill infers progress only from a valid legacy stage pointer", () => {
   assert.match(migration, /WHEN valid_current_stage_id IS NULL THEN 'not_started'/);
@@ -20,4 +21,8 @@ test("workflow backfill creates tenant-scoped review records for ambiguous legac
   assert.match(migration, /Legacy workflow stage is not part of the tenant default workflow/);
   assert.match(migration, /Legacy episode status says delivered; verify the terminal workflow track/);
   assert.match(migration, /ON CONFLICT \("episode_id"\) DO NOTHING/);
+});
+
+test("the external membership enum has an explicit Guest-to-Client migration", () => {
+  assert.match(clientRenameMigration, /ALTER TYPE "organization_role" RENAME VALUE 'guest' TO 'client'/);
 });

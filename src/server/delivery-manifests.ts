@@ -82,7 +82,7 @@ function deadlineFromEpisode(deadline: Date | null, offsetDays: number | null) {
 async function requireDeliveryCapability(permission: "manage_delivery_profiles" | "manage_episode_manifests" | "update_delivery_items" | "confirm_delivery_receipt", message: string) {
   const context = await getActiveOrganizationContext();
   if (!context?.organization) throw new DeliveryManifestError(401, "No active post house.");
-  if (context.organization.role === "guest" || !(await can(permission))) throw new DeliveryManifestError(403, message);
+  if (context.organization.role === "client" || !(await can(permission))) throw new DeliveryManifestError(403, message);
   return { organizationId: context.organization.organizationId, userId: context.userId, personId: context.person?.id ?? null };
 }
 
@@ -184,7 +184,7 @@ export async function listDeliveryRecipientContactsForShow(organizationId: strin
 export async function listActiveDeliveryRecipientContacts(episodeId: string) {
   const context = await getActiveOrganizationContext();
   if (!context?.organization) throw new DeliveryManifestError(401, "No active post house.");
-  if (context.organization.role === "guest" || !((await can("manage_episode_manifests")) || (await can("update_delivery_items")))) {
+  if (context.organization.role === "client" || !((await can("manage_episode_manifests")) || (await can("update_delivery_items")))) {
     throw new DeliveryManifestError(403, "Your role cannot choose delivery recipients.");
   }
   const episode = await getEpisodeScope(context.organization.organizationId, episodeId);
@@ -542,7 +542,7 @@ export async function shareActiveEpisodeDeliveryManifest(episodeId: string, payl
       .where(and(eq(people.id, parsed.data.personId), eq(people.organizationId, context.organizationId))).limit(1),
   ]);
   if (!manifest[0]) throw new DeliveryManifestError(404, "Delivery manifest not found.");
-  if (!target[0] || target[0].membershipRole !== "guest") throw new DeliveryManifestError(404, "External recipient not found in this post house.");
+  if (!target[0] || target[0].membershipRole !== "client") throw new DeliveryManifestError(404, "External recipient not found in this post house.");
   const [share] = await getDb().insert(episodeDeliveryManifestShares).values({
     organizationId: context.organizationId,
     episodeDeliveryManifestId: manifest[0].id,

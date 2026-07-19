@@ -11,7 +11,7 @@ export default async function EpisodesPage({ searchParams }: { searchParams: Pro
   if (!(mayManageShows || mayViewAssigned)) redirect(await roleHome());
   const [activeShow, query] = await Promise.all([getActiveShowName(), searchParams]);
   const seasonId = query.season;
-  const canSeeAllEpisodes = mayManageShows && organizationContext?.organization?.role !== "guest";
+  const canSeeAllEpisodes = mayManageShows && organizationContext?.organization?.role !== "client";
   const data = await getEpisodesData(); const visibleEpisodes = canSeeAllEpisodes ? data.episodes : (await Promise.all(data.episodes.map(async (episode) => (await isAssignedToEpisode(episode.id)) ? episode : null))).filter((episode): episode is EpisodeTableRow => Boolean(episode)); const episodes = visibleEpisodes.filter((episode) => seasonId ? episode.seasonId === seasonId : !activeShow || episode.showTitle === activeShow); const seasons = seasonId ? data.seasons.filter((season) => season.id === seasonId) : activeShow ? data.seasons.filter((season) => season.label.startsWith(`${activeShow} ·`)) : data.seasons;
   return <div className="space-y-5"><header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-xs font-medium uppercase tracking-[0.12em] text-[#7c827f]">Editorial pipeline</p><h1 className="mt-2 text-[27px] font-semibold tracking-[-0.045em] text-[#202524]">Episodes</h1><p className="mt-1 text-sm text-[#747977]">Manage the current workflow stage, lock, delivery, and QC for each episode.</p></div>{canSeeAllEpisodes && <EpisodeFormDialog seasons={seasons} people={data.people} />}</header><EpisodesTable episodes={episodes} /></div>;
 }
