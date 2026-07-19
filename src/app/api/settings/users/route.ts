@@ -7,7 +7,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { organizationMembers, organizationRolePolicies, people, users } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can, guestRolePolicy } from "@/lib/permissions";
+import { can, clientRolePolicy } from "@/lib/permissions";
 import { createOrganizationUserSchema } from "@/lib/validations/entities";
 
 /** Creates tenant access plus a tenant-local person record. The global user row is reused by email when appropriate. */
@@ -19,12 +19,12 @@ export async function POST(request: Request) {
   if (!context?.organization) return NextResponse.json({ error: "No active post house." }, { status: 401 });
 
   const organizationId = context.organization.organizationId;
-  const input = { ...parsed.data, email: parsed.data.email.toLowerCase().trim(), personRole: parsed.data.membershipRole === "guest" ? guestRolePolicy.role : parsed.data.personRole };
-  if (input.membershipRole !== "guest" && input.personRole === guestRolePolicy.role) return NextResponse.json({ error: "Guest is reserved for guest access." }, { status: 400 });
+  const input = { ...parsed.data, email: parsed.data.email.toLowerCase().trim(), personRole: parsed.data.membershipRole === "client" ? clientRolePolicy.role : parsed.data.personRole };
+  if (input.membershipRole !== "client" && input.personRole === clientRolePolicy.role) return NextResponse.json({ error: "Client is reserved for client access." }, { status: 400 });
   const db = getDb();
   const [policy] = await db.select({ role: organizationRolePolicies.role }).from(organizationRolePolicies)
     .where(and(eq(organizationRolePolicies.organizationId, organizationId), eq(organizationRolePolicies.role, input.personRole))).limit(1);
-  if (!policy && input.personRole !== guestRolePolicy.role) return NextResponse.json({ error: "Select a role configured for this post house." }, { status: 400 });
+  if (!policy && input.personRole !== clientRolePolicy.role) return NextResponse.json({ error: "Select a role configured for this post house." }, { status: 400 });
 
   const [existingUser] = await db.select({ id: users.id }).from(users).where(eq(users.email, input.email)).limit(1);
   const userId = existingUser?.id ?? randomUUID();

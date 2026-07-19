@@ -87,7 +87,7 @@ const stages = [
 ] as const;
 
 type PersonRole = string;
-type MembershipRole = "owner" | "admin" | "member" | "guest";
+type MembershipRole = "owner" | "admin" | "member" | "client";
 type PersonSeed = { name: string; email: string; role: PersonRole; userId?: string; membershipRole?: MembershipRole; isFreelancer?: boolean };
 type TenantSeed = {
   number: number;
@@ -111,7 +111,7 @@ const specialistRoleSeeds: Array<{ role: PersonRole; title: string }> = [
 ];
 
 const defaultRolePolicies: Record<string, string[]> = {
-  guest: ["view_assigned"],
+  client: ["sign_off_work"],
   post_supervisor: ["manage_shows", "manage_bookings", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_workflow_configuration", "manage_workflow_stages", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "manage_qc", "waive_qc", "authorize_early_starts", "authorize_delivery_exceptions", "manage_delivery_profiles", "manage_episode_manifests", "update_delivery_items", "confirm_delivery_receipt", "manage_budget", "manage_users", "request_catering", "view_assigned"],
   producer: ["manage_shows", "manage_bookings", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_workflow_configuration", "manage_workflow_stages", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "manage_qc", "waive_qc", "authorize_early_starts", "authorize_delivery_exceptions", "manage_delivery_profiles", "manage_episode_manifests", "update_delivery_items", "confirm_delivery_receipt", "manage_budget", "manage_users", "request_catering", "view_assigned"],
   head_of_production: ["manage_shows", "manage_bookings", "manage_work_orders", "manage_budget", "request_catering", "view_assigned"],
@@ -347,10 +347,10 @@ async function seedTenant(tenant: TenantSeed) {
   // Maya is intentionally the only shared debug platform administrator.
   const sourcePeople: PersonSeed[] = [...tenant.people, ...specialistRoleSeeds.map((specialist, index) => ({ name: `${tenant.name} ${specialist.title}`, email: `${specialist.role}.${index + 1}@${tenant.slug}.test`, role: specialist.role, isFreelancer: true }))];
   const tenantPeople = sourcePeople.map((person, index) => {
-    const membershipRole = person.membershipRole ?? (person.role === "client" || person.role === "director" ? "guest" : "member") as MembershipRole;
+    const membershipRole = person.membershipRole ?? (person.role === "client" || person.role === "director" ? "client" : "member") as MembershipRole;
     return {
       ...person,
-      role: membershipRole === "guest" ? "guest" : person.role,
+      role: membershipRole === "client" ? "client" : person.role,
       userId: person.userId ?? `user_${tenant.slug.replaceAll("-", "_")}_${index + 1}`,
       membershipRole,
     };
@@ -372,7 +372,7 @@ async function seedTenant(tenant: TenantSeed) {
     id: personId(index + 1), organizationId: tenant.id, name: person.name, email: person.email, role: person.role, userId: person.userId,
     availability: (index % 5 === 0 ? "limited" : "available") as "limited" | "available", isFreelancer: person.isFreelancer ?? false, hourlyRate: String(65 + index * 8), dayRate: String(520 + index * 55),
   })));
-  await db.insert(organizationRolePolicies).values([...new Set(tenantPeople.map((person) => person.role).filter((role) => role !== "guest"))].map((role) => ({ organizationId: tenant.id, role, label: roleLabel(role), permissions: defaultRolePolicies[role] ?? [] })));
+  await db.insert(organizationRolePolicies).values([...new Set(tenantPeople.map((person) => person.role).filter((role) => role !== "client"))].map((role) => ({ organizationId: tenant.id, role, label: roleLabel(role), permissions: defaultRolePolicies[role] ?? [] })));
 
   await db.insert(postWorkflows).values({ id: workflowId, organizationId: tenant.id, name: tenant.workflowName, description: tenant.workflowDescription, isDefault: true });
   await db.insert(workflowStages).values(stages.map(([name, key, color], index) => ({ id: stageId(index + 1), organizationId: tenant.id, workflowId, name, key, color, position: index + 1, isTerminal: key === "archive_closeout", canStartEarly: false, requiresQcPass: key === "quality_control", deliveryGate: (key === "delivery" ? "facility_dispatch" : key === "client_network_acceptance" ? "client_acceptance" : "none") as "none" | "facility_dispatch" | "client_acceptance" })));

@@ -19,7 +19,7 @@ const auditColumns = {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 };
 
-export const organizationRole = pgEnum("organization_role", ["owner", "admin", "member", "guest"]);
+export const organizationRole = pgEnum("organization_role", ["owner", "admin", "member", "client"]);
 export const episodeStatus = pgEnum("episode_status", ["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"]);
 /** The one live operational state for an episode's current workflow stage. */
 export const episodeWorkflowStatus = pgEnum("episode_workflow_status", ["not_started", "in_progress", "awaiting_sign_off", "blocked", "complete"]);

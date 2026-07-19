@@ -12,8 +12,8 @@ import { getActiveOrganizationContext } from "@/lib/organizations";
 export const permissions = ["manage_settings", "manage_production", "do_assigned_work", "sign_off_work", "manage_qc_delivery", "manage_commercial", "manage_catering", "view_all_operations"] as const;
 export type Permission = string;
 export type TenantRolePolicy = { role: string; label: string; permissions: Permission[] };
-export const guestRolePolicy: TenantRolePolicy = { role: "guest", label: "Guest", permissions: ["sign_off_work"] };
-export const isFixedRole = (role: string) => role === guestRolePolicy.role;
+export const clientRolePolicy: TenantRolePolicy = { role: "client", label: "Client", permissions: ["sign_off_work"] };
+export const isFixedRole = (role: string) => role === clientRolePolicy.role;
 
 /**
  * A short-lived compatibility bridge for policies saved before stages became
@@ -36,11 +36,11 @@ function normalizePermissions(values: readonly string[]): Permission[] {
 
 /** Roles are tenant data, apart from the fixed external Guest role. */
 export async function getTenantRolePolicies(organizationId: string): Promise<TenantRolePolicy[]> {
-  if (!db) return [guestRolePolicy];
+  if (!db) return [clientRolePolicy];
   const policies = await db.select({ role: organizationRolePolicies.role, label: organizationRolePolicies.label, permissions: organizationRolePolicies.permissions })
     .from(organizationRolePolicies).where(eq(organizationRolePolicies.organizationId, organizationId));
   const configurable = policies.filter((policy) => !isFixedRole(policy.role)).map((policy) => ({ role: policy.role, label: policy.label, permissions: normalizePermissions(policy.permissions) }));
-  return [guestRolePolicy, ...configurable];
+  return [clientRolePolicy, ...configurable];
 }
 
 export async function getCurrentPerson() {
@@ -53,7 +53,7 @@ export async function can(permission: Permission | string) {
   if (!context?.organization) return false;
   const normalized = normalizePermission(permission);
   if (!normalized) return false;
-  if (context.organization.role === "guest") return guestRolePolicy.permissions.includes(normalized);
+  if (context.organization.role === "client") return clientRolePolicy.permissions.includes(normalized);
   if (!context.person) return false;
   const policy = (await getTenantRolePolicies(context.organization.organizationId)).find((item) => item.role === context.person?.role);
   return policy?.permissions.includes(normalized) ?? false;
@@ -66,30 +66,30 @@ export async function can(permission: Permission | string) {
  */
 export async function canManageEpisodes() {
   const context = await getActiveOrganizationContext();
-  return context?.organization?.role !== "guest" && await can("manage_shows");
+  return context?.organization?.role !== "client" && await can("manage_shows");
 }
 
 /** Facility scheduling and time-cost controls are internal post-house actions. */
 export async function canManageBookings() {
   const context = await getActiveOrganizationContext();
-  return context?.organization?.role !== "guest" && await can("manage_bookings");
+  return context?.organization?.role !== "client" && await can("manage_bookings");
 }
 
 export async function canRecordBookingActuals() {
   const context = await getActiveOrganizationContext();
-  return context?.organization?.role !== "guest" && await can("update_assigned_work");
+  return context?.organization?.role !== "client" && await can("update_assigned_work");
 }
 
 /** Workflow configuration belongs to a tenant capability, not the shows module. */
 export async function canManageWorkflowConfiguration() {
   const context = await getActiveOrganizationContext();
-  return context?.organization?.role !== "guest" && await can("manage_workflow_configuration");
+  return context?.organization?.role !== "client" && await can("manage_workflow_configuration");
 }
 
 /** A manager may update any accessible episode; artists may update only assigned work. */
 export async function canUpdateWorkflowWork(episodeId: string) {
   const context = await getActiveOrganizationContext();
-  if (!context?.organization || context.organization.role === "guest") return false;
+  if (!context?.organization || context.organization.role === "client") return false;
   if (await can("manage_workflow_stages")) return true;
   return await can("update_assigned_workflow_work") && await isAssignedToEpisode(episodeId);
 }
@@ -98,7 +98,7 @@ export async function canUpdateWorkflowWork(episodeId: string) {
  * does not by itself allow someone to put it into the formal sign-off queue. */
 export async function canSubmitWorkflowTrack(episodeId: string) {
   const context = await getActiveOrganizationContext();
-  if (!context?.organization || context.organization.role === "guest") return false;
+  if (!context?.organization || context.organization.role === "client") return false;
   return await can("submit_workflow_stages") && await isAssignedToEpisode(episodeId);
 }
 
@@ -116,7 +116,7 @@ export async function isAssignedToEpisode(episodeId: string) {
   const context = await getActiveOrganizationContext();
   const current = context?.person;
   if (!context?.organization || !current || !db) return false;
-  if (context.organization.role !== "guest" && ((await can("manage_shows")) || (await can("manage_workflow_stages")))) return true;
+  if (context.organization.role !== "client" && ((await can("manage_shows")) || (await can("manage_workflow_stages")))) return true;
   const [assignment] = await db
     .select({ id: episodes.id })
     .from(episodes)

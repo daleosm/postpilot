@@ -8,7 +8,7 @@ declare module "next-auth" {
       organizationId: string;
       organizationName: string;
       organizationSlug: string;
-      role: "owner" | "admin" | "member" | "guest";
+      role: "owner" | "admin" | "member" | "client";
     }>;
     user: {
       id: string;

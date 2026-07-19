@@ -757,6 +757,13 @@
       "when": 1785943000000,
       "tag": "0107_stage_capability_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1785944000000,
+      "tag": "0108_rename_guest_to_client",
+      "breakpoints": true
     }
   ]
 }

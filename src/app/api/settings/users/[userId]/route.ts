@@ -5,7 +5,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { organizationMembers, organizationRolePolicies, people } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can, guestRolePolicy } from "@/lib/permissions";
+import { can, clientRolePolicy } from "@/lib/permissions";
 import { updateOrganizationUserSchema } from "@/lib/validations/entities";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ userId: string }> }) {
@@ -17,8 +17,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ us
   const { userId } = await params;
   if (userId === context.userId && parsed.data.membershipRole !== "admin") return NextResponse.json({ error: "You cannot remove your own administrator access." }, { status: 409 });
   const organizationId = context.organization.organizationId;
-  const input = { ...parsed.data, personRole: parsed.data.membershipRole === "guest" ? guestRolePolicy.role : parsed.data.personRole };
-  if (input.membershipRole !== "guest" && input.personRole === guestRolePolicy.role) return NextResponse.json({ error: "Guest is reserved for guest access." }, { status: 400 });
+  const input = { ...parsed.data, personRole: parsed.data.membershipRole === "client" ? clientRolePolicy.role : parsed.data.personRole };
+  if (input.membershipRole !== "client" && input.personRole === clientRolePolicy.role) return NextResponse.json({ error: "Client is reserved for client access." }, { status: 400 });
   const db = getDb();
   const [[membership], [policy]] = await Promise.all([
     db.select({ userId: organizationMembers.userId, membershipRole: organizationMembers.role }).from(organizationMembers).where(and(eq(organizationMembers.organizationId, organizationId), eq(organizationMembers.userId, userId))).limit(1),
@@ -26,7 +26,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ us
   ]);
   if (!membership) return NextResponse.json({ error: "User not found in this post house." }, { status: 404 });
   if (membership.membershipRole === "owner") return NextResponse.json({ error: "The post-house owner access cannot be changed here." }, { status: 403 });
-  if (!policy && input.personRole !== guestRolePolicy.role) return NextResponse.json({ error: "Select a role configured for this post house." }, { status: 400 });
+  if (!policy && input.personRole !== clientRolePolicy.role) return NextResponse.json({ error: "Select a role configured for this post house." }, { status: 400 });
 
   await db.transaction(async (tx) => {
     await tx.update(organizationMembers).set({ role: input.membershipRole }).where(and(eq(organizationMembers.organizationId, organizationId), eq(organizationMembers.userId, userId)));
