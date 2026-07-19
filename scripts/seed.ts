@@ -19,6 +19,7 @@ import {
   episodeDeliveryItems,
   episodeDeliveryManifests,
   episodeTeamAssignments,
+  episodeWorkflowSigners,
   episodes,
   invoiceSettings,
   organizationMembers,
@@ -113,24 +114,24 @@ const specialistRoleSeeds: Array<{ role: PersonRole; title: string }> = [
 
 const defaultRolePolicies: Record<string, string[]> = {
   guest: ["view_assigned"],
-  post_supervisor: ["manage_shows", "manage_bookings", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "authorize_delivery_exceptions", "manage_delivery_profiles", "manage_episode_manifests", "update_delivery_items", "confirm_delivery_receipt", "manage_budget", "manage_users", "request_catering", "view_assigned"],
-  producer: ["manage_shows", "manage_bookings", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_qc", "waive_qc", "authorize_delivery_exceptions", "manage_delivery_profiles", "manage_episode_manifests", "update_delivery_items", "confirm_delivery_receipt", "manage_budget", "manage_users", "request_catering", "view_assigned"],
+  post_supervisor: ["manage_shows", "manage_bookings", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_workflow_configuration", "manage_workflow_stages", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "manage_qc", "waive_qc", "authorize_early_starts", "authorize_delivery_exceptions", "manage_delivery_profiles", "manage_episode_manifests", "update_delivery_items", "confirm_delivery_receipt", "manage_budget", "manage_users", "request_catering", "view_assigned"],
+  producer: ["manage_shows", "manage_bookings", "approve_time", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_workflow_configuration", "manage_workflow_stages", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "manage_qc", "waive_qc", "authorize_early_starts", "authorize_delivery_exceptions", "manage_delivery_profiles", "manage_episode_manifests", "update_delivery_items", "confirm_delivery_receipt", "manage_budget", "manage_users", "request_catering", "view_assigned"],
   head_of_production: ["manage_shows", "manage_bookings", "manage_work_orders", "manage_budget", "request_catering", "view_assigned"],
   finance: ["manage_budget", "approve_time", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "view_assigned"],
   runner: ["request_catering", "manage_catering", "view_assigned"],
-  qc: ["update_assigned_work", "manage_qc", "verify_qc", "request_catering", "view_assigned"],
-  editor: ["update_assigned_work", "request_catering", "view_assigned"],
-  assistant_editor: ["update_assigned_work", "request_catering", "view_assigned"],
-  online_editor: ["manage_shows", "update_assigned_work", "request_catering", "view_assigned"],
-  colorist: ["update_assigned_work", "request_catering", "view_assigned"],
-  sound_mixer: ["update_assigned_work", "request_catering", "view_assigned"],
-  supervising_sound_editor: ["update_assigned_work", "request_catering", "view_assigned"],
-  rerecording_mixer: ["update_assigned_work", "request_catering", "view_assigned"],
-  vfx_coordinator: ["update_assigned_work", "request_catering", "view_assigned"],
-  vfx_supervisor: ["update_assigned_work", "request_catering", "view_assigned"],
-  director: ["view_assigned"],
-  network_client_executive: ["view_assigned"],
-  network_client_representative: ["view_assigned"],
+  qc: ["update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "manage_qc", "verify_qc", "request_catering", "view_assigned"],
+  editor: ["update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "request_catering", "view_assigned"],
+  assistant_editor: ["update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "request_catering", "view_assigned"],
+  online_editor: ["manage_shows", "update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "request_catering", "view_assigned"],
+  colorist: ["update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "request_catering", "view_assigned"],
+  sound_mixer: ["update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "request_catering", "view_assigned"],
+  supervising_sound_editor: ["update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "request_catering", "view_assigned"],
+  rerecording_mixer: ["update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "request_catering", "view_assigned"],
+  vfx_coordinator: ["update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "request_catering", "view_assigned"],
+  vfx_supervisor: ["update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "request_catering", "view_assigned"],
+  director: ["sign_off_workflow_stages", "view_assigned"],
+  network_client_executive: ["sign_off_workflow_stages", "view_assigned"],
+  network_client_representative: ["sign_off_workflow_stages", "view_assigned"],
   client: ["view_assigned", "view_shared_delivery_status"],
 };
 
@@ -378,7 +379,7 @@ async function seedTenant(tenant: TenantSeed) {
   await db.insert(organizationRolePolicies).values([...new Set(tenantPeople.map((person) => person.role).filter((role) => role !== "guest"))].map((role) => ({ organizationId: tenant.id, role, label: roleLabel(role), permissions: defaultRolePolicies[role] ?? [] })));
 
   await db.insert(postWorkflows).values({ id: workflowId, organizationId: tenant.id, name: tenant.workflowName, description: tenant.workflowDescription, isDefault: true });
-  await db.insert(workflowStages).values(stages.map(([name, key, color], index) => ({ id: stageId(index + 1), organizationId: tenant.id, workflowId, name, key, color, position: index + 1, isTerminal: key === "archive_closeout", requiresQcPass: key === "quality_control", deliveryGate: (key === "delivery" ? "facility_dispatch" : key === "client_network_acceptance" ? "client_acceptance" : "none") as "none" | "facility_dispatch" | "client_acceptance" })));
+  await db.insert(workflowStages).values(stages.map(([name, key, color], index) => ({ id: stageId(index + 1), organizationId: tenant.id, workflowId, name, key, color, position: index + 1, isTerminal: key === "archive_closeout", canStartEarly: false, requiresQcPass: key === "quality_control", deliveryGate: (key === "delivery" ? "facility_dispatch" : key === "client_network_acceptance" ? "client_acceptance" : "none") as "none" | "facility_dispatch" | "client_acceptance" })));
   await db.insert(workflowStageApprovalRules).values(stages.map(([, , , approverRole], index) => ({ id: ruleId(index + 1), organizationId: tenant.id, workflowStageId: stageId(index + 1), approverRole, label: `${approverRole.replaceAll("_", " ")} sign-off`, approvalOrder: 1, isRequired: true })));
   await db.insert(workflowStageWorkOrderTemplates).values([
     { id: id(tenant.number, "37", 1), organizationId: tenant.id, workflowStageId: stageId(12), title: "Confirm VFX, graphics and titles turnover", department: "VFX", assigneeRole: "vfx_coordinator", priority: "normal", isBlocking: false, position: 1 },
@@ -434,26 +435,30 @@ async function seedTenant(tenant: TenantSeed) {
     ["review", "needs_attention", 7],
     ["locked", "in_progress", 10],
   ] as const;
+  const episodeWorkflowSeed = new Map<string, { position: number; delivered: boolean; lifecycle: string }>();
   const episodeRows = tenant.shows.flatMap((show, showIndex) => show.episodes.map((title, episodeIndex) => {
     const position = showIndex * 4 + episodeIndex + 1;
     const lifecycle = lifecyclePatterns[(position - 1) % lifecyclePatterns.length] as ["development" | "assembly" | "editor_cut" | "review" | "locked" | "online" | "delivered", "not_started" | "in_progress" | "passed" | "needs_attention", number];
+    const id = episodeId(position);
+    episodeWorkflowSeed.set(id, { position: lifecycle[0] === "delivered" ? 22 : lifecycle[2], delivered: lifecycle[0] === "delivered", lifecycle: lifecycle[0] });
     return {
-      id: episodeId(position), organizationId: tenant.id, seasonId: seasonId(showIndex + 1), workflowStageId: stageId(lifecycle[2]),
+      id, organizationId: tenant.id, seasonId: seasonId(showIndex + 1),
       number: episodeIndex + 1, productionCode: `${show.code}10${episodeIndex + 1}`, title, synopsis: `${title} enters the ${tenant.name} post pipeline.`,
+      // The current stage/status are the live workflow model. The broad
+      // episode status is retained only as legacy compatibility data.
+      workflowStageId: stageId(lifecycle[0] === "delivered" ? 22 : lifecycle[2]),
+      workflowStatus: lifecycle[0] === "delivered" ? "complete" as const : "in_progress" as const,
       status: lifecycle[0], qcStatus: lifecycle[1], assignedProducerId: byRole("producer"), editorId: byRole("editor"), coloristId: byRole("colorist"), soundMixerId: byRole("sound_mixer"),
       airDate: day(25 + position * 7), lockedCutDate: day(-4 + position * 2), deliveryDeadline: at(3 + position * 2, 17),
     };
   }));
-  // One completed episode per post house makes the issued-invoice flow visible
-  // in the debug workspace without weakening the workflow/time export gate.
-  if (episodeRows[5]) episodeRows[5].workflowStageId = stageId(22);
   await db.insert(episodes).values(episodeRows);
   const deliveryManifestEpisodes = episodeRows.slice(0, tenant.shows[0]?.episodes.length ?? 0);
   await db.insert(episodeDeliveryManifests).values(deliveryManifestEpisodes.map((episode, index) => ({ id: deliveryManifestId(index + 1), organizationId: tenant.id, episodeId: episode.id, deliveryProfileId: deliveryProfileId(1), profileName: `${primaryNetwork} network & streamer delivery`, specificationUrl: `https://example.com/${tenant.slug}/delivery-specification`, appliedByUserId: tenantPeople.find((person) => person.role === "post_supervisor")?.userId })));
   await db.insert(episodeDeliveryItems).values(deliveryManifestEpisodes.flatMap((episode, episodeIndex) => deliveryProfileItemsSeed.map((item) => {
     const dueDate = new Date(episode.deliveryDeadline);
     dueDate.setUTCDate(dueDate.getUTCDate() + item.defaultDeadlineOffsetDays);
-    const delivered = episode.status === "delivered";
+    const delivered = episodeWorkflowSeed.get(episode.id)?.delivered ?? false;
     return {
       id: deliveryItemId((episodeIndex + 1) * 20 + item.position), organizationId: tenant.id, episodeDeliveryManifestId: deliveryManifestId(episodeIndex + 1), episodeId: episode.id,
       deliveryProfileItemId: deliveryProfileItemId(item.position), componentType: item.componentType, label: item.label, required: item.required, formatSpecification: item.formatSpecification,
@@ -465,13 +470,14 @@ async function seedTenant(tenant: TenantSeed) {
     };
   })));
   await db.insert(episodeTeamAssignments).values(episodeRows.flatMap((episode, index) => {
-    const roles = ["producer", "editor", "assistant_editor"];
-    if (["locked", "online", "delivered"].includes(episode.status)) roles.push("colorist", "sound_mixer");
+    const roles = ["producer", "editor", "assistant_editor", ...stages.map((stage) => stage[3])];
+    if (["locked", "online", "delivered"].includes(episodeWorkflowSeed.get(episode.id)?.lifecycle ?? "")) roles.push("colorist", "sound_mixer");
     if (index % 3 === 0) roles.push("qc");
     const stagePosition = lifecyclePatterns[index % lifecyclePatterns.length][2];
     if ([5, 7, 21].includes(stagePosition)) roles.push("guest");
-    return roles.map((role) => ({ organizationId: tenant.id, episodeId: episode.id, personId: byRole(role), isLead: true }));
+    return [...new Set(roles)].map((role) => ({ organizationId: tenant.id, episodeId: episode.id, personId: byRole(role), isLead: false }));
   }));
+  await db.insert(episodeWorkflowSigners).values(episodeRows.flatMap((episode) => stages.map((stage, index) => ({ organizationId: tenant.id, episodeId: episode.id, workflowStageApprovalRuleId: ruleId(index + 1), personId: byRole(stage[3]) }))));
 
   await db.insert(rooms).values([
     { id: roomId(1), organizationId: tenant.id, name: tenant.roomNames[0], type: "edit_bay", location: "Editorial floor", capacity: 3 },

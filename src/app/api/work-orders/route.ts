@@ -9,6 +9,7 @@ import { can } from "@/lib/permissions";
 import { missingTenantReferences } from "@/lib/tenant-resources";
 import { createPostWorkOrderSchema } from "@/lib/validations/entities";
 import { ClientPurchaseOrderError, selectApplicableClientPurchaseOrder } from "@/server/client-purchase-orders";
+import { getEpisodeWorkflowState } from "@/server/data/episode-workflow-state";
 
 export async function POST(request: Request) {
   if (!(await can("manage_work_orders"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -23,12 +24,13 @@ export async function POST(request: Request) {
   const missing = await missingTenantReferences(organizationId, { episodeId: parsed.data.episodeId, workflowStageId: parsed.data.workflowStageId, bookingId: parsed.data.bookingId, personId: parsed.data.assigneePersonId, companyId: parsed.data.vendorCompanyId });
   if (missing.length) return NextResponse.json({ error: `Invalid ${missing.join(", ")} for this post house.` }, { status: 404 });
   const db = getDb();
-  const [episode] = await db.select({ id: episodes.id, showId: shows.id, clientCompanyId: shows.clientCompanyId, workflowStageId: episodes.workflowStageId }).from(episodes).innerJoin(seasons, eq(episodes.seasonId, seasons.id)).innerJoin(shows, eq(seasons.showId, shows.id)).where(and(eq(episodes.id, parsed.data.episodeId), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId))).limit(1);
+  const [episode] = await db.select({ id: episodes.id, showId: shows.id, clientCompanyId: shows.clientCompanyId }).from(episodes).innerJoin(seasons, eq(episodes.seasonId, seasons.id)).innerJoin(shows, eq(seasons.showId, shows.id)).where(and(eq(episodes.id, parsed.data.episodeId), eq(episodes.organizationId, organizationId), eq(seasons.organizationId, organizationId), eq(shows.organizationId, organizationId))).limit(1);
   if (!episode) return NextResponse.json({ error: "Episode not found for this post house." }, { status: 404 });
+  const workflowState = await getEpisodeWorkflowState(organizationId, episode.id);
   const [[booking], [targetStage], [currentStage], [vendor], [purchaseOrder]] = await Promise.all([
     parsed.data.bookingId ? db.select({ episodeId: bookings.episodeId }).from(bookings).where(and(eq(bookings.id, parsed.data.bookingId), eq(bookings.organizationId, organizationId))).limit(1) : Promise.resolve([]),
     parsed.data.workflowStageId ? db.select({ workflowId: workflowStages.workflowId }).from(workflowStages).where(and(eq(workflowStages.id, parsed.data.workflowStageId), eq(workflowStages.organizationId, organizationId))).limit(1) : Promise.resolve([]),
-    episode.workflowStageId ? db.select({ workflowId: workflowStages.workflowId }).from(workflowStages).where(and(eq(workflowStages.id, episode.workflowStageId), eq(workflowStages.organizationId, organizationId))).limit(1) : Promise.resolve([]),
+    workflowState.primaryStageId ? db.select({ workflowId: workflowStages.workflowId }).from(workflowStages).where(and(eq(workflowStages.id, workflowState.primaryStageId), eq(workflowStages.organizationId, organizationId))).limit(1) : Promise.resolve([]),
     parsed.data.vendorCompanyId ? db.select({ type: crmCompanies.type }).from(crmCompanies).where(and(eq(crmCompanies.id, parsed.data.vendorCompanyId), eq(crmCompanies.organizationId, organizationId))).limit(1) : Promise.resolve([]),
     parsed.data.purchaseOrderId ? db.select({ vendorCompanyId: purchaseOrders.vendorCompanyId, showId: purchaseOrders.showId, episodeId: purchaseOrders.episodeId, status: purchaseOrders.status }).from(purchaseOrders).where(and(eq(purchaseOrders.id, parsed.data.purchaseOrderId), eq(purchaseOrders.organizationId, organizationId))).limit(1) : Promise.resolve([]),
   ]);

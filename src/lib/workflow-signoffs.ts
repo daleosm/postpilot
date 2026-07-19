@@ -1,25 +1,32 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { episodeTeamAssignments, people } from "@/lib/db/schema";
+import { episodeTeamAssignments, episodeWorkflowSigners, people } from "@/lib/db/schema";
 
-type SignOffRule = { id: string; approverRole: string };
-type EpisodeSigner = { personId: string; name: string; role: string; isSigner: boolean };
+type SignOffRule = { id: string };
+type EpisodeSigner = { personId: string; name: string; role: string };
 
-/** A workflow role resolves only to its explicitly selected episode-team signer. */
+/** Resolves configured sign-off slots to their explicitly selected episode-team people. */
 export async function resolveEpisodeWorkflowSigners(organizationId: string, episodeId: string, rules: readonly SignOffRule[]) {
+  if (!rules.length) return [];
   const db = getDb();
-  const team = await db.select({ personId: people.id, name: people.name, role: people.role, isSigner: episodeTeamAssignments.isLead })
-    .from(episodeTeamAssignments)
-    .innerJoin(people, eq(episodeTeamAssignments.personId, people.id))
-    .where(and(eq(episodeTeamAssignments.organizationId, organizationId), eq(episodeTeamAssignments.episodeId, episodeId), eq(people.organizationId, organizationId)));
-
-  return rules.map((rule) => {
-    const candidates: EpisodeSigner[] = team.filter((person) => person.role === rule.approverRole);
-    const explicit = candidates.filter((person) => person.isSigner);
-    const signer = explicit.length === 1 ? explicit[0] : null;
-    return { ruleId: rule.id, approverRole: rule.approverRole, signer };
-  });
+  const assignments = await db.select({
+    ruleId: episodeWorkflowSigners.workflowStageApprovalRuleId,
+    personId: people.id,
+    name: people.name,
+    role: people.role,
+  }).from(episodeWorkflowSigners)
+    .innerJoin(people, eq(episodeWorkflowSigners.personId, people.id))
+    .innerJoin(episodeTeamAssignments, and(eq(episodeTeamAssignments.episodeId, episodeWorkflowSigners.episodeId), eq(episodeTeamAssignments.personId, episodeWorkflowSigners.personId)))
+    .where(and(
+      eq(episodeWorkflowSigners.organizationId, organizationId),
+      eq(episodeWorkflowSigners.episodeId, episodeId),
+      inArray(episodeWorkflowSigners.workflowStageApprovalRuleId, rules.map((rule) => rule.id)),
+      eq(people.organizationId, organizationId),
+      eq(episodeTeamAssignments.organizationId, organizationId),
+    ));
+  const byRuleId = new Map(assignments.map((assignment) => [assignment.ruleId, { personId: assignment.personId, name: assignment.name, role: assignment.role } satisfies EpisodeSigner]));
+  return rules.map((rule) => ({ ruleId: rule.id, signer: byRuleId.get(rule.id) ?? null }));
 }

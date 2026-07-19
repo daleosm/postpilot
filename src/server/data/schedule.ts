@@ -8,7 +8,7 @@ import { listEpisodes } from "./episodes";
 
 export async function listSchedule(organizationId: string, from: Date, to: Date, personId?: string) {
   const db = getDb();
-  return db.select({
+  const rows = await db.select({
     id: bookings.id, title: bookings.title, startsAt: bookings.startsAt, endsAt: bookings.endsAt, actualStartsAt: bookings.actualStartsAt, actualEndsAt: bookings.actualEndsAt, approvedOvertimeMinutes: bookings.approvedOvertimeMinutes, setupMinutes: bookings.setupMinutes, handoverMinutes: bookings.handoverMinutes, isOption: bookings.isOption, optionRank: bookings.optionRank, status: bookings.status, bookingType: bookings.bookingType,
     roomId: bookings.roomId, episodeId: bookings.episodeId, personId: bookings.personId, guestPersonId: bookings.guestPersonId, notes: bookings.notes,
     roomName: rooms.name, roomType: rooms.type, episodeTitle: episodes.title, episodeNumber: episodes.number, episodeProductionCode: episodes.productionCode, personName: people.name,
@@ -18,6 +18,11 @@ export async function listSchedule(organizationId: string, from: Date, to: Date,
     .leftJoin(people, and(eq(bookings.personId, people.id), eq(people.organizationId, organizationId)))
     .where(and(eq(bookings.organizationId, organizationId), personId ? eq(bookings.personId, personId) : undefined, sql`${bookings.startsAt} - (${bookings.setupMinutes} * interval '1 minute') < ${to.toISOString()}::timestamptz`, sql`${bookings.endsAt} + (${bookings.handoverMinutes} * interval '1 minute') > ${from.toISOString()}::timestamptz`))
     .orderBy(asc(bookings.startsAt));
+  const episodeIds = [...new Set(rows.flatMap((row) => row.episodeId ? [row.episodeId] : []))];
+  if (!episodeIds.length) return rows.map((row) => ({ ...row, workflowState: null }));
+  const states = await listEpisodes(organizationId);
+  const byEpisodeId = new Map(states.map((episode) => [episode.id, episode.workflowState]));
+  return rows.map((row) => ({ ...row, workflowState: row.episodeId ? byEpisodeId.get(row.episodeId) ?? null : null }));
 }
 
 export async function getScheduleResources(organizationId: string) {

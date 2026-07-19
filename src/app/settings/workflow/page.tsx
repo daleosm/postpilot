@@ -1,15 +1,15 @@
 import { WorkflowTemplateEditor } from "@/components/workflow-template-editor";
 import Link from "next/link";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can, getTenantRolePolicies } from "@/lib/permissions";
+import { can, canManageWorkflowConfiguration } from "@/lib/permissions";
 import { getDefaultWorkflowConfig } from "@/server/data";
 import { redirect } from "next/navigation";
 
 export default async function WorkflowSettingsPage() {
-  if (!(await can("manage_shows"))) redirect("/");
+  if (!(await canManageWorkflowConfiguration())) redirect("/");
   const context = await getActiveOrganizationContext();
   if (!context?.organization) redirect("/");
-  const [workflow, roles, mayManageUsers, mayManageDeliveryProfiles] = await Promise.all([getDefaultWorkflowConfig(context.organization.organizationId), getTenantRolePolicies(context.organization.organizationId), can("manage_users"), can("manage_delivery_profiles")]);
+  const [workflow, mayManageUsers, mayManageDeliveryProfiles] = await Promise.all([getDefaultWorkflowConfig(context.organization.organizationId), can("manage_users"), can("manage_delivery_profiles")]);
 
   if (!workflow) {
     return <div className="panel mx-auto mt-16 max-w-xl p-8 text-center"><h1 className="text-lg font-semibold text-[#343b38]">No workflow configured</h1><p className="mt-2 text-sm text-[#747977]">Set up your organization workflow before configuring approvals.</p></div>;
@@ -25,7 +25,7 @@ export default async function WorkflowSettingsPage() {
         </div>
         <div className="flex flex-wrap gap-2"><Link href="/settings/rooms" className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#45685e] hover:bg-[#f3f7f4]">Rooms & suites</Link><Link href="/settings/roles" className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#45685e] hover:bg-[#f3f7f4]">Roles & permissions</Link>{mayManageUsers && <Link href="/settings/users" className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#45685e] hover:bg-[#f3f7f4]">Users & access</Link>}{mayManageDeliveryProfiles && <Link href="/settings/delivery-profiles" className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#45685e] hover:bg-[#f3f7f4]">Delivery profiles</Link>}<Link href="/settings/currency" className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#45685e] hover:bg-[#f3f7f4]">Currency</Link><Link href="/settings/invoicing" className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#45685e] hover:bg-[#f3f7f4]">Invoicing</Link><Link href="/settings/catering" className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#45685e] hover:bg-[#f3f7f4]">Catering billing</Link></div>
       </header>
-      <WorkflowTemplateEditor workflow={workflow} roles={roles} />
+      <WorkflowTemplateEditor workflow={workflow} />
     </div>
   );
 }

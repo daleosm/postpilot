@@ -6,23 +6,24 @@ import { useState } from "react";
 import { EpisodeWorkOrders } from "@/components/episode-work-orders";
 import { EpisodeTeam } from "@/components/episode-team";
 import { DeliveryManifestPanel, type DeliveryManifest } from "@/components/delivery-manifest-panel";
+import { WorkflowStateBadge } from "@/components/workflow-state-badge";
 
 const tabs = ["Overview", "Workflow", "QC", "Work orders", "Bookings", "Delivery manifest", "Budget", "Activity"] as const;
 type TabName = (typeof tabs)[number];
 type Row = { id: string; [key: string]: unknown };
-type EpisodeData = { id?: string; title: string; showTitle: string; seasonNumber: number; number: number; status: string; qcStatus: string; workflowStageId: string | null; workflowStage: string | null; editorName: string | null; producerName: string | null; lockedCutDate: string | null; deliveryDeadline: Date | string | null };
-type WorkflowStage = { id: string; name: string; key: string; position: number; canStartEarly?: boolean; requiresQcPass?: boolean; deliveryGate?: "none" | "facility_dispatch" | "client_acceptance" };
-type WorkflowApprovalRule = { id: string; workflowStageId: string; approverRole: string; label: string; approvalOrder: number; isRequired: boolean };
-type WorkflowApproval = { id: string; workflowStageId: string; approvalRuleId: string; approverRole: string; requiredPersonId: string | null; status: string; comment: string | null; submittedAt: Date | string; respondedAt: Date | string | null };
-type WorkflowTrack = { id: string; workflowStageId: string; status: string; startedAt: Date | string | null; completedAt: Date | string | null; blockedReason: string | null };
+type EpisodeData = { id?: string; title: string; showTitle: string; seasonNumber: number; number: number; status: string; qcStatus: string; workflowStageId: string | null; workflowStage: string | null; workflowState?: { displayStatus: string; label: string; primaryStageId: string | null; primaryStageName: string | null }; editorName: string | null; producerName: string | null; lockedCutDate: string | null; deliveryDeadline: Date | string | null };
+type WorkflowStage = { id: string; name: string; key: string; position: number; isTerminal?: boolean; canStartEarly?: boolean; requiresQcPass?: boolean; deliveryGate?: "none" | "facility_dispatch" | "client_acceptance" };
+type WorkflowApprovalRule = { id: string; workflowStageId: string; approverRole: string | null; label: string; approvalOrder: number; isRequired: boolean };
+type WorkflowApproval = { id: string; workflowStageId: string; approvalRuleId: string; approverRole: string | null; requiredPersonId: string | null; status: string; comment: string | null; submittedAt: Date | string; respondedAt: Date | string | null };
+type WorkflowException = { id: string; workflowStageId: string; type: "early_start"; reason: string; createdAt: Date | string };
 type WorkOrder = { id: string; workflowStageId: string | null; workflowStageName: string | null; kind: string; title: string; description: string | null; department: string | null; assigneePersonId: string | null; assigneeName: string | null; assigneeRole: string | null; workType: "internal" | "external_vendor"; vendorCompanyId: string | null; purchaseOrderId: string | null; purchaseOrderNumber: string | null; clientPurchaseOrderId: string | null; priority: string; isBlocking: boolean; status: string; billingScope: string; billingStatus: string; estimatedAmount: string | number | null; clientQuoteAmount: string | number | null; actualAmount: string | number | null; currency: string; clientQuoteCurrency: string | null; billingNotes: string | null; budgetLineId: string | null; approvedByPersonId: string | null; approvedByName: string | null; approvedAt: Date | string | null; approvalNote: string | null; externalUrl: string | null; dueAt: Date | string | null; completedAt: Date | string | null; items: Array<{ id: string; type: "service" | "material" | "expense"; description: string; quantity: string | number; unit: string; unitRate: string | number; discountPercent: string | number; notes: string | null; position: number }> };
 type QcReport = { id: string; status: string; reportUrl: string | null; summary: string | null; waiverReason: string | null; completedAt: Date | string | null; createdAt: Date | string };
 type QcIssue = { id: string; qcReportId: string; code: string | null; severity: string; description: string; timecodeSeconds: string | number | null; status: string; resolution: string | null; resolvedAt: Date | string | null; createdAt: Date | string };
-type WorkspaceData = { episode: EpisodeData; schedule: Array<Row & { title: string; startsAt: Date | string; roomName: string | null }>; budget: Array<Row & { category: string; actualAmount: string | number; budgetedAmount: string | number }>; activity: Array<Row & { action: string; createdAt: Date | string }>; workflowStages: readonly WorkflowStage[]; workflowApprovalRules: WorkflowApprovalRule[]; workflowApprovals: WorkflowApproval[]; workflowTracks: WorkflowTrack[]; workflowApprovers: Array<{ id: string; name: string; role: string }>; episodeTeam: Array<{ id: string; personId: string; name: string; role: string; isLead: boolean }>; workOrders: WorkOrder[]; qcHistory: QcReport[]; qcIssueHistory: QcIssue[]; vendorOptions: Array<{ id: string; name: string }>; deliveryManifest: DeliveryManifest | null; deliveryProfiles: Array<{ id: string; name: string }> };
+type WorkspaceData = { episode: EpisodeData; schedule: Array<Row & { title: string; startsAt: Date | string; roomName: string | null }>; budget: Array<Row & { category: string; actualAmount: string | number; budgetedAmount: string | number }>; activity: Array<Row & { action: string; createdAt: Date | string }>; workflowStages: readonly WorkflowStage[]; workflowApprovalRules: WorkflowApprovalRule[]; workflowApprovals: WorkflowApproval[]; workflowExceptions: WorkflowException[]; workflowOperationalBlockers: Array<{ kind: "qc" | "delivery" | "client_acceptance" | "work_order"; message: string }>; workflowApprovers: Array<{ id: string; name: string; role: string }>; workflowSigners: Array<{ approvalRuleId: string; personId: string; name: string; role: string }>; episodeTeam: Array<{ id: string; personId: string; name: string; role: string; isLead: boolean }>; workOrders: WorkOrder[]; qcHistory: QcReport[]; qcIssueHistory: QcIssue[]; vendorOptions: Array<{ id: string; name: string }>; deliveryManifest: DeliveryManifest | null; deliveryProfiles: Array<{ id: string; name: string }> };
 
-export function EpisodeDetailTabs({ data, canManageEpisodes, canManageWorkOrders, canApproveWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canVerifyQc, canWaiveQc, canViewDelivery, canManageDelivery, canUpdateDelivery, canConfirmDeliveryReceipt, currentPersonId }: { data: WorkspaceData; canManageEpisodes: boolean; canManageWorkOrders: boolean; canApproveWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canVerifyQc: boolean; canWaiveQc: boolean; canViewDelivery: boolean; canManageDelivery: boolean; canUpdateDelivery: boolean; canConfirmDeliveryReceipt: boolean; currentPersonId: string | null }) {
-  const [tab, setTab] = useState<TabName>("Overview");
-  const visibleTabs = tabs.filter((item) => (item !== "Budget" || canManageCommercial) && (item !== "Delivery manifest" || canViewDelivery));
+export function EpisodeDetailTabs({ data, workflowOnly = false, canUpdateWorkflowWork, canSubmitWorkflowTracks, canSignOffWorkflowTracks, canAuthorizeWorkflowExceptions, canManageWorkOrders, canApproveWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canVerifyQc, canWaiveQc, canViewDelivery, canManageDelivery, canUpdateDelivery, canConfirmDeliveryReceipt, currentPersonId }: { data: WorkspaceData; workflowOnly?: boolean; canUpdateWorkflowWork: boolean; canSubmitWorkflowTracks: boolean; canSignOffWorkflowTracks: boolean; canAuthorizeWorkflowExceptions: boolean; canManageWorkOrders: boolean; canApproveWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canVerifyQc: boolean; canWaiveQc: boolean; canViewDelivery: boolean; canManageDelivery: boolean; canUpdateDelivery: boolean; canConfirmDeliveryReceipt: boolean; currentPersonId: string | null }) {
+  const [tab, setTab] = useState<TabName>(workflowOnly ? "Workflow" : "Overview");
+  const visibleTabs = workflowOnly ? ["Workflow"] as TabName[] : tabs.filter((item) => (item !== "Budget" || canManageCommercial) && (item !== "Delivery manifest" || canViewDelivery));
 
   return (
     <section className="panel overflow-hidden">
@@ -33,15 +34,15 @@ export function EpisodeDetailTabs({ data, canManageEpisodes, canManageWorkOrders
           </Button>
         ))}
       </div>
-      <div className="p-5"><TabContent tab={tab} data={data} canManageEpisodes={canManageEpisodes} canManageWorkOrders={canManageWorkOrders} canApproveWorkOrders={canApproveWorkOrders} canUpdateWorkOrders={canUpdateWorkOrders} canManageCommercial={canManageCommercial} canManageQc={canManageQc} canVerifyQc={canVerifyQc} canWaiveQc={canWaiveQc} canManageDelivery={canManageDelivery} canUpdateDelivery={canUpdateDelivery} canConfirmDeliveryReceipt={canConfirmDeliveryReceipt} currentPersonId={currentPersonId} /></div>
+      <div className="p-5"><TabContent tab={tab} data={data} canUpdateWorkflowWork={canUpdateWorkflowWork} canSubmitWorkflowTracks={canSubmitWorkflowTracks} canSignOffWorkflowTracks={canSignOffWorkflowTracks} canAuthorizeWorkflowExceptions={canAuthorizeWorkflowExceptions} canManageWorkOrders={canManageWorkOrders} canApproveWorkOrders={canApproveWorkOrders} canUpdateWorkOrders={canUpdateWorkOrders} canManageCommercial={canManageCommercial} canManageQc={canManageQc} canVerifyQc={canVerifyQc} canWaiveQc={canWaiveQc} canManageDelivery={canManageDelivery} canUpdateDelivery={canUpdateDelivery} canConfirmDeliveryReceipt={canConfirmDeliveryReceipt} currentPersonId={currentPersonId} /></div>
     </section>
   );
 }
 
-function TabContent({ tab, data, canManageEpisodes, canManageWorkOrders, canApproveWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canVerifyQc, canWaiveQc, canManageDelivery, canUpdateDelivery, canConfirmDeliveryReceipt, currentPersonId }: { tab: TabName; data: WorkspaceData; canManageEpisodes: boolean; canManageWorkOrders: boolean; canApproveWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canVerifyQc: boolean; canWaiveQc: boolean; canManageDelivery: boolean; canUpdateDelivery: boolean; canConfirmDeliveryReceipt: boolean; currentPersonId: string | null }) {
+function TabContent({ tab, data, canUpdateWorkflowWork, canSubmitWorkflowTracks, canSignOffWorkflowTracks, canAuthorizeWorkflowExceptions, canManageWorkOrders, canApproveWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canVerifyQc, canWaiveQc, canManageDelivery, canUpdateDelivery, canConfirmDeliveryReceipt, currentPersonId }: { tab: TabName; data: WorkspaceData; canUpdateWorkflowWork: boolean; canSubmitWorkflowTracks: boolean; canSignOffWorkflowTracks: boolean; canAuthorizeWorkflowExceptions: boolean; canManageWorkOrders: boolean; canApproveWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canManageQc: boolean; canVerifyQc: boolean; canWaiveQc: boolean; canManageDelivery: boolean; canUpdateDelivery: boolean; canConfirmDeliveryReceipt: boolean; currentPersonId: string | null }) {
   if (tab === "Overview") return <EpisodeOverview data={data} />;
-  if (tab === "Workflow") return <WorkflowPanel key={`${data.episode.workflowStageId ?? ""}:${data.workflowApprovals.map((approval) => `${approval.id}:${approval.status}:${approval.respondedAt ?? ""}`).join("|")}:${data.workflowTracks.map((track) => `${track.id}:${track.status}:${track.completedAt ?? ""}`).join("|")}`} episodeId={data.episode.id} initialStageId={data.episode.workflowStageId} stages={data.workflowStages} rules={data.workflowApprovalRules} approvals={data.workflowApprovals} tracks={data.workflowTracks} episodeTeam={data.episodeTeam} canManageEpisodes={canManageEpisodes} currentPersonId={currentPersonId} />;
-  if (tab === "QC") return <QcPanel key={`${data.qcHistory.map((report) => `${report.id}:${report.status}`).join("|")}:${data.qcIssueHistory.map((issue) => `${issue.id}:${issue.status}`).join("|")}`} episodeId={data.episode.id ?? ""} episodeStatus={data.episode.qcStatus} initialHistory={data.qcHistory} initialIssues={data.qcIssueHistory} workOrders={data.workOrders} canManage={canManageQc} canVerify={canVerifyQc} canWaive={canWaiveQc} />;
+  if (tab === "Workflow") return <SimpleWorkflowPanel key={`${data.episode.workflowStageId ?? ""}:${data.episode.workflowState?.displayStatus ?? data.episode.status}:${data.workflowApprovals.map((approval) => `${approval.id}:${approval.status}:${approval.respondedAt ?? ""}`).join("|")}:${data.workflowExceptions.map((item) => item.id).join("|")}:${data.workflowOperationalBlockers.map((blocker) => `${blocker.kind}:${blocker.message}`).join("|")}:${data.workflowSigners.map((item) => `${item.approvalRuleId}:${item.personId}`).join("|")}`} episodeId={data.episode.id} currentStageId={data.episode.workflowStageId} currentStatus={data.episode.workflowState?.displayStatus ?? data.episode.status} stages={data.workflowStages} rules={data.workflowApprovalRules} approvals={data.workflowApprovals} exceptions={data.workflowExceptions} blockers={data.workflowOperationalBlockers} workflowSigners={data.workflowSigners} canUpdateWorkflowWork={canUpdateWorkflowWork} canSubmitWorkflowTracks={canSubmitWorkflowTracks} canSignOffWorkflowTracks={canSignOffWorkflowTracks} canAuthorizeWorkflowExceptions={canAuthorizeWorkflowExceptions} currentPersonId={currentPersonId} />;
+  if (tab === "QC") return <QcPanel key={`${data.qcHistory.map((report) => `${report.id}:${report.status}`).join("|")}:${data.qcIssueHistory.map((issue) => `${issue.id}:${issue.status}`).join("|")}`} episodeId={data.episode.id ?? ""} episodeStatus={data.episode.qcStatus} workflowState={data.episode.workflowState?.displayStatus ?? data.episode.status} initialHistory={data.qcHistory} initialIssues={data.qcIssueHistory} workOrders={data.workOrders} canManage={canManageQc} canVerify={canVerifyQc} canWaive={canWaiveQc} />;
   if (tab === "Work orders") return <EpisodeWorkOrders key={data.workOrders.map((item) => `${item.id}:${item.status}:${item.billingStatus}`).join("|")} episodeId={data.episode.id ?? ""} initialWorkOrders={data.workOrders} people={data.workflowApprovers} stages={data.workflowStages} currentStageId={data.episode.workflowStageId} vendors={data.vendorOptions} canManage={canManageWorkOrders} canApprove={canApproveWorkOrders} canUpdate={canUpdateWorkOrders} canManageCommercial={canManageCommercial} />;
   if (tab === "Bookings") return <List empty="No scheduled room bookings." items={data.schedule} render={(item) => <><b>{item.title}</b><span>{formatDate(item.startsAt)} · {item.roomName}</span></>} />;
   if (tab === "Delivery manifest") return <DeliveryManifestPanel episodeId={data.episode.id ?? ""} manifest={data.deliveryManifest} profiles={data.deliveryProfiles} canManageManifest={canManageDelivery} canUpdate={canUpdateDelivery} canConfirmReceipt={canConfirmDeliveryReceipt} />;
@@ -67,7 +68,7 @@ function EpisodeOverview({ data }: { data: WorkspaceData }) {
         </div>
         <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[#e6e9e5]"><div className="h-full rounded-full bg-[#5f8578]" style={{ width: `${data.workflowStages.length ? Math.max((stageIndex / data.workflowStages.length) * 100, stageIndex ? 8 : 0) : 0}%` }} /></div>
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <OverviewItem label="Episode status" value={humanize(data.episode.status)} />
+          <div className="rounded-lg border border-[#e7e9e5] bg-white/50 px-3 py-2.5"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#858c88]">Derived workflow state</p><div className="mt-1"><WorkflowStateBadge status={data.episode.workflowState?.displayStatus ?? data.episode.status} /></div></div>
           <OverviewItem label="QC status" value={latestQc ? `${humanize(latestQc.status)} · ${formatDate(latestQc.completedAt ?? latestQc.createdAt)}` : "No report recorded"} tone={latestQc?.status === "failed" ? "danger" : latestQc?.status === "passed" || latestQc?.status === "waived" ? "success" : undefined} />
           <OverviewItem label="Picture lock" value={formatDate(data.episode.lockedCutDate)} />
           <OverviewItem label="Delivery deadline" value={formatDate(data.episode.deliveryDeadline)} />
@@ -89,7 +90,7 @@ function EpisodeOverview({ data }: { data: WorkspaceData }) {
   </div>;
 }
 
-function QcPanel({ episodeId, episodeStatus, initialHistory, initialIssues, workOrders, canManage, canVerify, canWaive }: { episodeId: string; episodeStatus: string; initialHistory: QcReport[]; initialIssues: QcIssue[]; workOrders: WorkOrder[]; canManage: boolean; canVerify: boolean; canWaive: boolean }) {
+function QcPanel({ episodeId, episodeStatus, workflowState, initialHistory, initialIssues, workOrders, canManage, canVerify, canWaive }: { episodeId: string; episodeStatus: string; workflowState: string; initialHistory: QcReport[]; initialIssues: QcIssue[]; workOrders: WorkOrder[]; canManage: boolean; canVerify: boolean; canWaive: boolean }) {
   const router = useRouter();
   const [history, setHistory] = useState(initialHistory);
   const [status, setStatus] = useState("in_progress");
@@ -127,7 +128,7 @@ function QcPanel({ episodeId, episodeStatus, initialHistory, initialIssues, work
 
   return <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,.9fr)]">
     <section className="rounded-xl border border-[#e5e7e3] p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#77817d]">Episode QC</p><h2 className="mt-1 text-lg font-semibold capitalize text-[#313a36]">{humanize(episodeStatus)}</h2></div><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${episodeStatus === "needs_attention" ? "bg-[#f8e7df] text-[#a45f43]" : episodeStatus === "passed" || episodeStatus === "waived" ? "bg-[#e0ede6] text-[#427361]" : "bg-[#edf0ed] text-[#63716b]"}`}>{episodeStatus === "needs_attention" ? "Corrections required" : humanize(episodeStatus)}</span></div>
+      <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#77817d]">Episode QC</p><h2 className="mt-1 text-lg font-semibold capitalize text-[#313a36]">{humanize(episodeStatus)}</h2><div className="mt-2"><WorkflowStateBadge status={workflowState} /></div></div><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${episodeStatus === "needs_attention" ? "bg-[#f8e7df] text-[#a45f43]" : episodeStatus === "passed" || episodeStatus === "waived" ? "bg-[#e0ede6] text-[#427361]" : "bg-[#edf0ed] text-[#63716b]"}`}>{episodeStatus === "needs_attention" ? "Corrections required" : humanize(episodeStatus)}</span></div>
       <div className="mt-4 border-t border-[#eceeea] pt-3">{latest ? <><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold capitalize text-[#46504b]">Latest report · {humanize(latest.status)}</p><time className="text-xs text-[#818985]">{formatDate(latest.completedAt ?? latest.createdAt)}</time></div>{latest.summary && <p className="mt-2 text-sm leading-6 text-[#5e6863]">{latest.summary}</p>}{latest.waiverReason && <p className="mt-2 rounded-md bg-[#f3f0e8] px-3 py-2 text-xs text-[#766346]">Waiver: {latest.waiverReason}</p>}{latest.reportUrl && <a href={latest.reportUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex text-xs font-semibold text-[#4c7469] hover:underline">Open external QC report ↗</a>}</> : <p className="py-6 text-center text-sm text-[#858b87]">No QC report has been recorded for this episode yet.</p>}</div>
       <div className="mt-4 divide-y divide-[#eceeea] border-t border-[#eceeea]">{history.slice(1).map((report) => <div key={report.id} className="flex items-center justify-between gap-3 py-2.5"><div className="min-w-0"><p className="text-xs font-semibold capitalize text-[#4c5651]">{humanize(report.status)}</p><p className="mt-0.5 truncate text-xs text-[#858c88]">{report.summary ?? "No summary"}</p></div><time className="shrink-0 text-xs text-[#818985]">{formatDate(report.completedAt ?? report.createdAt)}</time></div>)}</div>
     </section>
@@ -191,7 +192,62 @@ function OverviewItem({ label, value, tone }: { label: string; value: string; to
   return <div className="rounded-lg border border-[#e7e9e5] bg-white/50 px-3 py-2.5"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#858c88]">{label}</p><p className={`mt-1 text-sm font-medium capitalize ${toneClass}`}>{value}</p></div>;
 }
 
-function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tracks, episodeTeam, canManageEpisodes, currentPersonId }: { episodeId?: string; initialStageId: string | null; stages: readonly WorkflowStage[]; rules: WorkflowApprovalRule[]; approvals: WorkflowApproval[]; tracks: WorkflowTrack[]; episodeTeam: WorkspaceData["episodeTeam"]; canManageEpisodes: boolean; currentPersonId: string | null }) {
+/** One ordered path and one operational action panel — never a live track board. */
+function SimpleWorkflowPanel({ episodeId, currentStageId, currentStatus, stages, rules, approvals, exceptions, blockers, workflowSigners, canUpdateWorkflowWork, canSubmitWorkflowTracks, canSignOffWorkflowTracks, canAuthorizeWorkflowExceptions, currentPersonId }: { episodeId?: string; currentStageId: string | null; currentStatus: string; stages: readonly WorkflowStage[]; rules: WorkflowApprovalRule[]; approvals: WorkflowApproval[]; exceptions: WorkflowException[]; blockers: WorkspaceData["workflowOperationalBlockers"]; workflowSigners: WorkspaceData["workflowSigners"]; canUpdateWorkflowWork: boolean; canSubmitWorkflowTracks: boolean; canSignOffWorkflowTracks: boolean; canAuthorizeWorkflowExceptions: boolean; currentPersonId: string | null }) {
+  const router = useRouter();
+  const [selectedStageId, setSelectedStageId] = useState(currentStageId);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [comment, setComment] = useState("");
+  const [reason, setReason] = useState("");
+  const orderedStages = [...stages].sort((left, right) => left.position - right.position);
+  const currentStage = orderedStages.find((stage) => stage.id === currentStageId) ?? null;
+  const selectedStage = orderedStages.find((stage) => stage.id === selectedStageId) ?? currentStage;
+  if (!currentStage || !selectedStage) return <p className="rounded-lg bg-[#fafbf9] py-8 text-center text-sm text-[#858b87]">No workflow stage is configured for this episode.</p>;
+  const selectedIsCurrent = selectedStage.id === currentStage.id;
+  const earlyStartedIds = new Set(exceptions.filter((exception) => exception.type === "early_start").map((exception) => exception.workflowStageId));
+  const currentRules = rules.filter((rule) => rule.workflowStageId === currentStage.id);
+  const requiredRules = currentRules.filter((rule) => rule.isRequired);
+  const signedRuleIds = new Set(approvals.filter((approval) => approval.workflowStageId === currentStage.id && approval.status === "approved").map((approval) => approval.approvalRuleId));
+  const nextRule = [...requiredRules].sort((left, right) => left.approvalOrder - right.approvalOrder).find((rule) => !signedRuleIds.has(rule.id));
+  const nextSigner = nextRule ? workflowSigners.find((signer) => signer.approvalRuleId === nextRule.id) ?? null : null;
+  const canSignCurrent = selectedIsCurrent && currentStatus === "awaiting_sign_off" && canSignOffWorkflowTracks && nextSigner?.personId === currentPersonId;
+  const selectedState = selectedIsCurrent ? currentStatus : selectedStage.position < currentStage.position || currentStatus === "complete" ? "complete" : earlyStartedIds.has(selectedStage.id) ? "started early" : "up next";
+
+  async function run(action: "start" | "start_early" | "submit" | "block" | "resume" | "sign_off", stageId = currentStageId) {
+    if (!episodeId || !stageId) return;
+    setSaving(true); setMessage("");
+    try {
+      const response = await fetch(`/api/episodes/${episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId: stageId, action, approvalRuleId: action === "sign_off" ? nextRule?.id : undefined, comment: action === "sign_off" ? comment : undefined, reason: ["block", "resume", "start_early"].includes(action) ? reason : undefined }) });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) return setMessage(body?.error ?? "Could not update this stage.");
+      setComment(""); setReason("");
+      setMessage(action === "sign_off" ? "Sign-off recorded." : action === "start_early" ? `${selectedStage?.name ?? "Stage"} marked as started early.` : action === "submit" ? "Stage submitted for sign-off." : action === "start" ? "Stage started." : action === "block" ? "Stage blocked." : "Stage resumed.");
+      router.refresh();
+    } catch { setMessage("Could not update this stage."); }
+    finally { setSaving(false); }
+  }
+
+  return <div className="space-y-4">
+    <section aria-label="Episode workflow" className="overflow-hidden rounded-2xl border border-[#dde4df] bg-[radial-gradient(circle_at_top_right,_#edf6f1,_transparent_42%),#fbfcfa]">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#e5eae6] px-5 py-4"><div><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#728079]">Workflow path</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-[#314139]">{currentStage.name}</h2><p className="mt-1 text-xs text-[#75817a]">Stage {currentStage.position} of {orderedStages.length}</p></div><WorkflowStateBadge status={currentStatus} /></div>
+      <div className="grid gap-2 p-4 sm:grid-cols-2 xl:grid-cols-4">{orderedStages.map((stage) => { const current = stage.id === currentStage.id; const completed = stage.position < currentStage.position || currentStatus === "complete"; const startedEarly = earlyStartedIds.has(stage.id); const selected = stage.id === selectedStage.id; return <button key={stage.id} type="button" onClick={() => { setSelectedStageId(stage.id); setMessage(""); }} className={`min-w-0 rounded-xl border px-3 py-2.5 text-left transition focus:outline-none focus:ring-2 focus:ring-[#87a89a] ${current ? "border-[#9ec2ad] bg-[#eaf4ed] text-[#315f52]" : selected ? "border-[#bfd5c8] bg-white text-[#405148]" : completed ? "border-[#dce5df] bg-[#f4f7f4] text-[#678076]" : "border-[#e5e9e5] bg-white/65 text-[#6e7873] hover:bg-white"}`}><span className="flex items-center justify-between gap-2"><span className="truncate text-xs font-semibold">{stage.position}. {stage.name}</span><span className={`shrink-0 text-[10px] font-semibold ${current ? "text-[#39715d]" : completed ? "text-[#6f8b7b]" : "text-[#8a938e]"}`}>{current ? "Current" : completed ? "Complete" : startedEarly ? "Started early" : "Upcoming"}</span></span></button>; })}</div>
+    </section>
+    <section className="rounded-xl border border-[#e2e8e3] bg-white/70 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.12em] text-[#77827c]">{selectedIsCurrent ? "Current stage" : "Selected stage"}</p><h3 className="mt-1 text-base font-semibold text-[#35433d]">{selectedStage.name}</h3><p className="mt-1 text-xs text-[#738078]">{selectedState === "complete" ? "This stage is complete." : selectedState === "started early" ? "Work has been authorised to begin early. The episode remains at its current stage." : selectedIsCurrent && currentStatus === "not_started" ? "Start when the work begins." : selectedIsCurrent && currentStatus === "in_progress" ? "Submit when the work is ready for sign-off." : selectedIsCurrent && currentStatus === "awaiting_sign_off" ? "Awaiting the configured sign-off." : selectedIsCurrent && currentStatus === "blocked" ? "This stage is blocked until it is resumed." : "This stage will become current after the earlier stages are complete."}</p></div><span className="rounded-full bg-[#eef2ee] px-2.5 py-1 text-[10px] font-semibold capitalize text-[#68756e]">{selectedState.replaceAll("_", " ")}</span></div>
+      {selectedIsCurrent && currentRules.length > 0 && <div className="mt-4 space-y-2">{currentRules.map((rule) => { const signer = workflowSigners.find((item) => item.approvalRuleId === rule.id); const signed = signedRuleIds.has(rule.id); return <div key={rule.id} className="flex items-center gap-2 text-xs text-[#55625b]"><span className={`grid h-4 w-4 place-items-center rounded-full text-[9px] font-bold ${signed ? "bg-[#5f917a] text-white" : "border border-[#cfd8d2] bg-white text-transparent"}`}>✓</span><span>{rule.label}{rule.isRequired ? "" : " · optional"}{signer ? <span className="text-[#829088]"> · {signer.name}</span> : rule.isRequired ? <span className="text-[#a16941]"> · signer needed</span> : null}</span></div>; })}</div>}
+      {selectedIsCurrent && blockers.length > 0 && <div className="mt-4 rounded-lg border border-[#ecd9c7] bg-[#fffaf4] px-3 py-3 text-xs leading-5 text-[#8b613d]" role="status"><p className="font-semibold text-[#754f31]">Before sign-off</p><ul className="mt-1 list-disc space-y-0.5 pl-4">{blockers.map((blocker) => <li key={`${blocker.kind}:${blocker.message}`}>{blocker.message}</li>)}</ul></div>}
+      {selectedIsCurrent && <div className="mt-4 flex flex-wrap gap-2">{currentStatus === "not_started" && canUpdateWorkflowWork && <Button size="sm" variant="primary" isDisabled={saving} onPress={() => run("start")} className="bg-[#315f52] text-white">{saving ? "Starting…" : "Start stage"}</Button>}{currentStatus === "in_progress" && canSubmitWorkflowTracks && <Button size="sm" variant="primary" isDisabled={saving} onPress={() => run("submit")} className="bg-[#315f52] text-white">{saving ? "Submitting…" : requiredRules.length ? "Submit for sign-off" : "Submit & advance"}</Button>}</div>}
+      {selectedIsCurrent && currentStatus === "awaiting_sign_off" && (canSignCurrent ? <div className="mt-4"><textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={2} placeholder="Optional sign-off note…" className="w-full rounded-lg border border-[#dbe4de] bg-white/80 px-3 py-2 text-xs text-[#49554f] outline-none focus:border-[#87a89a] focus:ring-2 focus:ring-[#dceae3]" /><Button size="sm" variant="primary" isDisabled={saving} onPress={() => run("sign_off")} className="mt-2 bg-[#3f7563] text-white">{saving ? "Saving…" : "Sign off"}</Button></div> : <p className="mt-4 text-xs text-[#718079]">{nextSigner ? `Awaiting sign-off from ${nextSigner.name}.` : "Choose a workflow signer in Edit episode → Episode team."}</p>)}
+      {selectedIsCurrent && ["in_progress", "awaiting_sign_off", "blocked"].includes(currentStatus) && canUpdateWorkflowWork && <div className="mt-4 border-t border-[#dce5df] pt-4"><input value={reason} onChange={(event) => setReason(event.target.value)} placeholder={currentStatus === "blocked" ? "Reason for resuming…" : "Reason for blocking…"} className="h-9 w-full rounded-md border border-[#d9e2dc] bg-white/80 px-3 text-xs text-[#48554f]" /><Button size="sm" variant="tertiary" isDisabled={saving || !reason.trim()} onPress={() => run(currentStatus === "blocked" ? "resume" : "block")} className="mt-2 border border-[#d5dfd8] bg-white text-[#56655e]">{currentStatus === "blocked" ? "Resume stage" : "Mark blocked"}</Button></div>}
+      {!selectedIsCurrent && selectedStage.position > currentStage.position && selectedStage.canStartEarly && canAuthorizeWorkflowExceptions && !earlyStartedIds.has(selectedStage.id) && <div className="mt-4 border-t border-[#dce5df] pt-4"><p className="text-xs text-[#6d7973]">This stage is configured to start early.</p><input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reason for early start…" className="mt-2 h-9 w-full rounded-md border border-[#d9e2dc] bg-white/80 px-3 text-xs text-[#48554f]" /><Button size="sm" variant="tertiary" isDisabled={saving || !reason.trim()} onPress={() => run("start_early", selectedStage.id)} className="mt-2 border border-[#d5dfd8] bg-white text-[#56655e]">Start early</Button></div>}
+    </section>
+    {message && <p role="status" className={`text-xs ${message.includes("Could not") ? "text-[#a35e41]" : "text-[#3f7563]"}`}>{message}</p>}
+  </div>;
+}
+
+/* Retired dependency-board implementation. The operational episode UI above
+   is intentionally the only compiled workflow presentation.
+function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tracks, dependencies, exceptions, episodeTeam, canUpdateWorkflowWork, canSubmitWorkflowTracks, canSignOffWorkflowTracks, canAuthorizeWorkflowExceptions, currentPersonId }: { episodeId?: string; initialStageId: string | null; stages: readonly WorkflowStage[]; rules: WorkflowApprovalRule[]; approvals: WorkflowApproval[]; tracks: WorkflowTrack[]; dependencies: WorkflowDependency[]; exceptions: WorkflowException[]; episodeTeam: WorkspaceData["episodeTeam"]; canUpdateWorkflowWork: boolean; canSubmitWorkflowTracks: boolean; canSignOffWorkflowTracks: boolean; canAuthorizeWorkflowExceptions: boolean; currentPersonId: string | null }) {
   const router = useRouter();
   const [currentStageId, setCurrentStageId] = useState(initialStageId ?? stages[0]?.id ?? "");
   const [selectedStageId, setSelectedStageId] = useState(initialStageId ?? stages[0]?.id ?? "");
@@ -200,16 +256,18 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tr
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [comment, setComment] = useState("");
+  const [actionReason, setActionReason] = useState("");
 
   const stageStatus = (stageId: string) => {
     const stageRules = rules.filter((rule) => rule.workflowStageId === stageId);
     const stageApprovals = approvalState.filter((approval) => approval.workflowStageId === stageId);
     const requiredRules = stageRules.filter((rule) => rule.isRequired);
-    if (requiredRules.length && requiredRules.every((rule) => stageApprovals.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"))) return "approved";
     const track = trackState.find((item) => item.workflowStageId === stageId);
-    if (track && ["in_progress", "submitted", "blocked"].includes(track.status)) return "in_progress";
-    if (stageApprovals.length) return "awaiting_sign_off";
-    return stageId === currentStageId ? "in_progress" : "not_started";
+    if (track && ["complete", "approved"].includes(track.status)) return "complete";
+    if (track?.status === "blocked") return "blocked";
+    if (track?.status === "submitted" && requiredRules.some((rule) => !stageApprovals.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"))) return "awaiting_sign_off";
+    if (track && ["in_progress", "submitted", "changes_requested"].includes(track.status)) return "in_progress";
+    return "not_started";
   };
 
   const currentStatus = stageStatus(currentStageId);
@@ -219,9 +277,9 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tr
   const selectedRules = rules.filter((rule) => rule.workflowStageId === selectedStageId);
   const orderedStages = [...stages].sort((left, right) => left.position - right.position);
   const completedCurrentRules = currentRules.filter((rule) => approvalState.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"));
-  const completedStageCount = orderedStages.filter((stage) => stageStatus(stage.id) === "approved").length;
+  const completedStageCount = orderedStages.filter((stage) => stageStatus(stage.id) === "complete").length;
   const workflowProgress = orderedStages.length ? Math.round((completedStageCount / orderedStages.length) * 100) : 0;
-  const currentCanAdvance = !currentRules.some((rule) => rule.isRequired) || currentStatus === "approved";
+  const currentCanAdvance = currentStatus === "complete";
   const isActiveTrack = (stageId: string) => trackState.some((track) => track.workflowStageId === stageId && ["in_progress", "submitted", "blocked"].includes(track.status));
   const signerForRule = (rule: WorkflowApprovalRule) => {
     const candidates = episodeTeam.filter((person) => person.role === rule.approverRole);
@@ -230,23 +288,38 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tr
   };
   const nextPendingRule = [...currentRules].sort((left, right) => left.approvalOrder - right.approvalOrder).find((rule) => rule.isRequired && !approvalState.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"));
   const nextSigner = nextPendingRule ? signerForRule(nextPendingRule) : null;
-  const canCurrentUserSignOff = Boolean(nextSigner && currentPersonId === nextSigner.personId);
+  const canCurrentUserSignOff = canSignOffWorkflowTracks && currentStatus === "awaiting_sign_off" && Boolean(nextSigner && currentPersonId === nextSigner.personId);
   const nextStagePosition = currentStage ? currentStage.position + 1 : null;
   const selectedIsNext = selectedStage?.position === nextStagePosition;
-  const selectedHasUnassignedSigner = selectedRules.some((rule) => rule.isRequired && !signerForRule(rule));
-  const selectedCanStart = Boolean(selectedStage && !selectedHasUnassignedSigner && selectedStageId !== currentStageId && !isActiveTrack(selectedStageId) && !(stageStatus(selectedStageId) === "approved" && !selectedIsNext) && ((selectedIsNext && currentCanAdvance) || (selectedStage.canStartEarly && selectedStage.position > (currentStage?.position ?? 0))));
+  const dependencyReady = (dependency: WorkflowDependency) => {
+    if (stageStatus(dependency.predecessorStageId) !== "complete") return false;
+    if (dependency.requirement === "predecessor_complete") return true;
+    return rules.filter((rule) => rule.workflowStageId === dependency.predecessorStageId && rule.isRequired)
+      .every((rule) => approvalState.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"));
+  };
+  const hardStartDependencies = (stageId: string) => dependencies.filter((dependency) => dependency.dependentStageId === stageId && dependencyBlocksStart(dependency.behaviour));
+  const hardCompletionDependencies = (stageId: string) => dependencies.filter((dependency) => dependency.dependentStageId === stageId && dependencyBlocksCompletion(dependency.behaviour));
+  const selectedHardDependencies = selectedStageId === currentStageId ? hardCompletionDependencies(currentStageId) : hardStartDependencies(selectedStageId);
+  const dependencyException = (dependency: WorkflowDependency, stageId = selectedStageId) => exceptions.find((exception) => exception.type === "dependency" && exception.workflowStageId === stageId && exception.workflowStageDependencyId === dependency.id);
+  const selectedUnmetDependencies = selectedHardDependencies.filter((dependency) => !dependencyReady(dependency) && !dependencyException(dependency));
+  const selectedHasEarlyAuthorisation = exceptions.some((exception) => exception.type === "early_start" && exception.workflowStageId === selectedStageId);
+  const selectedNeedsEarlyAuthorisation = Boolean(selectedStage && currentStage && selectedStage.position > currentStage.position && orderedStages.some((stage) => stage.position < selectedStage.position && stageStatus(stage.id) !== "complete"));
+  const selectedStartEligible = Boolean(selectedStage && selectedUnmetDependencies.length === 0 && selectedStageId !== currentStageId && !isActiveTrack(selectedStageId) && stageStatus(selectedStageId) !== "complete" && ((selectedIsNext && currentCanAdvance) || (selectedStage.canStartEarly && selectedStage.position > (currentStage?.position ?? 0))));
+  const selectedCanStart = selectedStartEligible && (!selectedNeedsEarlyAuthorisation || selectedHasEarlyAuthorisation);
   const selectedExplanation = !selectedStage
     ? "Choose a stage above to see what is required."
-    : selectedHasUnassignedSigner
-      ? "Choose a workflow signer in Edit episode → Episode team before this stage can start."
       : selectedStageId === currentStageId
       ? "This is the episode’s current stage."
-      : selectedIsNext && stageStatus(selectedStageId) === "approved"
+      : selectedIsNext && stageStatus(selectedStageId) === "complete"
         ? "This stage was completed early. Advance the primary workflow into it when the preceding stage is complete."
-        : stageStatus(selectedStageId) === "approved"
+        : stageStatus(selectedStageId) === "complete"
           ? "This stage has already been fully signed off."
+        : selectedUnmetDependencies.length
+          ? `Hard dependency: ${selectedUnmetDependencies.map((dependency) => stages.find((stage) => stage.id === dependency.predecessorStageId)?.name ?? "predecessor stage").join(", ")} must be ${selectedUnmetDependencies.some((dependency) => dependency.requirement === "predecessor_fully_signed_off") ? "fully signed off" : "complete"}.`
+        : selectedNeedsEarlyAuthorisation && !selectedHasEarlyAuthorisation
+          ? "This parallel start needs an authorised early-start exception before work can begin."
         : selectedStage.canStartEarly
-          ? "This stage can begin early when your post house needs parallel work."
+          ? "Authorised early-start exception: this stage can run in parallel once its hard dependencies are met."
           : selectedIsNext && currentCanAdvance
             ? "The current stage is complete. This is the next stage in the workflow."
             : selectedIsNext
@@ -255,40 +328,65 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tr
                 ? "This follows later in the workflow and will unlock in order."
                 : "This is an earlier workflow stage.";
 
-  async function save() {
-    if (!episodeId || !selectedStageId) return;
-    if (selectedStageId === currentStageId) {
-      setMessage("This is already the current workflow stage.");
-      return;
-    }
-    const selected = stages.find((stage) => stage.id === selectedStageId);
-    if (selectedStageId !== currentStageId && currentStage && selected && selected.position === currentStage.position + 1 && currentRules.length && currentStatus !== "approved") {
-      setMessage("Complete the current sign-off first.");
-      return;
-    }
+  async function runAction(action: "start" | "submit" | "complete" | "block" | "unblock" | "authorize_exception", workflowStageId: string, extra: Record<string, unknown> = {}) {
+    if (!episodeId) return null;
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/episodes/${episodeId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId: selectedStageId }) });
+      const response = await fetch(`/api/episodes/${episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId, action, ...extra }) });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
-        setMessage(body?.error ?? "Could not update the workflow stage.");
-        return;
-      }
-      if (body?.startedEarly) {
-        setTrackState((items) => items.some((item) => item.workflowStageId === selectedStageId) ? items : [...items, { id: `early-${selectedStageId}`, workflowStageId: selectedStageId, status: "in_progress", startedAt: new Date(), completedAt: null, blockedReason: null }]);
-        setMessage("Early-start work began in parallel with the primary workflow.");
-      } else {
-        setCurrentStageId(selectedStageId);
-        setSelectedStageId(selectedStageId);
-        setMessage("Workflow stage updated.");
+        setMessage(body?.error ?? "Could not complete the workflow action.");
+        return null;
       }
       router.refresh();
+      return body;
     } catch {
-      setMessage("Could not update the workflow stage.");
+      setMessage("Could not complete the workflow action.");
+      return null;
     } finally {
       setSaving(false);
     }
+  }
+
+  async function startStage() {
+    const body = await runAction("start", selectedStageId);
+    if (!body) return;
+    setTrackState((items) => items.map((item) => item.workflowStageId === selectedStageId ? { ...item, status: "in_progress", startedAt: new Date(), blockedReason: null } : item));
+    if (!body.startedEarly) setCurrentStageId(selectedStageId);
+    setMessage(body.startedEarly ? "Parallel stage started." : "Stage started.");
+  }
+
+  async function authoriseException(type: "early_start" | "dependency", dependencyId?: string, workflowStageId = selectedStageId) {
+    if (!actionReason.trim()) return setMessage("Give a reason before authorising this exception.");
+    const body = await runAction("authorize_exception", workflowStageId, { exceptionType: type, workflowStageDependencyId: dependencyId, reason: actionReason.trim() });
+    if (!body) return;
+    setActionReason("");
+    setMessage(type === "early_start" ? "Early start authorised. You can now start the parallel stage." : "Dependency exception authorised. The stage can now proceed when its other gates are met.");
+  }
+
+  async function setBlocked(action: "block" | "unblock") {
+    if (!actionReason.trim()) return setMessage(`Give a reason to ${action} this stage.`);
+    const body = await runAction(action, currentStageId, { reason: actionReason.trim() });
+    if (!body) return;
+    setTrackState((items) => items.map((item) => item.workflowStageId === currentStageId ? { ...item, status: action === "block" ? "blocked" : "in_progress", blockedReason: action === "block" ? actionReason.trim() : null } : item));
+    setActionReason("");
+    setMessage(action === "block" ? "Stage blocked." : "Stage unblocked and returned to in progress.");
+  }
+
+  async function completeCurrentStage() {
+    const body = await runAction("complete", currentStageId);
+    if (!body) return;
+    setTrackState((items) => items.map((item) => item.workflowStageId === currentStageId ? { ...item, status: "complete", completedAt: new Date(), blockedReason: null } : item));
+    setMessage("Stage completed.");
+  }
+
+  async function submitForSignOff() {
+    if (!episodeId || !currentStageId) return;
+    const body = await runAction("submit", currentStageId);
+    if (!body) return;
+    setTrackState((items) => items.map((item) => item.workflowStageId === currentStageId ? { ...item, status: "submitted" } : item));
+    setMessage("Stage submitted for sign-off.");
   }
 
   async function signOff(workflowStageId: string) {
@@ -308,9 +406,9 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tr
         const signer = signerForRule(signedRule);
         return existing ? items.map((approval) => approval.approvalRuleId === signedRule.id ? { ...approval, status: "approved", comment, respondedAt: new Date() } : approval) : [...items, { id: `sign-off-${signedRule.id}`, workflowStageId, approvalRuleId: signedRule.id, approverRole: signedRule.approverRole, requiredPersonId: signer?.personId ?? null, status: "approved", comment, submittedAt: new Date(), respondedAt: new Date() }];
       });
-      if (body?.stageComplete) setTrackState((items) => items.map((track) => track.workflowStageId === workflowStageId ? { ...track, status: "approved", completedAt: new Date() } : track));
+      if (body?.stageComplete) setTrackState((items) => items.map((track) => track.workflowStageId === workflowStageId ? { ...track, status: "complete", completedAt: new Date() } : track));
       setComment("");
-      setMessage(body?.advancedTo ? `Stage signed off and advanced to ${body.advancedTo.name}.` : body?.advanceBlockedBy ? `Stage signed off. Choose the next stage's ${body.advanceBlockedBy.replaceAll("_", " ")} workflow signer to advance.` : body?.stageComplete ? "Stage fully signed off." : "Sign-off recorded.");
+      setMessage(body?.stageComplete ? `Stage fully signed off.${body?.nextStage ? ` ${body.nextStage.name} is ready to start.` : ""}` : "Sign-off recorded.");
       router.refresh();
     } catch {
       setMessage("Could not record the sign-off.");
@@ -320,9 +418,10 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tr
   }
 
   return <div className="space-y-4">
+    <EpisodeWorkflowBoard stages={orderedStages} rules={rules} approvals={approvalState} tracks={trackState} dependencies={dependencies} exceptions={exceptions} selectedStageId={selectedStageId} onSelect={(stageId) => { setSelectedStageId(stageId); setMessage(""); }} />
     <section aria-label="Episode workflow" className="overflow-hidden rounded-2xl border border-[#dde4df] bg-[radial-gradient(circle_at_top_right,_#edf6f1,_transparent_42%),#fbfcfa]">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#e5eae6] px-5 py-4">
-        <div><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#728079]">Episode journey</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-[#314139]">{currentStage?.name ?? "Workflow not set"}</h2><p className="mt-1 text-xs text-[#75817a]">{currentStage ? `Now at stage ${currentStage.position} of ${orderedStages.length}` : "Choose a stage to begin."}</p></div>
+        <div><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#728079]">Selected stage controls</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-[#314139]">{currentStage?.name ?? "Workflow not set"}</h2><p className="mt-1 text-xs text-[#75817a]">{currentStage ? `Now at stage ${currentStage.position} of ${orderedStages.length}` : "Choose a stage to begin."}</p></div>
         <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-full" style={{ background: `conic-gradient(#4e806d ${workflowProgress}%, #e5ebe6 0)` }}><div className="grid h-8 w-8 place-items-center rounded-full bg-[#fbfcfa] text-[10px] font-bold text-[#49675b]">{workflowProgress}%</div></div><div><p className="text-sm font-semibold text-[#405149]">{completedStageCount} complete</p><p className="text-[11px] text-[#7b8781]">of {orderedStages.length} stages</p></div></div>
       </div>
 
@@ -335,24 +434,24 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tr
             const isParallel = !isCurrent && isActiveTrack(stage.id);
             const isSelected = stage.id === selectedStageId;
             const stageRules = rules.filter((rule) => rule.workflowStageId === stage.id);
-            const isEarlyStart = stage.canStartEarly && !isCurrent && status !== "approved";
+            const isEarlyStart = stage.canStartEarly && !isCurrent && status !== "complete";
             const isNext = stage.position === nextStagePosition;
             const isReadyNext = isNext && currentCanAdvance;
             const requiredRuleCount = stageRules.filter((rule) => rule.isRequired).length;
-            const stateLabel = status === "approved" ? "Complete" : isCurrent ? requiredRuleCount ? "Awaiting sign-off" : "Ready to move on" : isParallel ? "Running in parallel" : isEarlyStart ? "Can start early" : isReadyNext ? "Ready next" : isNext ? "Waiting for sign-off" : stage.position < (currentStage?.position ?? 0) ? "Earlier stage" : "Later stage";
-            const nodeTone = status === "approved" ? "bg-[#5f917a] text-white shadow-[0_0_0_5px_#edf6f0]" : isCurrent ? "bg-[#315f52] text-white shadow-[0_0_0_6px_#dbece3]" : isParallel ? "bg-[#9a7647] text-white shadow-[0_0_0_5px_#f6eee3]" : isReadyNext ? "border-2 border-[#5f917a] bg-[#fbfcfa] text-[#4b7664]" : "border border-[#d6ddd8] bg-[#fbfcfa] text-[#849089]";
+            const stateLabel = status === "complete" ? "Complete" : status === "blocked" ? "Blocked" : status === "awaiting_sign_off" ? "Awaiting sign-off" : isCurrent ? "In progress" : isParallel ? "Running in parallel" : isEarlyStart ? "Can start early" : isReadyNext ? "Ready next" : isNext ? "Waiting for completion" : stage.position < (currentStage?.position ?? 0) ? "Earlier stage" : "Later stage";
+            const nodeTone = status === "complete" ? "bg-[#5f917a] text-white shadow-[0_0_0_5px_#edf6f0]" : status === "blocked" ? "bg-[#a35e41] text-white shadow-[0_0_0_6px_#f5e5df]" : isCurrent ? "bg-[#315f52] text-white shadow-[0_0_0_6px_#dbece3]" : isParallel ? "bg-[#9a7647] text-white shadow-[0_0_0_5px_#f6eee3]" : isReadyNext ? "border-2 border-[#5f917a] bg-[#fbfcfa] text-[#4b7664]" : "border border-[#d6ddd8] bg-[#fbfcfa] text-[#849089]";
             return <div key={stage.id} className="relative grid grid-cols-[2.25rem_minmax(0,1fr)] gap-3 sm:grid-cols-[2.75rem_minmax(0,1fr)] sm:gap-4">
-              <div className="relative z-10 flex justify-center pt-3"><span className={`grid h-6 w-6 place-items-center rounded-full text-[10px] font-bold ${nodeTone}`}>{status === "approved" ? "✓" : stage.position}</span></div>
+              <div className="relative z-10 flex justify-center pt-3"><span className={`grid h-6 w-6 place-items-center rounded-full text-[10px] font-bold ${nodeTone}`}>{status === "complete" ? "✓" : stage.position}</span></div>
               <div className="min-w-0 pb-3">
                 <button type="button" aria-label={`Select ${stage.name}`} aria-pressed={isSelected} onClick={() => { setSelectedStageId(stage.id); setMessage(""); }} className={`group flex w-full items-start justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus:ring-2 focus:ring-[#87a89a] focus:ring-offset-2 ${isCurrent ? "bg-[#eef6f1]" : isSelected ? "bg-[#f1f6f3]" : "hover:bg-[#f5f8f5]"}`}>
-                  <span className="min-w-0"><span className={`block text-sm font-semibold ${isCurrent ? "text-[#315f52]" : status === "approved" ? "text-[#547866]" : "text-[#48554f]"}`}>{stage.name}</span><span className="mt-1 block text-[11px] text-[#7a8580]">{requiredRuleCount ? `${requiredRuleCount} required sign-off${requiredRuleCount === 1 ? "" : "s"}` : "No sign-off gate"}</span></span>
-                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${isCurrent ? "bg-[#d2e7dc] text-[#356d58]" : isParallel || isEarlyStart ? "bg-[#f6eee3] text-[#906a3b]" : status === "approved" ? "bg-[#e1eee6] text-[#467460]" : isReadyNext ? "bg-[#e2efe7] text-[#426e5b]" : "bg-[#edf0ed] text-[#77847e]"}`}>{stateLabel}</span>
+                  <span className="min-w-0"><span className={`block text-sm font-semibold ${isCurrent ? "text-[#315f52]" : status === "complete" ? "text-[#547866]" : "text-[#48554f]"}`}>{stage.name}</span><span className="mt-1 block text-[11px] text-[#7a8580]">{requiredRuleCount ? `${requiredRuleCount} required sign-off${requiredRuleCount === 1 ? "" : "s"}` : "No sign-off gate"}</span></span>
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${status === "blocked" ? "bg-[#f8e7df] text-[#a35e41]" : isCurrent ? "bg-[#d2e7dc] text-[#356d58]" : isParallel || isEarlyStart ? "bg-[#f6eee3] text-[#906a3b]" : status === "complete" ? "bg-[#e1eee6] text-[#467460]" : isReadyNext ? "bg-[#e2efe7] text-[#426e5b]" : "bg-[#edf0ed] text-[#77847e]"}`}>{stateLabel}</span>
                 </button>
 
-                {isCurrent && <div className="ml-3 mt-1 border-l-2 border-[#82ab94] pl-4 sm:ml-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs leading-5 text-[#66746d]">{currentStatus === "approved" ? "This stage is complete. Select the next stage in the journey to continue." : requiredRuleCount ? "Complete each required sign-off before the next ordered stage opens." : "No sign-off is required for this stage; move on when the work is ready."}</p>{requiredRuleCount > 0 && <span className="rounded-full bg-[#e6efe9] px-2 py-1 text-[10px] font-semibold text-[#557467]">{completedCurrentRules.filter((rule) => rule.isRequired).length}/{requiredRuleCount} complete</span>}</div>{currentStage?.requiresQcPass && <p className="mt-2 rounded-md bg-[#f8eee8] px-3 py-2 text-xs leading-5 text-[#8a583f]">Record a passed or authorised-waived QC report before this stage can be signed off. A failed report keeps the episode here while correction work is completed and re-QC is run.</p>}{currentStage?.deliveryGate === "facility_dispatch" && <p className="mt-2 rounded-md bg-[#f8eee8] px-3 py-2 text-xs leading-5 text-[#8a583f]">Every required manifest item must pass required QC and be dispatched before this stage can be signed off.</p>}{currentStage?.deliveryGate === "client_acceptance" && <p className="mt-2 rounded-md bg-[#f8eee8] px-3 py-2 text-xs leading-5 text-[#8a583f]">Every required manifest item needs recipient receipt confirmation before sign-off, unless an authorised local acceptance exception is recorded.</p>}{currentRules.length > 0 && <div className="mt-3 space-y-2">{currentRules.map((rule) => { const signed = approvalState.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"); const signer = signerForRule(rule); return <div key={rule.id} className="flex items-center gap-2 text-xs text-[#55625b]"><span className={`grid h-4 w-4 place-items-center rounded-full text-[9px] font-bold ${signed ? "bg-[#5f917a] text-white" : "border border-[#cfd8d2] bg-white text-transparent"}`}>✓</span><span>{rule.label}{rule.isRequired ? "" : " · optional"}{signer ? <span className="text-[#829088]"> · {signer.name}</span> : rule.isRequired ? <span className="text-[#a16941]"> · signer needed</span> : null}</span></div>; })}</div>}{requiredRuleCount > 0 && currentStatus !== "approved" && (canCurrentUserSignOff ? <><textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={2} placeholder="Optional sign-off note…" className="mt-3 w-full rounded-lg border border-[#dbe4de] bg-white/80 px-3 py-2 text-xs text-[#49554f] outline-none focus:border-[#87a89a] focus:ring-2 focus:ring-[#dceae3]" /><div className="mt-2"><Button type="button" size="sm" variant="primary" onPress={() => signOff(currentStageId)} isDisabled={saving} className="bg-[#3f7563] text-white">{saving ? "Saving…" : "Sign off"}</Button></div></> : <p className="mt-3 text-xs leading-5 text-[#718079]">{nextSigner ? `Awaiting sign-off from ${nextSigner.name}.` : "Choose a workflow signer in Edit episode → Episode team."}</p>)}</div>}
-                {isParallel && <div className="ml-3 mt-1 border-l-2 border-[#c8a46b] bg-[#fcf8f1] py-3 pl-4 pr-3 text-xs leading-5 text-[#76603d] sm:ml-4">This early-start stage is running in parallel. Its assigned signer can complete the gate from Approvals.</div>}
+                {isCurrent && <div className="ml-3 mt-1 border-l-2 border-[#82ab94] pl-4 sm:ml-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs leading-5 text-[#66746d]">{currentStatus === "not_started" ? "This is the next workflow stage. Start it when work begins." : currentStatus === "complete" ? "This stage is complete. Select another eligible track to continue." : currentStatus === "blocked" ? `Blocked${trackState.find((track) => track.workflowStageId === currentStageId)?.blockedReason ? ` · ${trackState.find((track) => track.workflowStageId === currentStageId)?.blockedReason}` : ""}` : currentStatus === "awaiting_sign_off" ? "This stage has been submitted and is awaiting its required sign-offs." : requiredRuleCount ? "Complete the work, then submit it for sign-off." : "No sign-off is required; complete the stage when the work is ready."}</p>{requiredRuleCount > 0 && <span className="rounded-full bg-[#e6efe9] px-2 py-1 text-[10px] font-semibold text-[#557467]">{completedCurrentRules.filter((rule) => rule.isRequired).length}/{requiredRuleCount} complete</span>}</div>{currentStatus === "not_started" && (canUpdateWorkflowWork ? <div className="mt-3"><Button type="button" size="sm" variant="primary" onPress={startStage} isDisabled={saving} className="bg-[#315f52] text-white">{saving ? "Starting…" : `Start ${currentStage?.name ?? "stage"}`}</Button></div> : <p className="mt-3 text-xs leading-5 text-[#718079]">You need workflow-track update permission for this assigned episode to start this stage.</p>)}{currentStage?.requiresQcPass && <p className="mt-2 rounded-md bg-[#f8eee8] px-3 py-2 text-xs leading-5 text-[#8a583f]">Record a passed or authorised-waived QC report before this stage can be completed. A failed report keeps the episode here while correction work is completed and re-QC is run.</p>}{currentStage?.deliveryGate === "facility_dispatch" && <p className="mt-2 rounded-md bg-[#f8eee8] px-3 py-2 text-xs leading-5 text-[#8a583f]">Every required manifest item must pass required QC and be dispatched before this stage can be completed.</p>}{currentStage?.deliveryGate === "client_acceptance" && <p className="mt-2 rounded-md bg-[#f8eee8] px-3 py-2 text-xs leading-5 text-[#8a583f]">Every required manifest item needs recipient receipt confirmation before completion, unless an authorised local acceptance exception is recorded.</p>}{currentRules.length > 0 && <div className="mt-3 space-y-2">{currentRules.map((rule) => { const signed = approvalState.some((approval) => approval.approvalRuleId === rule.id && approval.status === "approved"); const signer = signerForRule(rule); return <div key={rule.id} className="flex items-center gap-2 text-xs text-[#55625b]"><span className={`grid h-4 w-4 place-items-center rounded-full text-[9px] font-bold ${signed ? "bg-[#5f917a] text-white" : "border border-[#cfd8d2] bg-white text-transparent"}`}>✓</span><span>{rule.label}{rule.isRequired ? "" : " · optional"}{signer ? <span className="text-[#829088]"> · {signer.name}</span> : rule.isRequired ? <span className="text-[#a16941]"> · signer needed</span> : null}</span></div>; })}</div>}{currentStatus === "in_progress" && (requiredRuleCount > 0 ? canSubmitWorkflowTracks ? <div className="mt-3"><Button type="button" size="sm" variant="primary" onPress={submitForSignOff} isDisabled={saving} className="bg-[#315f52] text-white">{saving ? "Submitting…" : "Submit for sign-off"}</Button></div> : null : canUpdateWorkflowWork ? <div className="mt-3"><Button type="button" size="sm" variant="primary" onPress={completeCurrentStage} isDisabled={saving} className="bg-[#315f52] text-white">{saving ? "Completing…" : "Complete stage"}</Button></div> : null)}{currentStatus === "awaiting_sign_off" && canUpdateWorkflowWork && completedCurrentRules.filter((rule) => rule.isRequired).length === requiredRuleCount && <div className="mt-3"><Button type="button" size="sm" variant="primary" onPress={completeCurrentStage} isDisabled={saving} className="bg-[#315f52] text-white">{saving ? "Completing…" : "Complete stage"}</Button></div>}{requiredRuleCount > 0 && currentStatus === "awaiting_sign_off" && (canCurrentUserSignOff ? <><textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={2} placeholder="Optional sign-off note…" className="mt-3 w-full rounded-lg border border-[#dbe4de] bg-white/80 px-3 py-2 text-xs text-[#49554f] outline-none focus:border-[#87a89a] focus:ring-2 focus:ring-[#dceae3]" /><div className="mt-2"><Button type="button" size="sm" variant="primary" onPress={() => signOff(currentStageId)} isDisabled={saving} className="bg-[#3f7563] text-white">{saving ? "Saving…" : "Sign off"}</Button></div></> : <p className="mt-3 text-xs leading-5 text-[#718079]">{nextSigner ? `Awaiting sign-off from ${nextSigner.name}.` : "Choose a workflow signer in Edit episode → Episode team."}</p>)}{["in_progress", "submitted", "blocked"].includes(currentStatus) && canUpdateWorkflowWork && <div className="mt-3 border-t border-[#dce5df] pt-3"><input value={actionReason} onChange={(event) => setActionReason(event.target.value)} placeholder={currentStatus === "blocked" ? "Reason for unblocking…" : "Reason for blocking…"} className="h-8 w-full rounded-md border border-[#d9e2dc] bg-white/80 px-2 text-xs text-[#48554f]" /><Button type="button" size="sm" variant="tertiary" onPress={() => setBlocked(currentStatus === "blocked" ? "unblock" : "block")} isDisabled={saving} className="mt-2 border border-[#d5dfd8] bg-white text-[#56655e]">{currentStatus === "blocked" ? "Unblock stage" : "Mark blocked"}</Button></div>}</div>}
+                {isParallel && <div className="ml-3 mt-1 border-l-2 border-[#c8a46b] bg-[#fcf8f1] py-3 pl-4 pr-3 text-xs leading-5 text-[#76603d] sm:ml-4">Authorised early-start exception: this stage is running in parallel. Its configured hard dependencies were met before it started; its assigned signer can complete the gate from Approvals.</div>}
 
-                {isSelected && !isCurrent && <div className="ml-3 mt-1 border-l-2 border-[#b6d3c1] bg-[#f4f8f5]/70 py-3 pl-4 pr-3 sm:ml-4"><p className="text-xs leading-5 text-[#5c6b63]">{selectedExplanation}</p><p className="mt-3 text-[10px] font-semibold uppercase tracking-[.1em] text-[#718079]">Sign-off requirements</p><p className="mt-1 text-xs leading-5 text-[#59675f]">{selectedRules.map((rule) => rule.label).join(" · ") || "No sign-offs configured"}</p>{selectedCanStart && (canManageEpisodes ? <Button type="button" size="sm" variant="primary" onPress={save} isDisabled={saving} className="mt-3 bg-[#315f52] text-white">{saving ? "Moving…" : `Move episode to ${stage.name}`}</Button> : <p className="mt-3 text-xs leading-5 text-[#718079]">This stage is ready. A user with episode-management permission can move the episode forward.</p>)}</div>}
+                {isSelected && <div className="ml-3 mt-1 border-l-2 border-[#b6d3c1] bg-[#f4f8f5]/70 py-3 pl-4 pr-3 sm:ml-4"><p className="text-xs leading-5 text-[#5c6b63]">{selectedExplanation}</p>{selectedHardDependencies.length > 0 && <div className="mt-3 rounded-md border border-[#dce6df] bg-white/70 px-3 py-2 text-xs leading-5 text-[#57645d]"><p className="font-semibold text-[#4d6559]">Hard dependencies</p>{selectedHardDependencies.map((dependency) => { const exception = dependencyException(dependency); return <div key={dependency.id} className={dependencyReady(dependency) || exception ? "text-[#527761]" : "text-[#9a613f]"}><p>{dependencyReady(dependency) ? "✓" : exception ? "✓" : "•"} {stages.find((item) => item.id === dependency.predecessorStageId)?.name ?? "Predecessor stage"} · {dependencyReady(dependency) ? dependency.requirement === "predecessor_fully_signed_off" ? "fully signed off" : "complete" : exception ? "exception authorised" : dependency.requirement === "predecessor_fully_signed_off" ? "fully signed off required" : "completion required"}{dependency.note ? ` · ${dependency.note}` : ""}</p>{!dependencyReady(dependency) && dependency.allowException && !exception && canAuthorizeWorkflowExceptions && <Button type="button" size="sm" variant="tertiary" onPress={() => authoriseException("dependency", dependency.id)} isDisabled={saving || !actionReason.trim()} className="mt-1 h-7 border border-[#d8dfda] bg-white px-2 text-[11px] text-[#557467]">Authorise dependency exception</Button>}</div>; })}</div>}<p className="mt-3 text-[10px] font-semibold uppercase tracking-[.1em] text-[#718079]">Sign-off requirements</p><p className="mt-1 text-xs leading-5 text-[#59675f]">{selectedRules.map((rule) => rule.label).join(" · ") || "No sign-offs configured"}</p>{(selectedNeedsEarlyAuthorisation && !selectedHasEarlyAuthorisation || selectedHardDependencies.some((dependency) => dependency.allowException && !dependencyReady(dependency) && !dependencyException(dependency))) && canAuthorizeWorkflowExceptions && <input value={actionReason} onChange={(event) => setActionReason(event.target.value)} placeholder="Reason for authorised exception…" className="mt-3 h-8 w-full rounded-md border border-[#d9e2dc] bg-white/80 px-2 text-xs text-[#48554f]" />}{selectedNeedsEarlyAuthorisation && !selectedHasEarlyAuthorisation && canAuthorizeWorkflowExceptions && <Button type="button" size="sm" variant="tertiary" onPress={() => authoriseException("early_start")} isDisabled={saving || !actionReason.trim()} className="mt-2 border border-[#d8dfda] bg-white text-[#557467]">Authorise early start</Button>}{selectedCanStart && (canUpdateWorkflowWork ? <Button type="button" size="sm" variant="primary" onPress={startStage} isDisabled={saving} className="mt-3 bg-[#315f52] text-white">{saving ? "Starting…" : selectedStage?.canStartEarly && !selectedIsNext ? `Start ${stage.name} in parallel` : `Start ${stage.name}`}</Button> : <p className="mt-3 text-xs leading-5 text-[#718079]">This stage is ready. You need workflow-track update permission for this assigned episode to start it.</p>)}</div>}
               </div>
             </div>;
           })}
@@ -363,6 +462,8 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tr
     {message && <p role="status" className={`text-xs ${message.includes("Could not") || message.includes("Complete") ? "text-[#a35e41]" : "text-[#3f7563]"}`}>{message}</p>}
   </div>;
 }
+
+*/
 
 function List<T extends Row>({ items, empty, render }: { items: T[]; empty: string; render: (item: T) => React.ReactNode }) {
   return items.length ? <div className="divide-y divide-[#efeeea]">{items.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 py-3 text-sm text-[#474f4b]"><div className="min-w-0"><div className="truncate">{render(item)}</div></div></div>)}</div> : <p className="py-7 text-center text-sm text-[#858a87]">{empty}</p>;

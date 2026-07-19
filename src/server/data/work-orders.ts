@@ -4,6 +4,7 @@ import { aliasedTable, and, asc, eq, notInArray, or } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
 import { budgetLines, episodes, people, postWorkOrderItems, postWorkOrders, purchaseOrders, seasons, shows, workflowStages } from "@/lib/db/schema";
+import { getEpisodeWorkflowState, getEpisodeWorkflowStates } from "./episode-workflow-state";
 
 const assignees = aliasedTable(people, "work_order_assignees");
 const approvers = aliasedTable(people, "work_order_approvers");
@@ -32,7 +33,8 @@ export async function listEpisodeWorkOrders(organizationId: string, episodeId: s
       .where(and(eq(postWorkOrderItems.organizationId, organizationId)))
       .orderBy(asc(postWorkOrderItems.position)),
   ]);
-  return workOrders.map((workOrder) => ({ ...workOrder, items: items.filter((item) => item.workOrderId === workOrder.id) }));
+  const workflowState = await getEpisodeWorkflowState(organizationId, episodeId);
+  return workOrders.map((workOrder) => ({ ...workOrder, workflowState, items: items.filter((item) => item.workOrderId === workOrder.id) }));
 }
 
 /** Open work explicitly assigned to a person or their tenant role. */
@@ -41,7 +43,7 @@ export async function listWorkOrderInbox(organizationId: string, userId: string)
   const [person] = await db.select({ id: people.id, role: people.role }).from(people)
     .where(and(eq(people.organizationId, organizationId), eq(people.userId, userId))).limit(1);
   if (!person) return [];
-  return db.select({
+  const rows = await db.select({
     id: postWorkOrders.id, episodeId: episodes.id, showId: shows.id, showTitle: shows.title, episodeTitle: episodes.title, episodeNumber: episodes.number,
     workflowStageName: workflowStages.name, kind: postWorkOrders.kind, title: postWorkOrders.title, description: postWorkOrders.description,
     priority: postWorkOrders.priority, isBlocking: postWorkOrders.isBlocking, status: postWorkOrders.status, dueAt: postWorkOrders.dueAt, externalUrl: postWorkOrders.externalUrl,
@@ -56,4 +58,6 @@ export async function listWorkOrderInbox(organizationId: string, userId: string)
       notInArray(postWorkOrders.status, ["complete", "cancelled"]),
       or(eq(postWorkOrders.assigneePersonId, person.id), eq(postWorkOrders.assigneeRole, person.role)),
     )).orderBy(asc(postWorkOrders.dueAt), asc(postWorkOrders.priority), asc(postWorkOrders.createdAt));
+  const states = await getEpisodeWorkflowStates(organizationId, [...new Set(rows.map((row) => row.episodeId))]);
+  return rows.map((row) => ({ ...row, workflowState: states.get(row.episodeId) ?? null }));
 }

@@ -2,14 +2,13 @@ import { and, eq, inArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { getDb } from "@/lib/db";
-import { episodeTeamAssignments, episodes, people, seasons, shows } from "@/lib/db/schema";
+import { episodeTeamAssignments, episodes, people, postWorkflows, seasons, shows, workflowStages } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { canManageEpisodes } from "@/lib/permissions";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { insertEpisodeSchema } from "@/lib/validations/entities";
 import { missingTenantReferences } from "@/lib/tenant-resources";
 import { createDeliveryManifestForNewEpisode } from "@/server/delivery-manifests";
-import { createStageWorkOrders } from "@/lib/work-orders";
 
 export async function POST(request: Request) {
   if (!(await canManageEpisodes())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -26,7 +25,6 @@ export async function POST(request: Request) {
     .where(and(eq(seasons.id, parsed.data.seasonId), eq(seasons.organizationId, context.organization.organizationId), eq(shows.organizationId, context.organization.organizationId))).limit(1);
   if (!season) return NextResponse.json({ error: "Season not found." }, { status: 404 });
   const missing = await missingTenantReferences(context.organization.organizationId, {
-    workflowStageId: parsed.data.workflowStageId,
     personId: parsed.data.assignedProducerId,
   });
   const assigneeIds = [parsed.data.editorId, parsed.data.coloristId, parsed.data.soundMixerId].filter((id): id is string => Boolean(id));
@@ -46,7 +44,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "An episode with that number already exists in this season." }, { status: 409 });
   }
   if (team.length) { const teamPeople = await db.select({ id: people.id }).from(people).where(and(eq(people.organizationId, organizationId), inArray(people.id, team))); await db.insert(episodeTeamAssignments).values(teamPeople.map((person) => ({ organizationId, episodeId: episode.id, personId: person.id }))); }
-  if (parsed.data.workflowStageId) await createStageWorkOrders({ organizationId: context.organization.organizationId, episodeId: episode.id, workflowStageId: parsed.data.workflowStageId, createdByUserId: context.userId });
+  const [firstStage] = await db.select({ id: workflowStages.id })
+    .from(workflowStages)
+    .innerJoin(postWorkflows, eq(workflowStages.workflowId, postWorkflows.id))
+    .where(and(eq(workflowStages.organizationId, organizationId), eq(postWorkflows.organizationId, organizationId), eq(postWorkflows.isDefault, true)))
+    .orderBy(workflowStages.position)
+    .limit(1);
+  if (firstStage) {
+    await db.update(episodes).set({ workflowStageId: firstStage.id, workflowStatus: "not_started", updatedAt: new Date() })
+      .where(and(eq(episodes.organizationId, organizationId), eq(episodes.id, episode.id)));
+  }
   await createDeliveryManifestForNewEpisode({ organizationId, episodeId: episode.id, appliedByUserId: context.userId });
   return NextResponse.json(episode, { status: 201 });
 }

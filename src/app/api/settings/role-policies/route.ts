@@ -3,13 +3,13 @@ import { NextResponse } from "next/server";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { organizationRolePolicies, people, workflowStageApprovalRules } from "@/lib/db/schema";
+import { organizationRolePolicies, people } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can, guestRolePolicy, isFixedRole, permissions } from "@/lib/permissions";
 import { updateOrganizationRolePoliciesSchema } from "@/lib/validations/entities";
 
 export async function PATCH(request: Request) {
-  if (!(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!(await can("manage_users"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const parsed = updateOrganizationRolePoliciesSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: "Check the role settings." }, { status: 400 });
   const context = await getActiveOrganizationContext();
@@ -22,13 +22,10 @@ export async function PATCH(request: Request) {
   const policies = parsed.data.policies.filter((policy) => !isFixedRole(policy.role));
   const db = getDb();
   const organizationId = context.organization.organizationId;
-  const [assignedRoles, approvalRoles] = await Promise.all([
-    db.select({ role: people.role }).from(people).where(eq(people.organizationId, organizationId)),
-    db.select({ role: workflowStageApprovalRules.approverRole }).from(workflowStageApprovalRules).where(eq(workflowStageApprovalRules.organizationId, organizationId)),
-  ]);
+  const assignedRoles = await db.select({ role: people.role }).from(people).where(eq(people.organizationId, organizationId));
   const configuredRoles = new Set([guestRolePolicy.role, ...policies.map((policy) => policy.role)]);
-  const removedInUse = [...new Set([...assignedRoles.map((person) => person.role), ...approvalRoles.map((rule) => rule.role)])].find((role) => !configuredRoles.has(role));
-  if (removedInUse) return NextResponse.json({ error: `Reassign people and workflow approval rules using the ${removedInUse.replaceAll("_", " ")} role before removing it.` }, { status: 409 });
+  const removedInUse = [...new Set(assignedRoles.map((person) => person.role))].find((role) => !configuredRoles.has(role));
+  if (removedInUse) return NextResponse.json({ error: `Reassign people using the ${removedInUse.replaceAll("_", " ")} role before removing it.` }, { status: 409 });
   await db.transaction(async (tx) => {
     await tx.delete(organizationRolePolicies).where(eq(organizationRolePolicies.organizationId, organizationId));
     await tx.insert(organizationRolePolicies).values(policies.map((policy) => ({ organizationId, role: policy.role, label: policy.label, permissions: policy.permissions })));

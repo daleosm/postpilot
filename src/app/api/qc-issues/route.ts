@@ -7,6 +7,7 @@ import { episodes, postWorkOrders, qcIssues, qcReports } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { insertQcIssueSchema } from "@/lib/validations/entities";
+import { getEpisodeWorkflowState } from "@/server/data/episode-workflow-state";
 
 export async function POST(request: Request) {
   if (!(await can("manage_qc"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -17,16 +18,17 @@ export async function POST(request: Request) {
 
   const organizationId = context.organization.organizationId;
   const db = getDb();
-  const [report] = await db.select({ id: qcReports.id, episodeId: qcReports.episodeId, workflowStageId: episodes.workflowStageId, editorId: episodes.editorId }).from(qcReports)
+  const [report] = await db.select({ id: qcReports.id, episodeId: qcReports.episodeId, editorId: episodes.editorId }).from(qcReports)
     .innerJoin(episodes, eq(qcReports.episodeId, episodes.id))
     .where(and(eq(qcReports.id, parsed.data.qcReportId), eq(qcReports.organizationId, organizationId), eq(episodes.organizationId, organizationId))).limit(1);
   if (!report) return NextResponse.json({ error: "QC report not found." }, { status: 404 });
+  const workflowState = await getEpisodeWorkflowState(organizationId, report.episodeId);
 
   const [issue] = await db.insert(qcIssues).values({ ...parsed.data, timecodeSeconds: parsed.data.timecodeSeconds?.toString() ?? null, organizationId }).returning({ id: qcIssues.id, status: qcIssues.status, code: qcIssues.code, severity: qcIssues.severity, description: qcIssues.description, timecodeSeconds: qcIssues.timecodeSeconds, resolution: qcIssues.resolution, resolvedAt: qcIssues.resolvedAt });
   await db.insert(postWorkOrders).values({
     organizationId,
     episodeId: report.episodeId,
-    workflowStageId: report.workflowStageId,
+    workflowStageId: workflowState.primaryStageId,
     qcIssueId: issue.id,
     kind: "qc_exception",
     status: "in_progress",

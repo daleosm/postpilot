@@ -1,9 +1,10 @@
 import "server-only";
 
-import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { billables, bookings, clientInvoiceItems, clientInvoices, clientPurchaseOrderAllocations, clientPurchaseOrders, crmCompanies, episodes, invoiceSettings, people, seasons, shows, workflowStages } from "@/lib/db/schema";
+import { billables, bookings, clientInvoiceItems, clientInvoices, clientPurchaseOrderAllocations, clientPurchaseOrders, crmCompanies, episodes, invoiceSettings, people, seasons, shows } from "@/lib/db/schema";
+import { getEpisodeWorkflowState } from "./episode-workflow-state";
 
 export type ClientPoBillingWarning = {
   clientPurchaseOrderId: string;
@@ -88,16 +89,15 @@ export async function getEpisodeInvoiceReadiness(organizationId: string, episode
     clientAddress: crmCompanies.address,
     clientEmail: crmCompanies.financeEmail,
     paymentTermsDays: crmCompanies.paymentTermsDays,
-    workflowStageName: workflowStages.name,
-    workflowComplete: sql<boolean>`coalesce(${workflowStages.isTerminal}, false)`,
   }).from(episodes)
     .innerJoin(seasons, and(eq(episodes.seasonId, seasons.id), eq(seasons.organizationId, organizationId)))
     .innerJoin(shows, and(eq(seasons.showId, shows.id), eq(shows.organizationId, organizationId)))
     .leftJoin(crmCompanies, and(eq(shows.clientCompanyId, crmCompanies.id), eq(crmCompanies.organizationId, organizationId)))
-    .leftJoin(workflowStages, and(eq(episodes.workflowStageId, workflowStages.id), eq(workflowStages.organizationId, organizationId)))
     .where(and(eq(episodes.id, episodeId), eq(episodes.organizationId, organizationId))).limit(1);
 
   if (!episode) return { episode: null, unconfirmedBookings: [], billables: [], invoices: [], invoiceProfileComplete: false, clientPoWarnings: [], readyToIssue: false, blockedReason: "Episode not found." };
+  const workflowState = await getEpisodeWorkflowState(organizationId, episodeId);
+  const workflowComplete = workflowState.displayStatus === "complete";
 
   const [unconfirmedBookings, approvedBillables, issuedInvoices, issuedInvoiceItems, profileRows] = await Promise.all([
     db.select({ id: bookings.id, title: bookings.title, personName: people.name }).from(bookings)
@@ -127,13 +127,13 @@ export async function getEpisodeInvoiceReadiness(organizationId: string, episode
   const clientPoBlocked = clientPoWarnings.find((warning) => warning.blocksBilling);
   const clientMissing = !episode.clientCompanyId || !episode.clientName;
   const invoiceProfileComplete = Boolean(profileRows[0]?.legalName?.trim() && profileRows[0]?.legalAddress?.trim());
-  const readyToIssue = invoiceProfileComplete && !clientMissing && episode.workflowComplete && unconfirmedBookings.length === 0 && approvedBillables.length > 0 && !clientPoBlocked;
+  const readyToIssue = invoiceProfileComplete && !clientMissing && workflowComplete && unconfirmedBookings.length === 0 && approvedBillables.length > 0 && !clientPoBlocked;
   const blockedReason = clientMissing
     ? "Assign a client or production company to the show before issuing an invoice."
     : !invoiceProfileComplete
       ? "Complete the invoicing profile with the legal entity name and registered address before issuing an invoice."
-    : !episode.workflowComplete
-      ? `Complete the episode workflow before issuing an invoice${episode.workflowStageName ? ` (currently ${episode.workflowStageName})` : ""}.`
+    : !workflowComplete
+      ? `Complete the episode workflow before issuing an invoice${workflowState.primaryStageName ? ` (currently ${workflowState.primaryStageName})` : ""}.`
     : unconfirmedBookings.length
       ? `${unconfirmedBookings.length} assigned booking${unconfirmedBookings.length === 1 ? "" : "s"} still need actual time confirmed.`
       : approvedBillables.length === 0
@@ -143,7 +143,7 @@ export async function getEpisodeInvoiceReadiness(organizationId: string, episode
         : null;
 
   return {
-    episode,
+    episode: { ...episode, workflowStageName: workflowState.primaryStageName, workflowComplete },
     unconfirmedBookings,
     billables: approvedBillables,
     invoices: invoicesWithExportSafeguards,

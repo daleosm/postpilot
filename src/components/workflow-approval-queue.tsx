@@ -5,6 +5,7 @@ import { Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { WorkflowStateBadge } from "@/components/workflow-state-badge";
 
 export type WorkflowSignOffItem = {
   id: string;
@@ -15,7 +16,7 @@ export type WorkflowSignOffItem = {
   stageName: string;
   stagePosition: number;
   signOffLabel: string;
-  approverRole: string;
+  approverRole: string | null;
   approvalOrder: number;
   isRequired: boolean;
   passedAt: Date | null;
@@ -27,7 +28,7 @@ export type WorkflowSignOffItem = {
 export function WorkflowSignOffQueue({ signOffs }: { signOffs: WorkflowSignOffItem[] }) {
   return (
     <section className="panel overflow-hidden">
-      <div className="border-b border-[#ebeae6] px-5 py-4"><h2 className="text-sm font-semibold text-[#343b38]">Awaiting my sign-off</h2><p className="mt-1 text-xs text-[#858a87]">Current workflow stages that have reached your configured sign-off role.</p></div>
+      <div className="border-b border-[#ebeae6] px-5 py-4"><h2 className="text-sm font-semibold text-[#343b38]">Awaiting my sign-off</h2><p className="mt-1 text-xs text-[#858a87]">Current workflow stages where you are the named sign-off person.</p></div>
       <div className="divide-y divide-[#efeeea]">
         {signOffs.map((signOff) => <SignOffRow key={signOff.id} signOff={signOff} />)}
         {!signOffs.length && <p className="px-5 py-10 text-center text-sm text-[#858a87]">No workflow stages are waiting for your sign-off.</p>}
@@ -65,7 +66,7 @@ function SignOffRow({ signOff: item }: { signOff: WorkflowSignOffItem }) {
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
         <div className="min-w-0">
           <p className="text-xs font-medium text-[#617b75]">{item.showTitle} · E{String(item.episodeNumber).padStart(2, "0")} {item.episodeTitle}</p>
-          <h3 className="mt-1 text-sm font-semibold"><Link href={`/episodes/${item.episodeId}`} className="text-[#3c4440] hover:text-[#54776d] hover:underline">{item.stageName}</Link></h3>
+          <div className="mt-1 flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold"><Link href={`/episodes/${item.episodeId}`} className="text-[#3c4440] hover:text-[#54776d] hover:underline">{item.stageName}</Link></h3><WorkflowStateBadge status="awaiting_sign_off" /></div>
           <p className="mt-1 text-xs text-[#6e7772]">{item.signOffLabel} · Step {item.approvalOrder}{item.isRequired ? " · Required" : " · Optional"} · Current since {formatDate(item.passedAt)}</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">

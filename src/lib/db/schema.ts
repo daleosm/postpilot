@@ -21,6 +21,8 @@ const auditColumns = {
 
 export const organizationRole = pgEnum("organization_role", ["owner", "admin", "member", "guest"]);
 export const episodeStatus = pgEnum("episode_status", ["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"]);
+/** The one live operational state for an episode's current workflow stage. */
+export const episodeWorkflowStatus = pgEnum("episode_workflow_status", ["not_started", "in_progress", "awaiting_sign_off", "blocked", "complete"]);
 export const qcStatus = pgEnum("qc_status", ["not_started", "in_progress", "passed", "needs_attention", "waived"]);
 export const bookingStatus = pgEnum("booking_status", ["tentative", "confirmed", "hold", "cancelled"]);
 export const bookingType = pgEnum("booking_type", ["edit", "color", "mix", "qc", "client_review", "ingest", "conform", "leave", "training", "sick", "unavailable"]);
@@ -29,7 +31,10 @@ export const billableStatus = pgEnum("billable_status", ["draft", "approved", "i
 export const clientInvoiceStatus = pgEnum("client_invoice_status", ["issued", "paid", "void"]);
 export const costType = pgEnum("cost_type", ["billable", "internal"]);
 export const availabilityStatus = pgEnum("availability_status", ["available", "limited", "booked_out", "away"]);
-export const workflowTrackStatus = pgEnum("workflow_track_status", ["not_started", "in_progress", "submitted", "approved", "changes_requested", "blocked"]);
+/** `approved` remains readable for rows created before tracks used the explicit complete state. */
+export const workflowTrackStatus = pgEnum("workflow_track_status", ["not_started", "in_progress", "submitted", "complete", "approved", "changes_requested", "blocked"]);
+export const workflowExceptionType = pgEnum("workflow_exception_type", ["early_start"]);
+export const workflowMigrationReviewStatus = pgEnum("workflow_migration_review_status", ["open", "resolved", "ignored"]);
 export const deliveryWorkflowGate = pgEnum("delivery_workflow_gate", ["none", "facility_dispatch", "client_acceptance"]);
 export const qcReportStatus = pgEnum("qc_report_status", ["draft", "in_progress", "passed", "failed", "waived"]);
 export const qcIssueStatus = pgEnum("qc_issue_status", ["open", "resolved", "waived"]);
@@ -107,7 +112,7 @@ export const organizationMembers = pgTable("organization_members", {
   index("organization_members_user_id_idx").on(table.userId),
 ]);
 
-/** Tenant-level overrides for the built-in post-house roles. */
+/** Tenant-owned role records. Only the external Guest account type is fixed. */
 export const organizationRolePolicies = pgTable("organization_role_policies", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
@@ -360,7 +365,8 @@ export const workflowStageApprovalRules = pgTable("workflow_stage_approval_rules
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   workflowStageId: uuid("workflow_stage_id").notNull().references(() => workflowStages.id, { onDelete: "cascade" }),
-  approverRole: text("approver_role").notNull(),
+  /** Legacy display context only. The assigned episode signer is authoritative. */
+  approverRole: text("approver_role"),
   label: text("label").notNull(),
   approvalOrder: integer("approval_order").default(1).notNull(),
   isRequired: boolean("is_required").default(true).notNull(),
@@ -425,7 +431,9 @@ export const episodes = pgTable("episodes", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   seasonId: uuid("season_id").notNull().references(() => seasons.id, { onDelete: "cascade" }),
+  /** The one current stage. Historical per-stage records remain in the tracks table for audit only. */
   workflowStageId: uuid("workflow_stage_id").references(() => workflowStages.id, { onDelete: "set null" }),
+  workflowStatus: episodeWorkflowStatus("workflow_status").default("not_started").notNull(),
   assignedProducerId: uuid("assigned_producer_id").references(() => people.id, { onDelete: "set null" }),
   editorId: uuid("editor_id").references(() => people.id, { onDelete: "set null" }),
   coloristId: uuid("colorist_id").references(() => people.id, { onDelete: "set null" }),
@@ -443,6 +451,7 @@ export const episodes = pgTable("episodes", {
 }, (table) => [
   uniqueIndex("episodes_season_number_idx").on(table.seasonId, table.number),
   index("episodes_workflow_stage_id_idx").on(table.workflowStageId),
+  index("episodes_organization_workflow_state_idx").on(table.organizationId, table.workflowStageId, table.workflowStatus),
   index("episodes_organization_id_idx").on(table.organizationId),
 ]);
 
@@ -467,7 +476,8 @@ export const episodeWorkflowApprovals = pgTable("episode_workflow_approvals", {
   episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
   workflowStageId: uuid("workflow_stage_id").notNull().references(() => workflowStages.id, { onDelete: "cascade" }),
   approvalRuleId: uuid("approval_rule_id").notNull().references(() => workflowStageApprovalRules.id, { onDelete: "cascade" }),
-  approverRole: text("approver_role").notNull(),
+  /** Snapshot of legacy display context; never used to authorise sign-off. */
+  approverRole: text("approver_role"),
   requiredPersonId: uuid("required_person_id").references(() => people.id, { onDelete: "set null" }),
   approverPersonId: uuid("approver_person_id").references(() => people.id, { onDelete: "set null" }),
   status: approvalStatus("status").default("pending").notNull(),
@@ -481,7 +491,21 @@ export const episodeWorkflowApprovals = pgTable("episode_workflow_approvals", {
   index("episode_workflow_approvals_organization_id_idx").on(table.organizationId),
 ]);
 
-/** Finishing stages are parallel after picture lock; they cannot be represented by one episode field. */
+/** The named episode-team person assigned to one configured sign-off slot. */
+export const episodeWorkflowSigners = pgTable("episode_workflow_signers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
+  workflowStageApprovalRuleId: uuid("workflow_stage_approval_rule_id").notNull().references(() => workflowStageApprovalRules.id, { onDelete: "cascade" }),
+  personId: uuid("person_id").notNull().references(() => people.id, { onDelete: "restrict" }),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("episode_workflow_signers_episode_rule_idx").on(table.episodeId, table.workflowStageApprovalRuleId),
+  index("episode_workflow_signers_organization_episode_idx").on(table.organizationId, table.episodeId),
+  index("episode_workflow_signers_organization_person_idx").on(table.organizationId, table.personId),
+]);
+
+/** Historical per-stage event records retained for existing approvals and activity. Not used as live workflow state. */
 export const episodeWorkflowTracks = pgTable("episode_workflow_tracks", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
@@ -496,6 +520,41 @@ export const episodeWorkflowTracks = pgTable("episode_workflow_tracks", {
   uniqueIndex("episode_workflow_tracks_episode_stage_idx").on(table.episodeId, table.workflowStageId),
   index("episode_workflow_tracks_stage_status_idx").on(table.workflowStageId, table.status),
   index("episode_workflow_tracks_organization_id_idx").on(table.organizationId),
+]);
+
+/** Immutable, capability-authorised early-start records. */
+export const episodeWorkflowExceptions = pgTable("episode_workflow_exceptions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
+  workflowStageId: uuid("workflow_stage_id").notNull().references(() => workflowStages.id, { onDelete: "cascade" }),
+  type: workflowExceptionType("type").notNull(),
+  reason: text("reason").notNull(),
+  authorizedByUserId: text("authorized_by_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("episode_workflow_exceptions_episode_stage_type_idx").on(table.episodeId, table.workflowStageId, table.type),
+  index("episode_workflow_exceptions_organization_id_idx").on(table.organizationId),
+  index("episode_workflow_exceptions_episode_stage_idx").on(table.episodeId, table.workflowStageId),
+]);
+
+/** Manual review queue for legacy episode rows whose track state could not be safely inferred. */
+export const episodeWorkflowMigrationReviews = pgTable("episode_workflow_migration_reviews", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  episodeId: uuid("episode_id").notNull().references(() => episodes.id, { onDelete: "cascade" }),
+  reason: text("reason").notNull(),
+  legacyWorkflowStageId: uuid("legacy_workflow_stage_id"),
+  legacyStatus: text("legacy_status"),
+  status: workflowMigrationReviewStatus("status").default("open").notNull(),
+  resolutionNote: text("resolution_note"),
+  reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("episode_workflow_migration_reviews_episode_idx").on(table.episodeId),
+  index("episode_workflow_migration_reviews_organization_status_idx").on(table.organizationId, table.status),
 ]);
 
 export const bookings = pgTable("bookings", {

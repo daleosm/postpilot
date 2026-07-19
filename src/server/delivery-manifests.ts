@@ -4,6 +4,7 @@ import { and, asc, desc, eq, inArray, max, ne, notInArray, or, sql } from "drizz
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
+import { getEpisodeWorkflowStates } from "@/server/data/episode-workflow-state";
 import { getDeliveryManifestReadiness, validateDeliveryItemTransition } from "@/lib/delivery-lifecycle";
 import { getDeliveryWorkflowGateReadiness } from "@/lib/delivery-workflow-gate";
 import {
@@ -434,13 +435,15 @@ export async function listDeliveryRegisterForOrganization(organizationId: string
     .where(eq(episodes.organizationId, organizationId))
     .orderBy(asc(shows.title), asc(seasons.number), asc(episodes.number));
 
+  const workflowStates = await getEpisodeWorkflowStates(organizationId, rows.map((row) => row.episodeId));
   return Promise.all(rows.map(async (row) => {
-    if (!row.manifestId) return { ...row, manifest: null, manifestState: "profile_not_applied" as const };
+    const workflowState = workflowStates.get(row.episodeId) ?? null;
+    if (!row.manifestId) return { ...row, workflowState, manifest: null, manifestState: "profile_not_applied" as const };
     const manifest = await getEpisodeDeliveryManifestForOrganization(organizationId, row.episodeId);
     // The join guarantees a manifest exists, but retaining this guard makes
     // concurrent manifest replacement harmless to the register.
-    if (!manifest) return { ...row, manifest: null, manifestState: "profile_not_applied" as const };
-    return { ...row, manifest, manifestState: "applied" as const };
+    if (!manifest) return { ...row, workflowState, manifest: null, manifestState: "profile_not_applied" as const };
+    return { ...row, workflowState, manifest, manifestState: "applied" as const };
   })).then((items) => items.filter((item): item is NonNullable<typeof item> => Boolean(item)));
 }
 

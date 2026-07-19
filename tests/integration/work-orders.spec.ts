@@ -65,7 +65,7 @@ test.describe("Post work orders integration", () => {
     await sql`insert into post_workflows (id, organization_id, name, is_default) values (${workflowId}, ${organizationId}, 'Work order test workflow', true), (${alternateWorkflowId}, ${organizationId}, 'Alternate work order workflow', false), (${foreignWorkflowId}, ${foreignOrganizationId}, 'Foreign work order workflow', true)`;
     await sql`insert into workflow_stages (id, organization_id, workflow_id, name, key, position, color, is_terminal, can_start_early) values (${stageId}, ${organizationId}, ${workflowId}, 'QC verification', 'quality_control', 1, '#506f68', false, false), (${laterStageId}, ${organizationId}, ${workflowId}, 'Delivery handoff', 'delivery_handoff', 2, '#506f68', false, false), (${alternateStageId}, ${organizationId}, ${alternateWorkflowId}, 'Alternate stage', 'alternate_stage', 1, '#506f68', false, false), (${foreignStageId}, ${foreignOrganizationId}, ${foreignWorkflowId}, 'Foreign stage', 'foreign_stage', 1, '#506f68', false, false)`;
     await sql`insert into workflow_stage_approval_rules (id, organization_id, workflow_stage_id, approver_role, label, approval_order, is_required) values (${ruleId}, ${organizationId}, ${stageId}, 'post_supervisor', 'Post Supervisor sign-off', 1, true)`;
-    await sql`insert into organization_role_policies (organization_id, role, label, permissions) values (${organizationId}, 'post_supervisor', 'Post supervisor', '["manage_work_orders","approve_work_orders","manage_shows","manage_budget"]'::jsonb), (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb), (${organizationId}, 'quality_verifier', 'QC verifier', '["update_assigned_work","verify_qc","approve_work_orders","approve_budget_overruns"]'::jsonb), (${organizationId}, 'operations_coordinator', 'Operations coordinator', '["manage_work_orders","approve_work_orders"]'::jsonb)`;
+    await sql`insert into organization_role_policies (organization_id, role, label, permissions) values (${organizationId}, 'post_supervisor', 'Post supervisor', '["manage_work_orders","approve_work_orders","manage_shows","manage_budget","manage_workflow_stages","sign_off_workflow_stages"]'::jsonb), (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb), (${organizationId}, 'quality_verifier', 'QC verifier', '["update_assigned_work","verify_qc","approve_work_orders","approve_budget_overruns"]'::jsonb), (${organizationId}, 'operations_coordinator', 'Operations coordinator', '["manage_work_orders","approve_work_orders"]'::jsonb)`;
     await sql`insert into crm_companies (id, organization_id, name, type, currency) values (${vendorCompanyId}, ${organizationId}, 'Lab Finishing Vendor', 'vendor', 'GBP'), (${clientCompanyId}, ${organizationId}, 'Lab Network Client', 'client', 'GBP'), (${foreignVendorCompanyId}, ${foreignOrganizationId}, 'Foreign Finishing Vendor', 'vendor', 'GBP'), (${foreignClientCompanyId}, ${foreignOrganizationId}, 'Foreign Client', 'client', 'GBP')`;
     await sql`insert into shows (id, organization_id, title, code, client_company_id, time_zone) values (${showId}, ${organizationId}, 'Work Order Lab Series', 'WOL', ${clientCompanyId}, 'Europe/London'), (${foreignShowId}, ${foreignOrganizationId}, 'Foreign Work Order Series', 'FWOL', null, 'Europe/London')`;
     await sql`insert into seasons (id, organization_id, show_id, number) values (${seasonId}, ${organizationId}, ${showId}, 1), (${foreignSeasonId}, ${foreignOrganizationId}, ${foreignShowId}, 1)`;
@@ -76,6 +76,7 @@ test.describe("Post work orders integration", () => {
     await sql`insert into bookings (id, organization_id, room_id, episode_id, title, starts_at, ends_at, status, booking_type) values (${otherBookingId}, ${organizationId}, ${roomId}, ${otherEpisodeId}, 'Other episode online', '2035-02-01T09:00:00.000Z', '2035-02-01T12:00:00.000Z', 'confirmed', 'conform')`;
     await sql`insert into post_work_orders (id, organization_id, episode_id, workflow_stage_id, title) values (${foreignWorkOrderId}, ${foreignOrganizationId}, ${foreignEpisodeId}, ${foreignStageId}, 'Foreign work order')`;
     await sql`insert into episode_team_assignments (organization_id, episode_id, person_id, is_lead) values (${organizationId}, ${episodeId}, ${mayaPersonId}, true)`;
+    await sql`insert into episode_workflow_signers (organization_id, episode_id, workflow_stage_approval_rule_id, person_id) values (${organizationId}, ${episodeId}, ${ruleId}, ${mayaPersonId})`;
   });
 
   test.beforeEach(async () => {
@@ -85,8 +86,9 @@ test.describe("Post work orders integration", () => {
     await sql`delete from vendor_invoices where organization_id = ${organizationId}`;
     await sql`delete from activity_log where organization_id = ${organizationId} and entity_type = 'post_work_order'`;
     await sql`delete from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId}`;
+    await sql`insert into episode_workflow_approvals (organization_id, episode_id, workflow_stage_id, approval_rule_id, required_person_id, status) values (${organizationId}, ${episodeId}, ${stageId}, ${ruleId}, ${mayaPersonId}, 'pending')`;
     await sql`delete from post_work_orders where organization_id = ${organizationId}`;
-    await sql`update episodes set workflow_stage_id = ${stageId} where organization_id = ${organizationId} and id = ${episodeId}`;
+    await sql`update episodes set workflow_stage_id = ${stageId}, workflow_status = 'awaiting_sign_off' where organization_id = ${organizationId} and id = ${episodeId}`;
   });
 
   test.afterAll(async () => {
@@ -108,7 +110,7 @@ test.describe("Post work orders integration", () => {
 
     const signOff = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: stageId, action: "sign_off" } });
     expect(signOff.status()).toBe(409);
-    await expect(signOff.json()).resolves.toMatchObject({ error: expect.stringContaining("blocking work order") });
+    await expect(signOff.json()).resolves.toMatchObject({ error: expect.stringContaining("Blocking work order") });
 
     expect((await page.request.patch(`/api/work-orders/${workOrderId}`, { data: { status: "awaiting_approval" } })).status()).toBe(200);
     await switchDebugUser(page, qcUserId);
@@ -523,10 +525,10 @@ test.describe("Post work orders integration", () => {
 
     const signOff = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: stageId, action: "sign_off" } });
     expect(signOff.status()).toBe(200);
-    const advance = await page.request.patch(`/api/episodes/${episodeId}`, { data: { workflowStageId: laterStageId } });
-    expect(advance.status()).toBe(200);
-    const repeat = await page.request.patch(`/api/episodes/${episodeId}`, { data: { workflowStageId: laterStageId } });
-    expect(repeat.status()).toBe(200);
+    const start = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: laterStageId, action: "start" } });
+    expect(start.status()).toBe(200);
+    const repeat = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: laterStageId, action: "start" } });
+    expect(repeat.status()).toBe(409);
     const rows = await sql`select id from post_work_orders where organization_id = ${organizationId} and episode_id = ${episodeId} and workflow_stage_id = ${laterStageId} and title = 'Prepare delivery manifest'`;
     expect(rows).toHaveLength(1);
   });

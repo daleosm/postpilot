@@ -21,4 +21,4 @@ export async function getQcGateReadiness(organizationId: string, episodeId: stri
   return { ready: clearedReport && !openIssue && !openException, latestStatus: latestReport?.status ?? null };
 }
 
-export const qcGateBlockedMessage = "Record a passed or authorised-waived QC result, with every QC correction resolved, before progressing from this stage.";
+export const qcGateBlockedMessage = "QC must pass or be waived, and all QC corrections must be closed, before this stage can be signed off.";

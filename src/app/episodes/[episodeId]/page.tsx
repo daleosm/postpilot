@@ -4,16 +4,26 @@ import { notFound } from "next/navigation";
 
 import { EpisodeDetailTabs } from "@/components/episode-detail-tabs";
 import { EpisodeEditButton } from "@/components/episode-edit-button";
+import { WorkflowStateBadge } from "@/components/workflow-state-badge";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can, isAssignedToEpisode } from "@/lib/permissions";
+import { can, canSignOffWorkflowTrack, canSubmitWorkflowTrack, canUpdateWorkflowWork, isAssignedToEpisode } from "@/lib/permissions";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { getDemoCommandCenterData, getEpisodeWorkspace } from "@/server/data";
 import { DeliveryManifestError, getActiveSharedDeliveryManifest } from "@/server/delivery-manifests";
 
 export default async function EpisodeDetailPage({ params }: { params: Promise<{ episodeId: string }> }) {
   const { episodeId } = await params;
-  const [organizationContext, canManageShows] = await Promise.all([getActiveOrganizationContext(), can("manage_shows")]);
-  if (!isDebugDemoMode && organizationContext?.organization?.role === "guest") {
+  const [organizationContext, canManageShows, guestMaySignOff] = await Promise.all([getActiveOrganizationContext(), can("manage_shows"), canSignOffWorkflowTrack(episodeId)]);
+  const data = await getEpisodeDetail(episodeId);
+  if (!data) notFound();
+  const currentPersonId = organizationContext?.person?.id ?? null;
+  const guestCanSignOff = Boolean(
+    organizationContext?.organization?.role === "guest"
+    && guestMaySignOff
+    && currentPersonId
+    && data.workflowSigners.some((signer) => signer.personId === currentPersonId),
+  );
+  if (!isDebugDemoMode && organizationContext?.organization?.role === "guest" && !guestCanSignOff) {
     let manifest: Awaited<ReturnType<typeof getActiveSharedDeliveryManifest>>;
     try {
       manifest = await getActiveSharedDeliveryManifest(episodeId);
@@ -25,10 +35,8 @@ export default async function EpisodeDetailPage({ params }: { params: Promise<{ 
   }
   const canSeeAllEpisodes = canManageShows && organizationContext?.organization?.role !== "guest";
   if (!isDebugDemoMode && !canSeeAllEpisodes && !(await isAssignedToEpisode(episodeId))) notFound();
-  const data = await getEpisodeDetail(episodeId);
-  if (!data) notFound();
   const { episode } = data;
-  const [canManageWorkOrders, canApproveWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canVerifyQc, canWaiveQc, canManageDelivery, canUpdateDelivery, canConfirmDeliveryReceipt] = await Promise.all([can("manage_work_orders"), can("approve_work_orders"), can("update_assigned_work"), can("manage_budget"), can("manage_qc"), can("verify_qc"), can("waive_qc"), can("manage_episode_manifests"), can("update_delivery_items"), can("confirm_delivery_receipt")]);
+  const [canManageWorkOrders, canApproveWorkOrders, canUpdateWorkOrders, canManageCommercial, canManageQc, canVerifyQc, canWaiveQc, canAuthorizeWorkflowExceptions, mayUpdateWorkflowWork, maySubmitWorkflowTracks, maySignOffWorkflowTracks, canManageDelivery, canUpdateDelivery, canConfirmDeliveryReceipt] = await Promise.all([can("manage_work_orders"), can("approve_work_orders"), can("update_assigned_work"), can("manage_budget"), can("manage_qc"), can("verify_qc"), can("waive_qc"), can("authorize_early_starts"), canUpdateWorkflowWork(episodeId), canSubmitWorkflowTrack(episodeId), canSignOffWorkflowTrack(episodeId), can("manage_episode_manifests"), can("update_delivery_items"), can("confirm_delivery_receipt")]);
   const canViewDelivery = canManageDelivery || canUpdateDelivery || canConfirmDeliveryReceipt;
   const visibleData = canManageCommercial ? data : {
     ...data,
@@ -36,7 +44,9 @@ export default async function EpisodeDetailPage({ params }: { params: Promise<{ 
     workOrders: data.workOrders.map((workOrder) => ({ ...workOrder, billingScope: "included", billingStatus: "not_billable", estimatedAmount: null, clientQuoteAmount: null, actualAmount: null, currency: "", clientQuoteCurrency: null, billingNotes: null, budgetLineId: null })),
   };
   const safeVisibleData = canViewDelivery ? visibleData : { ...visibleData, deliveryManifest: null };
-  return <div className="space-y-5"><Link href="/episodes" className="flex items-center gap-1 text-xs font-medium text-[#617b75]"><ArrowLeft size={14} /> All episodes</Link><header className="panel flex justify-between gap-4 p-6"><div className="flex items-start gap-4"><span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#e5ebe7] text-[#547168]"><Clapperboard size={21} /></span><div><p className="text-xs font-medium uppercase tracking-[0.1em] text-[#7a827e]">{episode.showTitle} · S{episode.seasonNumber} · E{String(episode.number).padStart(2, "0")}</p><h1 className="mt-1 text-[28px] font-semibold tracking-[-0.045em] text-[#262c29]">{episode.title}</h1><p className="mt-1 text-sm capitalize text-[#777d79]">{episode.workflowStage ?? episode.status.replaceAll("_", " ")} · {episode.qcStatus.replaceAll("_", " ")}</p></div></div>{canSeeAllEpisodes && <EpisodeEditButton episode={episode} />}</header><EpisodeDetailTabs data={safeVisibleData} canManageEpisodes={canSeeAllEpisodes} canManageWorkOrders={canManageWorkOrders} canApproveWorkOrders={canApproveWorkOrders} canUpdateWorkOrders={canUpdateWorkOrders} canManageCommercial={canManageCommercial} canManageQc={canManageQc} canVerifyQc={canVerifyQc} canWaiveQc={canWaiveQc} canViewDelivery={canViewDelivery} canManageDelivery={canManageDelivery} canUpdateDelivery={canUpdateDelivery} canConfirmDeliveryReceipt={canConfirmDeliveryReceipt} currentPersonId={organizationContext?.person?.id ?? null} /></div>;
+  const guestWorkflowOnly = organizationContext?.organization?.role === "guest" && guestCanSignOff;
+  const episodeData = guestWorkflowOnly ? { ...safeVisibleData, schedule: [], budget: [], activity: [], workOrders: [], qcHistory: [], qcIssueHistory: [], vendorOptions: [], deliveryManifest: null, deliveryProfiles: [] } : safeVisibleData;
+  return <div className="space-y-5"><Link href="/episodes" className="flex items-center gap-1 text-xs font-medium text-[#617b75]"><ArrowLeft size={14} /> All episodes</Link><header className="panel flex justify-between gap-4 p-6"><div className="flex items-start gap-4"><span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#e5ebe7] text-[#547168]"><Clapperboard size={21} /></span><div><p className="text-xs font-medium uppercase tracking-[0.1em] text-[#7a827e]">{episode.showTitle} · S{episode.seasonNumber} · E{String(episode.number).padStart(2, "0")}</p><h1 className="mt-1 text-[28px] font-semibold tracking-[-0.045em] text-[#262c29]">{episode.title}</h1><div className="mt-2 flex flex-wrap items-center gap-2"><p className="text-sm text-[#64716b]">{episode.workflowStage ?? "Workflow not configured"}</p><WorkflowStateBadge status={episode.workflowState?.displayStatus ?? episode.status} /><span className="text-xs text-[#8a918d]">QC · {episode.qcStatus.replaceAll("_", " ")}</span></div></div></div>{canSeeAllEpisodes && <EpisodeEditButton episode={episode} />}</header><EpisodeDetailTabs data={episodeData} workflowOnly={guestWorkflowOnly} canUpdateWorkflowWork={mayUpdateWorkflowWork} canSubmitWorkflowTracks={maySubmitWorkflowTracks} canSignOffWorkflowTracks={maySignOffWorkflowTracks} canAuthorizeWorkflowExceptions={canAuthorizeWorkflowExceptions} canManageWorkOrders={canManageWorkOrders} canApproveWorkOrders={canApproveWorkOrders} canUpdateWorkOrders={canUpdateWorkOrders} canManageCommercial={canManageCommercial} canManageQc={canManageQc} canVerifyQc={canVerifyQc} canWaiveQc={canWaiveQc} canViewDelivery={canViewDelivery} canManageDelivery={canManageDelivery} canUpdateDelivery={canUpdateDelivery} canConfirmDeliveryReceipt={canConfirmDeliveryReceipt} currentPersonId={currentPersonId} /></div>;
 }
 
 function SharedDeliveryManifest({ manifest }: { manifest: Awaited<ReturnType<typeof getActiveSharedDeliveryManifest>> }) {
@@ -46,9 +56,9 @@ function SharedDeliveryManifest({ manifest }: { manifest: Awaited<ReturnType<typ
 async function getEpisodeDetail(episodeId: string) {
   if (isDebugDemoMode) {
     const demo = getDemoCommandCenterData(); const episode = demo.dashboard.episodes.find((item) => item.id === episodeId); if (!episode) return null;
-    const details = { ...episode, workflowStageId: null, workflowStage: null, editorName: episode.showTitle === "Under Current" ? "Leah Morgan" : "James Liu", producerName: episode.showTitle === "Under Current" ? "Noah Chen" : "Maya Ortiz", productionCode: null, airDate: null, lockedCutDate: null };
+    const details = { ...episode, workflowStageId: null, workflowStage: null, workflowState: { displayStatus: episode.status, label: episode.status, primaryStageId: null, primaryStageName: null }, editorName: episode.showTitle === "Under Current" ? "Leah Morgan" : "James Liu", producerName: episode.showTitle === "Under Current" ? "Noah Chen" : "Maya Ortiz", productionCode: null, airDate: null, lockedCutDate: null };
     const workflowApprovers = [...demo.team.map((person) => ({ id: person.id, name: person.name, role: person.role })), { id: "demo-director", name: "Mara Voss", role: "director" }, { id: "demo-network", name: "Iris Bell", role: "network" }];
-    return { episode: details, schedule: demo.schedule.filter((item) => item.episodeTitle === episode.title), budget: [{ id: "demo-budget", category: "Editorial + finishing", actualAmount: "42150.00", budgetedAmount: "48000.00" }], activity: demo.dashboard.activity.filter((item) => item.entityId === episode.id), workflowStages: [], workflowApprovalRules: [], workflowApprovals: [], workflowTracks: [], workflowApprovers, episodeTeam: [], workOrders: [], qcHistory: [], qcIssueHistory: [], vendorOptions: [], deliveryManifest: null, deliveryProfiles: [] };
+    return { episode: details, schedule: demo.schedule.filter((item) => item.episodeTitle === episode.title), budget: [{ id: "demo-budget", category: "Editorial + finishing", actualAmount: "42150.00", budgetedAmount: "48000.00" }], activity: demo.dashboard.activity.filter((item) => item.entityId === episode.id), workflowStages: [], workflowApprovalRules: [], workflowApprovals: [], workflowExceptions: [], workflowOperationalBlockers: [], workflowApprovers, workflowSigners: [], episodeTeam: [], workOrders: [], qcHistory: [], qcIssueHistory: [], vendorOptions: [], deliveryManifest: null, deliveryProfiles: [] };
   }
   const context = await getActiveOrganizationContext();
   return context?.organization ? getEpisodeWorkspace(context.organization.organizationId, episodeId) : null;

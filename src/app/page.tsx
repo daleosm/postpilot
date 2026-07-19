@@ -26,6 +26,7 @@ import {
   listShows,
   listTeam,
 } from "@/server/data";
+import { WorkflowStateBadge } from "@/components/workflow-state-badge";
 
 function formatDate(value: Date | string | null) {
   if (!value) return "—";
@@ -76,7 +77,7 @@ export default async function DashboardPage() {
 
   const activeShows = showRows.filter((show) => show.seasons.some((season) => season.activeEpisodeCount > 0));
   const dueThisWeek = dashboard.episodes.filter((episode) => episode.deliveryDeadline && episode.deliveryDeadline >= weekStart && episode.deliveryDeadline <= endOfWeek);
-  const lockedCuts = dashboard.episodes.filter((episode) => episode.status === "locked");
+  const lockedCuts = dashboard.episodes.filter((episode) => "workflowStageKey" in episode ? episode.workflowStageKey === "picture_lock" && episode.status === "awaiting_sign_off" : episode.status === "locked");
   const qcFailures = dashboard.episodes.filter((episode) => episode.qcStatus === "needs_attention");
   const budgetBurn = budget.totals.budgeted ? Math.round((budget.totals.actual / budget.totals.budgeted) * 100) : 0;
   const suiteHours = schedule.reduce<Record<string, number>>((total, booking) => {
@@ -130,7 +131,7 @@ export default async function DashboardPage() {
             {[...lockedCuts, ...qcFailures].slice(0, 5).map((episode) => (
               <Link href={`/episodes/${episode.id}`} key={`${episode.id}-${episode.qcStatus}`} className="flex items-center gap-3 px-5 py-3 transition hover:bg-[#fbfbf9]">
                 <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[10px] font-bold ${episode.qcStatus === "needs_attention" ? "bg-[#f7e5dd] text-[#a96347]" : "bg-[#e6ece8] text-[#4e746b]"}`}>{episode.qcStatus === "needs_attention" ? "QC" : "LK"}</span>
-                <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-[#3a403e]">{episode.showTitle} · E{String(episode.number).padStart(2, "0")} {episode.title}</p><p className="mt-0.5 text-xs text-[#858987]">{episode.qcStatus === "needs_attention" ? "Technical QC failure · escalation needed" : "Picture locked · client approval pending"}</p></div>
+                <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-[#3a403e]">{episode.showTitle} · E{String(episode.number).padStart(2, "0")} {episode.title}</p><div className="mt-1 flex flex-wrap items-center gap-1.5"><WorkflowStateBadge status={episode.status} /><p className="text-xs text-[#858987]">{episode.qcStatus === "needs_attention" ? "Technical QC failure · escalation needed" : "Picture lock stage · client approval pending"}</p></div></div>
                 <span className="text-[11px] font-medium text-[#7c817f]">{formatDate(episode.deliveryDeadline)}</span>
               </Link>
             ))}

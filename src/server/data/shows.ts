@@ -8,8 +8,12 @@ import { listEpisodes } from "./episodes";
 
 export async function listShows(organizationId: string) {
   const db = getDb();
-  const rows = await db.select({ showId: shows.id, title: shows.title, code: shows.code, network: shows.network, seasonId: seasons.id, seasonNumber: seasons.number, episodeId: episodes.id, episodeStatus: episodes.status })
-    .from(shows).leftJoin(seasons, and(eq(seasons.showId, shows.id), eq(seasons.organizationId, organizationId))).leftJoin(episodes, and(eq(episodes.seasonId, seasons.id), eq(episodes.organizationId, organizationId))).where(eq(shows.organizationId, organizationId)).orderBy(asc(shows.title), asc(seasons.number));
+  const [rows, episodeStates] = await Promise.all([
+    db.select({ showId: shows.id, title: shows.title, code: shows.code, network: shows.network, seasonId: seasons.id, seasonNumber: seasons.number, episodeId: episodes.id })
+      .from(shows).leftJoin(seasons, and(eq(seasons.showId, shows.id), eq(seasons.organizationId, organizationId))).leftJoin(episodes, and(eq(episodes.seasonId, seasons.id), eq(episodes.organizationId, organizationId))).where(eq(shows.organizationId, organizationId)).orderBy(asc(shows.title), asc(seasons.number)),
+    listEpisodes(organizationId),
+  ]);
+  const statesByEpisodeId = new Map(episodeStates.map((episode) => [episode.id, episode.status]));
 
   return Object.values(rows.reduce<Record<string, { id: string; title: string; code: string; network: string | null; seasons: Map<string, { id: string; number: number; episodeCount: number; activeEpisodeCount: number }> }>>((result, row) => {
     const show = result[row.showId] ?? { id: row.showId, title: row.title, code: row.code, network: row.network, seasons: new Map() };
@@ -17,7 +21,7 @@ export async function listShows(organizationId: string) {
       const season = show.seasons.get(row.seasonId) ?? { id: row.seasonId, number: row.seasonNumber ?? 0, episodeCount: 0, activeEpisodeCount: 0 };
       if (row.episodeId) {
         season.episodeCount += 1;
-        if (row.episodeStatus !== "delivered") season.activeEpisodeCount += 1;
+        if (statesByEpisodeId.get(row.episodeId) !== "complete") season.activeEpisodeCount += 1;
       }
       show.seasons.set(row.seasonId, season);
     }

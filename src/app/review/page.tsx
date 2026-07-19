@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { WorkflowSignOffQueue } from "@/components/workflow-approval-queue";
 import { WorkOrderQueue } from "@/components/work-order-queue";
 import { getActiveOrganizationContext, getActiveShow } from "@/lib/organizations";
-import { roleHome } from "@/lib/permissions";
+import { can, roleHome } from "@/lib/permissions";
 import { hasApprovalWorkspace, listWorkOrderInbox, listWorkflowSignOffInbox } from "@/server/data";
 
 export default async function ApprovalsPage() {
@@ -12,7 +12,13 @@ export default async function ApprovalsPage() {
     getActiveOrganizationContext(),
     getActiveShow(),
   ]);
-  const [signOffs, workOrders, hasApprovalAccess] = context?.organization ? await Promise.all([listWorkflowSignOffInbox(context.organization.organizationId, context.userId), listWorkOrderInbox(context.organization.organizationId, context.userId), hasApprovalWorkspace(context.organization.organizationId, context.userId)]) : [[], [], false];
+  const [signOffs, workOrders, hasApprovalAccess] = context?.organization
+    ? await Promise.all([
+      can("sign_off_workflow_stages").then((maySignOff) => maySignOff ? listWorkflowSignOffInbox(context.organization!.organizationId, context.userId) : []),
+      listWorkOrderInbox(context.organization.organizationId, context.userId),
+      hasApprovalWorkspace(context.organization.organizationId, context.userId),
+    ])
+    : [[], [], false];
   if (!hasApprovalAccess) redirect(await roleHome());
   const visibleSignOffs = activeShow ? signOffs.filter((item) => item.showId === activeShow.id) : signOffs;
   const visibleWorkOrders = activeShow ? workOrders.filter((item) => item.showId === activeShow.id) : workOrders;

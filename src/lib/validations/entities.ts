@@ -9,8 +9,6 @@ const optionalTimestamp = z.coerce.date().optional();
 const money = z.coerce.number().nonnegative().finite();
 const metadata = z.record(z.string(), z.unknown()).default({});
 
-const episodeStatuses = ["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"] as const;
-const qcStatuses = ["not_started", "in_progress", "passed", "needs_attention", "waived"] as const;
 const workOrderPriorities = ["blocker", "high", "normal", "low"] as const;
 const workOrderStatuses = ["open", "awaiting_approval", "in_progress", "ready_for_review", "complete", "rejected", "cancelled"] as const;
 const workOrderBillingScopes = ["included", "billable_change", "internal"] as const;
@@ -237,7 +235,7 @@ export const updateWorkflowTemplateSchema = z.object({
   rules: z.array(z.object({
     id: id.optional(),
     workflowStageId: id,
-    approverRole: z.string().trim().min(2).max(80),
+    approverRole: z.string().trim().min(2).max(80).nullable().optional(),
     label: z.string().trim().min(2).max(120),
     approvalOrder: z.coerce.number().int().positive(),
     isRequired: z.boolean(),
@@ -281,7 +279,6 @@ export const updateRoomSchema = insertRoomSchema.omit({ organizationId: true }).
 
 export const insertEpisodeSchema = z.object({
   seasonId: id,
-  workflowStageId: nullableId,
   assignedProducerId: nullableId,
   editorId: nullableId,
   coloristId: nullableId,
@@ -290,8 +287,6 @@ export const insertEpisodeSchema = z.object({
   productionCode: z.string().trim().max(40).nullable().optional(),
   title: z.string().trim().min(1, "Episode title is required.").max(160),
   synopsis: z.string().trim().max(4000).nullable().optional(),
-  status: z.enum(episodeStatuses).default("development"),
-  qcStatus: z.enum(qcStatuses).default("not_started"),
   airDate: optionalDate.nullable(),
   lockedCutDate: optionalDate.nullable(),
   deliveryDeadline: optionalTimestamp.nullable(),

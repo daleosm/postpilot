@@ -37,13 +37,14 @@ type StagePayload = {
   isTerminal: boolean;
   canStartEarly: boolean;
   requiresQcPass: boolean;
+  deliveryGate: "none" | "dispatch" | "receipt";
 };
 
 function baseStages(): StagePayload[] {
   return [
-    { id: editorialStageId, name: "Editorial handoff", key: "editorial_handoff", position: 1, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: false },
-    { id: qcStageId, name: "Quality control", key: "quality_control", position: 2, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: true },
-    { id: deliveryStageId, name: "Delivery", key: "delivery", position: 3, color: "#66819a", isTerminal: true, canStartEarly: false, requiresQcPass: false },
+    { id: editorialStageId, name: "Editorial handoff", key: "editorial_handoff", position: 1, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: false, deliveryGate: "none" },
+    { id: qcStageId, name: "Quality control", key: "quality_control", position: 2, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: true, deliveryGate: "none" },
+    { id: deliveryStageId, name: "Delivery", key: "delivery", position: 3, color: "#66819a", isTerminal: true, canStartEarly: false, requiresQcPass: false, deliveryGate: "none" },
   ];
 }
 
@@ -86,10 +87,10 @@ async function resetFixture() {
     (${foreignOrganizationId}, ${managerUserId}, 'member'),
     (${emptyOrganizationId}, ${managerUserId}, 'member')`;
   await sql`insert into organization_role_policies (organization_id, role, label, permissions) values
-    (${organizationId}, 'workflow_manager', 'Workflow manager', '["manage_shows"]'::jsonb),
+    (${organizationId}, 'workflow_manager', 'Workflow manager', '["manage_workflow_configuration","manage_workflow_stages","submit_workflow_stages","sign_off_workflow_stages"]'::jsonb),
     (${organizationId}, 'workflow_viewer', 'Workflow viewer', '[]'::jsonb),
-    (${foreignOrganizationId}, 'workflow_manager', 'Workflow manager', '["manage_shows"]'::jsonb),
-    (${emptyOrganizationId}, 'workflow_manager', 'Workflow manager', '["manage_shows"]'::jsonb)`;
+    (${foreignOrganizationId}, 'workflow_manager', 'Workflow manager', '["manage_workflow_configuration","manage_workflow_stages"]'::jsonb),
+    (${emptyOrganizationId}, 'workflow_manager', 'Workflow manager', '["manage_workflow_configuration","manage_workflow_stages"]'::jsonb)`;
   await sql`insert into people (id, organization_id, user_id, name, email, role) values
     (${managerPersonId}, ${organizationId}, ${managerUserId}, 'Workflow Settings Manager', 'workflow-settings-manager@postpilot.test', 'workflow_manager'),
     (${viewerPersonId}, ${organizationId}, ${viewerUserId}, 'Workflow Settings Viewer', 'workflow-settings-viewer@postpilot.test', 'workflow_viewer'),
@@ -124,7 +125,7 @@ test.describe("Workflow settings", () => {
     await sql.end();
   });
 
-  test("lets a manager add, persist, and remove stages, sign-offs, and checklist templates", async ({ page }) => {
+  test("lets a manager add, persist, and remove ordered stages and sign-off slots", async ({ page }) => {
     await assume(page, managerUserId, organizationId);
     await page.goto("/settings/workflow");
 
@@ -133,39 +134,22 @@ test.describe("Workflow settings", () => {
     await expect(stageNames).toHaveCount(4);
     await stageNames.nth(3).fill("Archive preparation");
     await page.getByRole("button", { name: "Add sign-off", exact: true }).first().click();
-    await page.getByLabel("Sign-off role 2").selectOption("workflow_manager");
-    await page.getByRole("button", { name: "Add item", exact: true }).nth(2).click();
-    await page.getByLabel("Work order 1 title").fill("Prepare delivery manifest");
-    await page.getByLabel("Work order 1 role").selectOption("workflow_manager");
+    await page.getByLabel("Sign-off slot 2").fill("Creative approval");
     await page.getByRole("button", { name: "Save workflow", exact: true }).click();
     await expect(page.getByRole("status")).toContainText("Workflow saved.");
 
     await page.reload();
     await expect(page.getByLabel("Stage name")).toHaveCount(4);
     await expect(page.getByLabel("Stage name").nth(3)).toHaveValue("Archive preparation");
-    await expect(page.getByLabel("Sign-off role 2")).toHaveValue("workflow_manager");
-    await expect(page.getByLabel("Work order 1 title")).toHaveValue("Prepare delivery manifest");
+    await expect(page.getByLabel("Sign-off slot 2")).toHaveValue("Creative approval");
+    await expect(page.getByLabel("Mark Delivery as terminal")).toBeChecked();
     await expect(page.getByRole("button", { name: /Delete Quality control/ })).toBeDisabled();
-
-    const activateDelivery = await page.request.patch(`/api/episodes/${templateEpisodeId}`, { data: { workflowStageId: deliveryStageId } });
-    expect(activateDelivery.status()).toBe(200);
-    const repeatActivation = await page.request.patch(`/api/episodes/${templateEpisodeId}`, { data: { workflowStageId: deliveryStageId } });
-    expect(repeatActivation.status()).toBe(200);
-    const generatedWorkOrders = await sql`select id from post_work_orders where organization_id = ${organizationId} and episode_id = ${templateEpisodeId} and title = 'Prepare delivery manifest'`;
-    expect(generatedWorkOrders).toHaveLength(1);
 
     await page.getByRole("button", { name: "Delete Archive preparation", exact: true }).click();
     await page.getByRole("button", { name: "Save workflow", exact: true }).click();
     await expect(page.getByRole("status")).toContainText("Workflow saved.");
     await page.reload();
     await expect(page.getByLabel("Stage name")).toHaveCount(3);
-
-    await page.getByRole("button", { name: "Remove work order 1", exact: true }).click();
-    await expect(page.getByLabel("Work order 1 title")).toHaveCount(0);
-    await page.getByRole("button", { name: "Save workflow", exact: true }).click();
-    await page.reload();
-    const templates = await sql`select id from workflow_stage_work_order_templates where organization_id = ${organizationId}`;
-    expect(templates).toHaveLength(0);
   });
 
   test("keeps the saved workflow unchanged when validation or protected-history deletion fails", async ({ page }) => {
@@ -178,6 +162,7 @@ test.describe("Workflow settings", () => {
     await expect(page.getByLabel("Stage name").first()).toHaveValue("X");
 
     await page.reload();
+    await sql`insert into episode_workflow_tracks (organization_id, episode_id, workflow_stage_id, status, started_at) values (${organizationId}, ${editorialEpisodeId}, ${editorialStageId}, 'in_progress', now()) on conflict (episode_id, workflow_stage_id) do nothing`;
     await page.getByRole("button", { name: "Delete Editorial handoff", exact: true }).click();
     await page.getByRole("button", { name: "Save workflow", exact: true }).click();
     await expect(page.getByRole("status")).toContainText("episode workflow history cannot be deleted");
@@ -198,6 +183,7 @@ test.describe("Workflow settings", () => {
     await page.keyboard.press("ArrowUp");
     await expect(page.getByLabel("Stage name").nth(1)).toHaveValue("Delivery");
     await page.getByRole("button", { name: "Save workflow", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("Workflow saved.");
 
     const savedStages = await sql`select key from workflow_stages where organization_id = ${organizationId} order by position`;
     expect(savedStages.map((stage) => stage.key)).toEqual(["editorial_handoff", "delivery", "quality_control"]);
@@ -218,7 +204,7 @@ test.describe("Workflow settings", () => {
 
     expect((await page.request.patch(`/api/workflows/${workflowId}`, { data: workflowPayload({ rules: [{ ...baseRules()[0], workflowStageId: foreignStageId }] }) })).status()).toBe(400);
 
-    const foreignStagePayload = workflowPayload({ stages: [...baseStages(), { id: foreignStageId, name: "Foreign editorial", key: "foreign_editorial", position: 4, color: "#725f8f", isTerminal: false, canStartEarly: false, requiresQcPass: false }] });
+    const foreignStagePayload = workflowPayload({ stages: [...baseStages(), { id: foreignStageId, name: "Foreign editorial", key: "foreign_editorial", position: 4, color: "#725f8f", isTerminal: false, canStartEarly: false, requiresQcPass: false, deliveryGate: "none" }] });
     expect((await page.request.patch(`/api/workflows/${workflowId}`, { data: foreignStagePayload })).status()).toBe(400);
 
     expect((await page.request.patch(`/api/workflows/${foreignWorkflowId}`, { data: workflowPayload() })).status()).toBe(404);
@@ -264,4 +250,5 @@ test.describe("Workflow settings", () => {
       .map((element) => ({ className: element.className, right: Math.round(element.getBoundingClientRect().right), text: element.textContent?.trim().slice(0, 60) })));
     expect(overflowingElements).toEqual([]);
   });
+
 });

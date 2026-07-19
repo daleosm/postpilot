@@ -8,6 +8,7 @@ import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { insertQcReportSchema } from "@/lib/validations/entities";
+import { getEpisodeWorkflowState } from "@/server/data/episode-workflow-state";
 
 export async function POST(request: Request) {
   if (!(await can("manage_qc"))) return NextResponse.json({ error: "Your role needs the Record QC reports permission." }, { status: 403 });
@@ -17,9 +18,10 @@ export async function POST(request: Request) {
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const db = getDb();
-  const [episode] = await db.select({ id: episodes.id, workflowStageId: episodes.workflowStageId, editorId: episodes.editorId }).from(episodes).innerJoin(seasons, eq(episodes.seasonId, seasons.id)).innerJoin(shows, eq(seasons.showId, shows.id))
+  const [episode] = await db.select({ id: episodes.id, editorId: episodes.editorId }).from(episodes).innerJoin(seasons, eq(episodes.seasonId, seasons.id)).innerJoin(shows, eq(seasons.showId, shows.id))
     .where(and(eq(episodes.id, parsed.data.episodeId), eq(episodes.organizationId, context.organization.organizationId), eq(seasons.organizationId, context.organization.organizationId), eq(shows.organizationId, context.organization.organizationId))).limit(1);
   if (!episode) return NextResponse.json({ error: "Episode not found." }, { status: 404 });
+  const workflowState = await getEpisodeWorkflowState(context.organization.organizationId, episode.id);
   const [actor] = await db.select({ id: people.id, role: people.role }).from(people)
     .where(and(eq(people.organizationId, context.organization.organizationId), eq(people.userId, context.userId))).limit(1);
   if (parsed.data.status === "waived" && !(await can("waive_qc"))) return NextResponse.json({ error: "Your role needs the QC waiver permission." }, { status: 403 });
@@ -62,7 +64,7 @@ export async function POST(request: Request) {
     await db.insert(postWorkOrders).values({
       organizationId: context.organization.organizationId,
       episodeId: episode.id,
-      workflowStageId: episode.workflowStageId,
+      workflowStageId: workflowState.primaryStageId,
       kind: "qc_exception",
       status: "in_progress",
       title: "QC failure — assign and resolve corrections",

@@ -7,7 +7,7 @@ import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can, getTenantRolePolicies, permissions } from "@/lib/permissions";
 
 export default async function RoleSettingsPage() {
-  if (!(await can("manage_shows"))) redirect("/");
+  if (!(await can("manage_users"))) redirect("/");
   const context = await getActiveOrganizationContext();
   if (!context?.organization) redirect("/");
   const policies = await getTenantRolePolicies(context.organization.organizationId);

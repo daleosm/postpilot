@@ -63,11 +63,11 @@ test.describe("QC lifecycle integration", () => {
       (${organizationId}, ${managerUserId}, 'member'),
       (${organizationId}, ${waiverUserId}, 'member')`;
     await sql`insert into organization_role_policies (organization_id, role, label, permissions) values
-      (${organizationId}, 'qc_verifier', 'QC verifier', '["manage_qc","verify_qc","update_assigned_work"]'::jsonb),
+      (${organizationId}, 'qc_verifier', 'QC verifier', '["manage_qc","verify_qc","update_assigned_work","update_assigned_workflow_work","submit_workflow_stages","sign_off_workflow_stages"]'::jsonb),
       (${organizationId}, 'qc_recorder', 'QC recorder', '["manage_qc"]'::jsonb),
       (${organizationId}, 'qc_waiver', 'QC waiver', '["manage_qc","waive_qc"]'::jsonb),
       (${organizationId}, 'editor', 'Editor', '["update_assigned_work"]'::jsonb),
-      (${organizationId}, 'post_manager', 'Post manager', '["manage_shows"]'::jsonb)`;
+      (${organizationId}, 'post_manager', 'Post manager', '["manage_shows","manage_workflow_configuration"]'::jsonb)`;
     await sql`insert into people (id, organization_id, user_id, name, email, role) values
       (${qcPersonId}, ${organizationId}, ${qcUserId}, 'QC Lifecycle Verifier', 'qc-lifecycle-verifier@postpilot.test', 'qc_verifier'),
       (${recorderPersonId}, ${organizationId}, ${recorderUserId}, 'QC Lifecycle Recorder', 'qc-lifecycle-recorder@postpilot.test', 'qc_recorder'),
@@ -83,6 +83,8 @@ test.describe("QC lifecycle integration", () => {
     await sql`insert into episode_team_assignments (organization_id, episode_id, person_id, is_lead) values
       (${organizationId}, ${episodeId}, ${qcPersonId}, true),
       (${organizationId}, ${episodeId}, ${recorderPersonId}, false)`;
+    await sql`insert into episode_workflow_signers (organization_id, episode_id, workflow_stage_approval_rule_id, person_id) values
+      (${organizationId}, ${episodeId}, ${qcApprovalRuleId}, ${qcPersonId})`;
     await sql`insert into shows (id, organization_id, title, code, time_zone) values (${crossShowId}, ${crossOrganizationId}, 'Isolated QC Series', 'XQC', 'Europe/London')`;
     await sql`insert into seasons (id, organization_id, show_id, number) values (${crossSeasonId}, ${crossOrganizationId}, ${crossShowId}, 1)`;
     await sql`insert into episodes (id, organization_id, season_id, number, title, status, qc_status) values (${crossEpisodeId}, ${crossOrganizationId}, ${crossSeasonId}, 1, 'Other tenant episode', 'online', 'in_progress')`;
@@ -95,7 +97,7 @@ test.describe("QC lifecycle integration", () => {
     await sql`delete from qc_reports where organization_id = ${organizationId} and episode_id = ${episodeId}`;
     await sql`delete from episode_workflow_approvals where organization_id = ${organizationId} and episode_id = ${episodeId}`;
     await sql`delete from activity_log where organization_id = ${organizationId} and entity_id = ${episodeId}`;
-    await sql`update episodes set qc_status = 'in_progress', workflow_stage_id = ${stageId} where id = ${episodeId} and organization_id = ${organizationId}`;
+    await sql`update episodes set qc_status = 'in_progress', workflow_stage_id = ${stageId}, workflow_status = 'in_progress' where id = ${episodeId} and organization_id = ${organizationId}`;
   });
 
   test.afterAll(async () => {
@@ -124,7 +126,7 @@ test.describe("QC lifecycle integration", () => {
         name: "QC lifecycle workflow",
         description: null,
         stages: [
-          { id: deliveryStageId, name: "Delivery", key: "delivery", position: 1, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: false },
+          { id: deliveryStageId, name: "Delivery", key: "delivery", position: 1, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: false, deliveryGate: "none" },
         ],
         rules: [],
         workOrderTemplates: [],
@@ -132,14 +134,15 @@ test.describe("QC lifecycle integration", () => {
     });
 
     expect(response.status()).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({ error: "The QC workflow stage cannot be deleted." });
+    await expect(response.json()).resolves.toMatchObject({ error: "This workflow must retain its QC decision stage." });
   });
 
   test("keeps failed QC in one decision stage and advances only after a passed re-QC", async ({ page }) => {
     await switchUser(page, qcUserId);
+    expect((await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: stageId, action: "submit" } })).status()).toBe(200);
     const beforeResult = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: stageId, approvalRuleId: qcApprovalRuleId, action: "sign_off" } });
     expect(beforeResult.status()).toBe(409);
-    await expect(beforeResult.json()).resolves.toMatchObject({ error: expect.stringContaining("passed or authorised-waived QC") });
+    await expect(beforeResult.json()).resolves.toMatchObject({ error: expect.stringContaining("QC must pass or be waived") });
 
     const failed = await page.request.post("/api/qc-reports", { data: { episodeId, status: "failed", summary: "A correction is required." } });
     expect(failed.status()).toBe(201);
@@ -153,7 +156,10 @@ test.describe("QC lifecycle integration", () => {
     expect(passed.status()).toBe(200);
     const signed = await page.request.post(`/api/episodes/${episodeId}`, { data: { workflowStageId: stageId, approvalRuleId: qcApprovalRuleId, action: "sign_off" } });
     expect(signed.status()).toBe(200);
-    await expect(signed.json()).resolves.toMatchObject({ stageComplete: true, advancedTo: { id: deliveryStageId, name: "Delivery" } });
+    await expect(signed.json()).resolves.toMatchObject({ stageComplete: true });
+    expect(await sql`select workflow_stage_id, workflow_status from episodes where organization_id = ${organizationId} and id = ${episodeId}`).toEqual([
+      { workflow_stage_id: deliveryStageId, workflow_status: "not_started" },
+    ]);
   });
 
   test("keeps another tenant's QC report outside the current post house", async ({ page }) => {
@@ -264,7 +270,7 @@ test.describe("QC lifecycle integration", () => {
     expect(issueResponse.status()).toBe(201);
     const issueId = (await issueResponse.json()).id as string;
     const [linkedIssueWorkOrder] = await sql`select id, qc_issue_id, assignee_person_id, is_blocking, status from post_work_orders where qc_issue_id = ${issueId}`;
-    expect(linkedIssueWorkOrder).toMatchObject({ qc_issue_id: issueId, assignee_person_id: editorPersonId, is_blocking: true, status: "open" });
+    expect(linkedIssueWorkOrder).toMatchObject({ qc_issue_id: issueId, assignee_person_id: editorPersonId, is_blocking: true, status: "in_progress" });
 
     const reQc = await page.request.post("/api/qc-reports", { data: { episodeId, status: "in_progress", summary: "Re-QC started after correction." } });
     expect(reQc.status()).toBe(201);
@@ -334,9 +340,9 @@ test.describe("QC lifecycle integration", () => {
         name: "QC lifecycle workflow",
         description: null,
         stages: [
-          { id: stageId, name: "Quality control", key: "quality_control", position: 1, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: true },
-          { id: deliveryStageId, name: "Delivery", key: "delivery", position: 2, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: false },
-          { id: temporaryStageId, name: "Archive preparation", key: "archive_preparation", position: 3, color: "#687a78", isTerminal: false, canStartEarly: false, requiresQcPass: false },
+          { id: stageId, name: "Quality control", key: "quality_control", position: 1, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: true, deliveryGate: "none" },
+          { id: deliveryStageId, name: "Delivery", key: "delivery", position: 2, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: false, deliveryGate: "none" },
+          { id: temporaryStageId, name: "Archive preparation", key: "archive_preparation", position: 3, color: "#687a78", isTerminal: false, canStartEarly: false, requiresQcPass: false, deliveryGate: "none" },
         ],
         rules: [
           { id: qcApprovalRuleId, workflowStageId: stageId, approverRole: "qc_verifier", label: "QC sign-off", approvalOrder: 1, isRequired: true },
@@ -352,8 +358,8 @@ test.describe("QC lifecycle integration", () => {
         name: "QC lifecycle workflow",
         description: null,
         stages: [
-          { id: stageId, name: "Quality control", key: "quality_control", position: 1, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: true },
-          { id: deliveryStageId, name: "Delivery", key: "delivery", position: 2, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: false },
+          { id: stageId, name: "Quality control", key: "quality_control", position: 1, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: true, deliveryGate: "none" },
+          { id: deliveryStageId, name: "Delivery", key: "delivery", position: 2, color: "#506f68", isTerminal: false, canStartEarly: false, requiresQcPass: false, deliveryGate: "none" },
         ],
         rules: [
           { id: qcApprovalRuleId, workflowStageId: stageId, approverRole: "qc_verifier", label: "QC sign-off", approvalOrder: 1, isRequired: true },

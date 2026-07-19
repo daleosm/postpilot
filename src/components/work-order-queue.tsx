@@ -5,6 +5,7 @@ import { CheckCircle2, ExternalLink, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { WorkflowStateBadge } from "@/components/workflow-state-badge";
 
 export type WorkOrderInboxItem = {
   id: string;
@@ -22,6 +23,7 @@ export type WorkOrderInboxItem = {
   status: string;
   dueAt: Date | string | null;
   externalUrl: string | null;
+  workflowState?: { displayStatus: string; primaryStageName: string | null } | null;
 };
 
 export function WorkOrderQueue({ workOrders, canOpenEpisodes }: { workOrders: WorkOrderInboxItem[]; canOpenEpisodes: boolean }) {
@@ -42,7 +44,7 @@ function WorkOrderRow({ item, canOpenEpisodes }: { item: WorkOrderInboxItem; can
     } catch { setMessage("Could not complete this work order."); }
     finally { setSaving(false); }
   }
-  return <article className="px-5 py-4"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div className="min-w-0"><p className="text-xs font-medium text-[#617b75]">{item.showTitle} · E{String(item.episodeNumber).padStart(2, "0")} {item.episodeTitle}</p><div className="mt-1 flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold text-[#3c4440]">{item.title}</h3>{item.isBlocking && <span className="inline-flex items-center gap-1 rounded-full bg-[#f8e8df] px-2 py-0.5 text-[10px] font-semibold text-[#a15e42]"><ShieldAlert size={11} /> Blocker</span>}<span className="rounded-full bg-[#edf0ed] px-2 py-0.5 text-[10px] font-semibold text-[#65716c]">{item.priority}</span></div><p className="mt-1 text-xs text-[#6e7772]">{item.workflowStageName ?? "Episode work"}{item.dueAt ? ` · Due ${formatDate(item.dueAt)}` : ""}</p>{item.description && <p className="mt-2 text-xs leading-5 text-[#68716d]">{item.description}</p>}<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">{canOpenEpisodes && <Link href={`/episodes/${item.episodeId}`} className="font-medium text-[#54776d] hover:underline">Open episode</Link>}{item.externalUrl && <a href={item.externalUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-[#54776d] hover:underline"><ExternalLink size={12} /> External reference</a>}</div></div><Button variant="primary" onClick={complete} isDisabled={saving} className="button--success"><CheckCircle2 size={15} /> {saving ? "Saving…" : item.kind === "qc_exception" ? "Ready for re-QC" : "Mark complete"}</Button></div>{message && <p role="status" className={`mt-3 text-xs ${message.includes("completed") || message.includes("handed") ? "text-[#3f7563]" : "text-[#a35e41]"}`}>{message}</p>}</article>;
+  return <article className="px-5 py-4"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div className="min-w-0"><p className="text-xs font-medium text-[#617b75]">{item.showTitle} · E{String(item.episodeNumber).padStart(2, "0")} {item.episodeTitle}</p><div className="mt-1 flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold text-[#3c4440]">{item.title}</h3>{item.isBlocking && <span className="inline-flex items-center gap-1 rounded-full bg-[#f8e8df] px-2 py-0.5 text-[10px] font-semibold text-[#a15e42]"><ShieldAlert size={11} /> Blocker</span>}<span className="rounded-full bg-[#edf0ed] px-2 py-0.5 text-[10px] font-semibold text-[#65716c]">{item.priority}</span>{item.workflowState && <WorkflowStateBadge status={item.workflowState.displayStatus} />}</div><p className="mt-1 text-xs text-[#6e7772]">{item.workflowStageName ?? item.workflowState?.primaryStageName ?? "Episode work"}{item.dueAt ? ` · Due ${formatDate(item.dueAt)}` : ""}</p>{item.description && <p className="mt-2 text-xs leading-5 text-[#68716d]">{item.description}</p>}<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">{canOpenEpisodes && <Link href={`/episodes/${item.episodeId}`} className="font-medium text-[#54776d] hover:underline">Open episode</Link>}{item.externalUrl && <a href={item.externalUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-[#54776d] hover:underline"><ExternalLink size={12} /> External reference</a>}</div></div><Button variant="primary" onClick={complete} isDisabled={saving} className="button--success"><CheckCircle2 size={15} /> {saving ? "Saving…" : item.kind === "qc_exception" ? "Ready for re-QC" : "Mark complete"}</Button></div>{message && <p role="status" className={`mt-3 text-xs ${message.includes("completed") || message.includes("handed") ? "text-[#3f7563]" : "text-[#a35e41]"}`}>{message}</p>}</article>;
 }
 
 function formatDate(value: Date | string) { return new Intl.DateTimeFormat("en-GB", { month: "short", day: "numeric" }).format(new Date(value)); }

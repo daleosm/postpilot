@@ -11,7 +11,6 @@ type EditableEpisode = {
   id: string;
   title: string;
   productionCode: string | null;
-  status: string;
   airDate: string | null;
   lockedCutDate: string | null;
   deliveryDeadline: Date | string | null;
@@ -52,7 +51,6 @@ export function EpisodeEditButton({ episode }: { episode: EditableEpisode }) {
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <label>Title<input name="title" defaultValue={episode.title} /></label>
           <label>Production code<input name="productionCode" defaultValue={episode.productionCode ?? ""} /></label>
-          <label>Status<select name="status" defaultValue={episode.status}>{["development", "assembly", "editor_cut", "review", "locked", "online", "delivered"].map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select></label>
           <label>Air date<input type="date" name="airDate" defaultValue={episode.airDate ?? ""} /></label>
           <label>Lock date<input type="date" name="lockedCutDate" defaultValue={episode.lockedCutDate ?? ""} /></label>
           <label>Delivery deadline<input type="datetime-local" name="deliveryDeadline" defaultValue={episode.deliveryDeadline ? new Date(episode.deliveryDeadline).toISOString().slice(0, 16) : ""} /></label>

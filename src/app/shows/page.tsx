@@ -41,7 +41,7 @@ async function getShowsData() {
     const lines = budget.lines.filter((line) => line.showTitle === show.title);
     const budgeted = lines.reduce((sum, line) => sum + Number(line.budgetedAmount), 0);
     const actual = lines.reduce((sum, line) => sum + Number(line.actualAmount), 0);
-    return { ...show, seasonCount: show.seasons.length, episodeCount: showEpisodes.length, activeEpisodeCount: showEpisodes.filter((episode) => episode.status !== "delivered").length, budgetHealth: budgeted ? Math.round((actual / budgeted) * 100) : 0 };
+    return { ...show, seasonCount: show.seasons.length, episodeCount: showEpisodes.length, activeEpisodeCount: showEpisodes.filter((episode) => episode.status !== "complete").length, budgetHealth: budgeted ? Math.round((actual / budgeted) * 100) : 0 };
   }), companies };
 }
 

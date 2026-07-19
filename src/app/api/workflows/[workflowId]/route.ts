@@ -3,17 +3,14 @@ import { NextResponse } from "next/server";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { episodeWorkflowApprovals, episodeWorkflowTracks, episodes, postWorkflows, workflowStageApprovalRules, workflowStages, workflowStageWorkOrderTemplates } from "@/lib/db/schema";
+import { episodeWorkflowApprovals, episodeWorkflowTracks, postWorkflows, workflowStageApprovalRules, workflowStages, workflowStageWorkOrderTemplates } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can } from "@/lib/permissions";
+import { canManageWorkflowConfiguration } from "@/lib/permissions";
 import { isDebugDemoMode } from "@/lib/runtime";
 import { updateWorkflowTemplateSchema } from "@/lib/validations/entities";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ workflowId: string }> }) {
-  if (!(await can("manage_shows"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  const parsed = updateWorkflowTemplateSchema.safeParse(await request.json());
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Check the workflow configuration." }, { status: 400 });
-  if (isDebugDemoMode) return NextResponse.json({ ok: true, debug: true });
+  if (!(await canManageWorkflowConfiguration())) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const organizationId = context.organization.organizationId;
@@ -21,6 +18,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
   const db = getDb();
   const [workflow] = await db.select({ id: postWorkflows.id }).from(postWorkflows).where(and(eq(postWorkflows.id, workflowId), eq(postWorkflows.organizationId, organizationId))).limit(1);
   if (!workflow) return NextResponse.json({ error: "Workflow not found." }, { status: 404 });
+  const parsed = updateWorkflowTemplateSchema.safeParse(await request.json());
+  if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Check the workflow configuration." }, { status: 400 });
+  if (isDebugDemoMode) return NextResponse.json({ ok: true, debug: true });
   const [existingStages, existingRules] = await Promise.all([
     db.select({ id: workflowStages.id, requiresQcPass: workflowStages.requiresQcPass, deliveryGate: workflowStages.deliveryGate }).from(workflowStages).where(and(eq(workflowStages.workflowId, workflowId), eq(workflowStages.organizationId, organizationId))),
     db.select({ id: workflowStageApprovalRules.id }).from(workflowStageApprovalRules).innerJoin(workflowStages, eq(workflowStageApprovalRules.workflowStageId, workflowStages.id)).where(and(eq(workflowStageApprovalRules.organizationId, organizationId), eq(workflowStages.organizationId, organizationId), eq(workflowStages.workflowId, workflowId))),
@@ -30,7 +30,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
   const newStages = parsed.data.stages.filter((stage) => !stageIds.has(stage.id));
   const removedStages = existingStages.filter((stage) => !submittedStageIds.has(stage.id));
   if (parsed.data.rules.some((rule) => !submittedStageIds.has(rule.workflowStageId)) || parsed.data.workOrderTemplates.some((template) => !submittedStageIds.has(template.workflowStageId))) return NextResponse.json({ error: "Workflow contains an invalid stage." }, { status: 400 });
-  if (removedStages.some((stage) => stage.requiresQcPass)) return NextResponse.json({ error: "The QC workflow stage cannot be deleted." }, { status: 409 });
   if (existingStages.some((stage) => stage.requiresQcPass) && !parsed.data.stages.some((stage) => stage.requiresQcPass)) return NextResponse.json({ error: "This workflow must retain its QC decision stage." }, { status: 409 });
   if (newStages.length) {
     const duplicateIds = await db.select({ id: workflowStages.id }).from(workflowStages).where(inArray(workflowStages.id, newStages.map((stage) => stage.id)));
@@ -38,12 +37,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
   }
   if (removedStages.length) {
     const removedStageIds = removedStages.map((stage) => stage.id);
-    const [episodeUsingStage, approvalUsingStage, trackUsingStage] = await Promise.all([
-      db.select({ id: episodes.id }).from(episodes).where(and(eq(episodes.organizationId, organizationId), inArray(episodes.workflowStageId, removedStageIds))).limit(1),
+    const [approvalUsingStage, trackUsingStage] = await Promise.all([
       db.select({ id: episodeWorkflowApprovals.id }).from(episodeWorkflowApprovals).where(and(eq(episodeWorkflowApprovals.organizationId, organizationId), inArray(episodeWorkflowApprovals.workflowStageId, removedStageIds))).limit(1),
       db.select({ id: episodeWorkflowTracks.id }).from(episodeWorkflowTracks).where(and(eq(episodeWorkflowTracks.organizationId, organizationId), inArray(episodeWorkflowTracks.workflowStageId, removedStageIds))).limit(1),
     ]);
-    if (episodeUsingStage.length || approvalUsingStage.length || trackUsingStage.length) return NextResponse.json({ error: "A stage with episode workflow history cannot be deleted." }, { status: 409 });
+    if (approvalUsingStage.length || trackUsingStage.length) return NextResponse.json({ error: "A stage with episode workflow history cannot be deleted." }, { status: 409 });
   }
   const existingRuleIds = new Set(existingRules.map((rule) => rule.id));
   const retainedRules = parsed.data.rules.filter((rule) => rule.id && existingRuleIds.has(rule.id));
@@ -63,8 +61,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ wo
     // removed rules cascade their associated approvals.
     if (existingRules.length) await tx.update(workflowStageApprovalRules).set({ approvalOrder: sql`${workflowStageApprovalRules.approvalOrder} + 1000`, updatedAt: new Date() }).where(and(eq(workflowStageApprovalRules.organizationId, organizationId), inArray(workflowStageApprovalRules.id, existingRules.map((rule) => rule.id))));
     if (removedRuleIds.length) await tx.delete(workflowStageApprovalRules).where(and(eq(workflowStageApprovalRules.organizationId, organizationId), inArray(workflowStageApprovalRules.id, removedRuleIds)));
-    for (const rule of retainedRules) await tx.update(workflowStageApprovalRules).set({ workflowStageId: rule.workflowStageId, approverRole: rule.approverRole, label: rule.label, approvalOrder: rule.approvalOrder, isRequired: rule.isRequired, updatedAt: new Date() }).where(and(eq(workflowStageApprovalRules.id, rule.id!), eq(workflowStageApprovalRules.organizationId, organizationId)));
-    if (newRules.length) await tx.insert(workflowStageApprovalRules).values(newRules.map((rule) => ({ organizationId, workflowStageId: rule.workflowStageId, approverRole: rule.approverRole, label: rule.label, approvalOrder: rule.approvalOrder, isRequired: rule.isRequired })));
+    for (const rule of retainedRules) await tx.update(workflowStageApprovalRules).set({ workflowStageId: rule.workflowStageId, approverRole: null, label: rule.label, approvalOrder: rule.approvalOrder, isRequired: rule.isRequired, updatedAt: new Date() }).where(and(eq(workflowStageApprovalRules.id, rule.id!), eq(workflowStageApprovalRules.organizationId, organizationId)));
+    if (newRules.length) await tx.insert(workflowStageApprovalRules).values(newRules.map((rule) => ({ organizationId, workflowStageId: rule.workflowStageId, approverRole: null, label: rule.label, approvalOrder: rule.approvalOrder, isRequired: rule.isRequired })));
     if (existingStages.length) await tx.delete(workflowStageWorkOrderTemplates).where(and(eq(workflowStageWorkOrderTemplates.organizationId, organizationId), inArray(workflowStageWorkOrderTemplates.workflowStageId, existingStages.map((stage) => stage.id))));
     if (parsed.data.workOrderTemplates.length) await tx.insert(workflowStageWorkOrderTemplates).values(parsed.data.workOrderTemplates.map((template) => ({ organizationId, workflowStageId: template.workflowStageId, title: template.title, description: template.description ?? null, department: template.department ?? null, assigneeRole: template.assigneeRole ?? null, priority: template.priority, isBlocking: template.isBlocking, position: template.position })));
   });

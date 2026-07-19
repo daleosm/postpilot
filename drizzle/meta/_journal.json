@@ -680,6 +680,83 @@
       "when": 1784746000000,
       "tag": "0096_delivery_audit_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1785852000000,
+      "tag": "0097_workflow_track_complete_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1785852010000,
+      "tag": "0098_backfill_authoritative_workflow_tracks",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1785852020000,
+      "tag": "0099_workflow_stage_dependencies",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1785852030000,
+      "tag": "0100_workflow_track_exceptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1785852040000,
+      "tag": "0101_episode_workflow_legacy_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1785852050000,
+      "tag": "0102_flag_legacy_delivered_episode_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1785852060000,
+      "tag": "0103_backfill_workflow_capabilities",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1785940000000,
+      "tag": "0104_simplify_ordered_workflow",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1785941000000,
+      "tag": "0105_authoritative_current_workflow_stage",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1785942000000,
+      "tag": "0106_named_episode_workflow_signers",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1785943000000,
+      "tag": "0107_stage_capability_policy",
+      "breakpoints": true
     }
   ]
 }
