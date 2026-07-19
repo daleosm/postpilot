@@ -9,10 +9,10 @@ import { getActiveOrganizationContext } from "@/lib/organizations";
  * than a post-production job title. A post house can therefore give the same
  * authority to any of its own roles without changing workflow code.
  */
-export const permissions = ["manage_shows", "manage_bookings", "manage_work_orders", "approve_work_orders", "update_assigned_work", "manage_workflow_configuration", "manage_workflow_stages", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "approve_budget_overruns", "manage_rates", "approve_rate_overrides", "manage_qc", "verify_qc", "waive_qc", "authorize_early_starts", "authorize_delivery_exceptions", "manage_delivery_profiles", "manage_episode_manifests", "update_delivery_items", "confirm_delivery_receipt", "view_shared_delivery_status", "manage_budget", "manage_users", "request_catering", "manage_catering", "view_assigned"] as const;
-export type Permission = (typeof permissions)[number];
+export const permissions = ["manage_settings", "manage_production", "do_assigned_work", "sign_off_work", "manage_qc_delivery", "manage_commercial", "manage_catering", "view_all_operations"] as const;
+export type Permission = string;
 export type TenantRolePolicy = { role: string; label: string; permissions: Permission[] };
-export const guestRolePolicy: TenantRolePolicy = { role: "guest", label: "Guest", permissions: ["view_assigned", "view_shared_delivery_status", "sign_off_workflow_stages"] };
+export const guestRolePolicy: TenantRolePolicy = { role: "guest", label: "Guest", permissions: ["sign_off_work"] };
 export const isFixedRole = (role: string) => role === guestRolePolicy.role;
 
 /**
@@ -22,15 +22,12 @@ export const isFixedRole = (role: string) => role === guestRolePolicy.role;
  * a staged deployment.
  */
 const legacyPermissionMap: Record<string, Permission> = {
-  manage_workflow_tracks: "manage_workflow_stages",
-  submit_workflow_tracks: "submit_workflow_stages",
-  sign_off_workflow_tracks: "sign_off_workflow_stages",
-  authorize_workflow_exceptions: "authorize_early_starts",
+  manage_shows: "manage_production", manage_bookings: "manage_production", manage_work_orders: "manage_production", approve_work_orders: "manage_production", manage_workflow_configuration: "manage_settings", manage_workflow_stages: "manage_production", authorize_early_starts: "manage_production", manage_users: "manage_settings", manage_rates: "manage_commercial", manage_budget: "manage_commercial", approve_budget_overruns: "manage_commercial", approve_rate_overrides: "manage_commercial", manage_qc: "manage_qc_delivery", verify_qc: "manage_qc_delivery", waive_qc: "manage_qc_delivery", manage_delivery_profiles: "manage_qc_delivery", manage_episode_manifests: "manage_qc_delivery", update_delivery_items: "manage_qc_delivery", confirm_delivery_receipt: "manage_qc_delivery", authorize_delivery_exceptions: "manage_qc_delivery", manage_catering: "manage_catering", request_catering: "do_assigned_work", update_assigned_work: "do_assigned_work", update_assigned_workflow_work: "do_assigned_work", submit_workflow_stages: "do_assigned_work", sign_off_workflow_stages: "sign_off_work", view_assigned: "do_assigned_work", view_shared_delivery_status: "sign_off_work", manage_workflow_tracks: "manage_production", submit_workflow_tracks: "do_assigned_work", sign_off_workflow_tracks: "sign_off_work", authorize_workflow_exceptions: "manage_production",
 };
 
 function normalizePermission(permission: string): Permission | null {
   const normalized = legacyPermissionMap[permission] ?? permission;
-  return permissions.includes(normalized as Permission) ? normalized as Permission : null;
+  return permissions.includes(normalized as (typeof permissions)[number]) ? normalized : null;
 }
 
 function normalizePermissions(values: readonly string[]): Permission[] {
@@ -51,13 +48,15 @@ export async function getCurrentPerson() {
   return context?.person ?? null;
 }
 
-export async function can(permission: Permission) {
+export async function can(permission: Permission | string) {
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return false;
-  if (context.organization.role === "guest") return guestRolePolicy.permissions.includes(permission);
+  const normalized = normalizePermission(permission);
+  if (!normalized) return false;
+  if (context.organization.role === "guest") return guestRolePolicy.permissions.includes(normalized);
   if (!context.person) return false;
   const policy = (await getTenantRolePolicies(context.organization.organizationId)).find((item) => item.role === context.person?.role);
-  return policy?.permissions.includes(permission) ?? false;
+  return policy?.permissions.includes(normalized) ?? false;
 }
 
 /**
