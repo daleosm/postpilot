@@ -108,8 +108,6 @@ const specialistRoleSeeds: Array<{ role: PersonRole; title: string }> = [
   { role: "vfx_supervisor", title: "VFX Supervisor" },
   { role: "supervising_sound_editor", title: "Supervising Sound Editor" },
   { role: "rerecording_mixer", title: "Re-recording Mixer" },
-  { role: "network_client_executive", title: "Network Client Executive" },
-  { role: "network_client_representative", title: "Network Client Representative" },
 ];
 
 const defaultRolePolicies: Record<string, string[]> = {
@@ -130,8 +128,6 @@ const defaultRolePolicies: Record<string, string[]> = {
   vfx_coordinator: ["update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "request_catering", "view_assigned"],
   vfx_supervisor: ["update_assigned_work", "update_assigned_workflow_work", "submit_workflow_stages", "sign_off_workflow_stages", "request_catering", "view_assigned"],
   director: ["sign_off_workflow_stages", "view_assigned"],
-  network_client_executive: ["sign_off_workflow_stages", "view_assigned"],
-  network_client_representative: ["sign_off_workflow_stages", "view_assigned"],
   client: ["view_assigned", "view_shared_delivery_status"],
 };
 
