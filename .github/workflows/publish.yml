@@ -74,9 +74,11 @@ jobs:
           IMAGE: ${{ steps.image.outputs.name }}
           IMAGE_TAG: ${{ steps.image.outputs.tag }}
         run: |
-          sed -i -E "s|image: postpilot:[^[:space:]]+|image: ${IMAGE}:${IMAGE_TAG}|" deploy/kubernetes/base/deployment.yaml
-          sed -i -E "s|image: postpilot-migrations:[^[:space:]]+|image: ${IMAGE}:migrations-${IMAGE_TAG}|" deploy/kubernetes/base/migration-job.yaml
-          sed -i -E "s|image: postpilot-seed:[^[:space:]]+|image: ${IMAGE}:seed-${IMAGE_TAG}|" deploy/kubernetes/jobs/demo-seed.yaml
+          # Replace the value of each image field, whether it is still the
+          # local placeholder or an immutable ECR reference from a prior run.
+          sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:${IMAGE_TAG}|" deploy/kubernetes/base/deployment.yaml
+          sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:migrations-${IMAGE_TAG}|" deploy/kubernetes/base/migration-job.yaml
+          sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:seed-${IMAGE_TAG}|" deploy/kubernetes/jobs/demo-seed.yaml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add deploy/kubernetes/base/deployment.yaml deploy/kubernetes/base/migration-job.yaml deploy/kubernetes/jobs/demo-seed.yaml
