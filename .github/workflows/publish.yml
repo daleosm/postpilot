@@ -41,7 +41,12 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - name: Resolve the ECR repository name
         id: image
-        run: echo "name=${{ vars.ECR_REPOSITORY_URL }}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "name=${{ vars.ECR_REPOSITORY_URL }}" >> "$GITHUB_OUTPUT"
+          # ECR tags are immutable. The run ID makes a retry or a separately
+          # dispatched build of the same commit publishable without replacing
+          # an existing image, while retaining the commit SHA for traceability.
+          echo "tag=${GITHUB_SHA}-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
       - uses: aws-actions/amazon-ecr-login@v2
         id: ecr-login
         with:
@@ -51,29 +56,29 @@ jobs:
           context: .
           target: runtime
           push: true
-          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+          tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
       - uses: docker/build-push-action@v6
         with:
           context: .
           target: migrations
           push: true
-          tags: ${{ steps.image.outputs.name }}:migrations-${{ github.sha }}
+          tags: ${{ steps.image.outputs.name }}:migrations-${{ steps.image.outputs.tag }}
       - uses: docker/build-push-action@v6
         with:
           context: .
           target: seed
           push: true
-          tags: ${{ steps.image.outputs.name }}:seed-${{ github.sha }}
+          tags: ${{ steps.image.outputs.name }}:seed-${{ steps.image.outputs.tag }}
       - name: Commit the immutable image references for Argo CD
         env:
           IMAGE: ${{ steps.image.outputs.name }}
-          SHA: ${{ github.sha }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
         run: |
-          sed -i -E "s|image: postpilot:[^[:space:]]+|image: ${IMAGE}:${SHA}|" deploy/kubernetes/base/deployment.yaml
-          sed -i -E "s|image: postpilot-migrations:[^[:space:]]+|image: ${IMAGE}:migrations-${SHA}|" deploy/kubernetes/base/migration-job.yaml
-          sed -i -E "s|image: postpilot-seed:[^[:space:]]+|image: ${IMAGE}:seed-${SHA}|" deploy/kubernetes/jobs/demo-seed.yaml
+          sed -i -E "s|image: postpilot:[^[:space:]]+|image: ${IMAGE}:${IMAGE_TAG}|" deploy/kubernetes/base/deployment.yaml
+          sed -i -E "s|image: postpilot-migrations:[^[:space:]]+|image: ${IMAGE}:migrations-${IMAGE_TAG}|" deploy/kubernetes/base/migration-job.yaml
+          sed -i -E "s|image: postpilot-seed:[^[:space:]]+|image: ${IMAGE}:seed-${IMAGE_TAG}|" deploy/kubernetes/jobs/demo-seed.yaml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add deploy/kubernetes/base/deployment.yaml deploy/kubernetes/base/migration-job.yaml deploy/kubernetes/jobs/demo-seed.yaml
-          git diff --cached --quiet || git commit -m "chore(deploy): postpilot ${SHA}"
+          git diff --cached --quiet || git commit -m "chore(deploy): postpilot ${IMAGE_TAG}"
           git push
