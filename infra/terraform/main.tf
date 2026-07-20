@@ -220,18 +220,26 @@ resource "aws_eks_addon" "vpc_cni" {
   cluster_name                = aws_eks_cluster.this.name
   addon_name                  = "vpc-cni"
   resolve_conflicts_on_create = "OVERWRITE"
+
+  # The initial managed node group must exist before Terraform waits for an
+  # add-on's Kubernetes pods to become healthy.
+  depends_on = [aws_eks_node_group.on_demand]
 }
 
 resource "aws_eks_addon" "kube_proxy" {
   cluster_name                = aws_eks_cluster.this.name
   addon_name                  = "kube-proxy"
   resolve_conflicts_on_create = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.on_demand]
 }
 
 resource "aws_eks_addon" "coredns" {
   cluster_name                = aws_eks_cluster.this.name
   addon_name                  = "coredns"
   resolve_conflicts_on_create = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.on_demand]
 }
 
 resource "aws_eks_node_group" "on_demand" {
@@ -259,9 +267,6 @@ resource "aws_eks_node_group" "on_demand" {
     aws_iam_role_policy_attachment.node_worker,
     aws_iam_role_policy_attachment.node_cni,
     aws_iam_role_policy_attachment.node_ecr,
-    aws_eks_addon.vpc_cni,
-    aws_eks_addon.kube_proxy,
-    aws_eks_addon.coredns,
   ]
 }
 
