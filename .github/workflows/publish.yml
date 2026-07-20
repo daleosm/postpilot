@@ -1,0 +1,79 @@
+name: Build and publish PostPilot
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: publish-postpilot-main
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # The GitOps commit this workflow creates must not trigger another image build.
+    if: "!contains(github.event.head_commit.message, 'chore(deploy):')"
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec next typegen
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm lint
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ECR_PUBLISH_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Resolve the ECR repository name
+        id: image
+        run: echo "name=${{ vars.ECR_REPOSITORY_URL }}" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+        with:
+          mask-password: true
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrations
+          push: true
+          tags: ${{ steps.image.outputs.name }}:migrations-${{ github.sha }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: seed
+          push: true
+          tags: ${{ steps.image.outputs.name }}:seed-${{ github.sha }}
+      - name: Commit the immutable image references for Argo CD
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          SHA: ${{ github.sha }}
+        run: |
+          sed -i -E "s|image: postpilot:[^[:space:]]+|image: ${IMAGE}:${SHA}|" deploy/kubernetes/base/deployment.yaml
+          sed -i -E "s|image: postpilot-migrations:[^[:space:]]+|image: ${IMAGE}:migrations-${SHA}|" deploy/kubernetes/base/migration-job.yaml
+          sed -i -E "s|image: postpilot-seed:[^[:space:]]+|image: ${IMAGE}:seed-${SHA}|" deploy/kubernetes/jobs/demo-seed.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/kubernetes/base/deployment.yaml deploy/kubernetes/base/migration-job.yaml deploy/kubernetes/jobs/demo-seed.yaml
+          git diff --cached --quiet || git commit -m "chore(deploy): postpilot ${SHA}"
+          git push

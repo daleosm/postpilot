@@ -1,0 +1,12 @@
+.git
+.github
+.next
+.next-*
+.pnpm-store
+node_modules
+playwright-report
+test-results
+tests
+.env*
+*.tsbuildinfo
+README.md

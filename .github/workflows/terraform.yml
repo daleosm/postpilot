@@ -1,0 +1,54 @@
+name: Terraform EKS
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Terraform operation
+        required: true
+        type: choice
+        options: [plan, apply, destroy]
+        default: plan
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: terraform-production
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    name: ${{ inputs.command }} EKS
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    env:
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_gitops_repo_url: ${{ vars.GITOPS_REPO_URL }}
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+      - name: Initialise remote state
+        run: >-
+          terraform init
+          -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          -backend-config="key=postpilot/terraform.tfstate"
+          -backend-config="region=${{ vars.AWS_REGION }}"
+          -backend-config="dynamodb_table=${{ vars.TF_LOCK_TABLE }}"
+          -backend-config="encrypt=true"
+      - run: terraform fmt -check -recursive
+      - run: terraform validate
+      - run: terraform plan -out=tfplan
+      - if: ${{ inputs.command == 'apply' }}
+        run: terraform apply -auto-approve tfplan
+      - if: ${{ inputs.command == 'destroy' }}
+        run: terraform destroy -auto-approve

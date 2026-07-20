@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars. Do not commit the real file.
+aws_region      = "us-east-1"
+project_name    = "postpilot"
+gitops_repo_url = "https://github.com/YOUR-ORG/postpilot.git"
+github_repository = "YOUR-ORG/postpilot"
+
+# Set this only if the AWS account already has a GitHub OIDC provider managed
+# outside this Terraform state.
+# github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+
+# Lock this down to the public egress IP ranges of your office/VPN/CI runner.
+cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]

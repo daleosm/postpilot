@@ -120,6 +120,8 @@ Minimum production checklist:
 
 Before publishing a public fork or deploying to users, add a license that matches how you want the community to use and contribute to the project. This repository currently has no LICENSE file, so reuse rights are not yet defined by a standard open-source licence.
 
+For the supplied GitHub Actions, container, Terraform, EKS, and Argo CD delivery path, see [infra/README.md](infra/README.md).
+
 ## Demo data and debug mode
 
 **pnpm db:seed** creates five isolated example post houses, each with its own people, rooms, shows, episodes, workflow, bookings, commercial records, QC, delivery, and catering data. The seed is designed for local demonstration and testing.
