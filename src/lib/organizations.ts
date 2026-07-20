@@ -57,7 +57,10 @@ export async function getActiveShowName() {
 
 /** Resolves the authenticated (or debug) actor without accepting client-supplied identity. */
 export async function getActiveContextUserId() {
-  if (isDebugMode) return (await getDebugUser())?.userId ?? null;
+  if (isDebugMode) {
+    const debugUser = await getDebugUser();
+    if (debugUser) return debugUser.userId;
+  }
   return (await getServerSession(authOptions))?.user?.id ?? null;
 }
 

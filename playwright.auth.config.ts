@@ -14,13 +14,13 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `pnpm exec next dev --port ${port}`,
+    command: `./node_modules/.bin/next dev --port ${port}`,
     url: `http://localhost:${port}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {
-      // Reuse the already-configured Playwright build directory so Next does
-      // not amend tsconfig.json whenever this isolated suite starts.
+      // Reuse the configured Playwright build directory so Next does not
+      // amend tsconfig.json whenever this isolated suite starts.
       NEXT_DIST_DIR: ".next-playwright",
       NEXTAUTH_URL: `http://localhost:${port}`,
       NEXTAUTH_SECRET: "postpilot-auth-test-secret",

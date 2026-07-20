@@ -22,7 +22,18 @@ export function SignInForm({ debugMode }: { debugMode: boolean }) {
     const result = await signIn("credentials", { email, password, callbackUrl, redirect: false });
     setBusy(false);
     if (result?.error) return setError("Email or password is incorrect.");
-    router.push(callbackUrl); router.refresh();
+    // Credentials sign-in writes the Auth.js session cookie immediately before
+    // this navigation. Use a document navigation so a protected route never
+    // races a client-router refresh with that freshly written cookie.
+    window.location.assign(callbackUrl);
+  }
+
+  async function openDebugWorkspace() {
+    setBusy(true); setError("");
+    const response = await fetch("/api/debug/user", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+    setBusy(false);
+    if (!response.ok) return setError("Could not open the debug workspace.");
+    router.push("/"); router.refresh();
   }
 
   return (
@@ -35,7 +46,7 @@ export function SignInForm({ debugMode }: { debugMode: boolean }) {
           <div className="mt-7 rounded-lg border border-[#dce6e1] bg-[#f3f8f5] p-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-[#3e6258]"><MonitorPlay size={16} /> Demo mode is on</div>
             <p className="mt-1.5 text-xs leading-5 text-[#60766e]">All seeded accounts use the temporary password <span className="font-semibold">password</span>. You can also open the command center directly.</p>
-            <Button variant="primary" onPress={() => router.push("/")} className="mt-4 w-full bg-[#325b52] text-white">Open demo workspace</Button>
+            <Button variant="primary" onPress={openDebugWorkspace} isDisabled={busy} className="mt-4 w-full bg-[#325b52] text-white">Open demo workspace</Button>
           </div>
         )}
         <form className="mt-7 space-y-4" onSubmit={signInWithPassword}>

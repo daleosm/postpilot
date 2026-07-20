@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test && playwright test --config playwright.auth.config.ts",
     "test:ui": "playwright test tests/ui",
     "test:integration": "playwright test tests/integration",
     "test:auth": "playwright test --config playwright.auth.config.ts",

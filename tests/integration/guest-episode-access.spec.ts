@@ -5,18 +5,18 @@ const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required for guest episode access tests.");
 const sql = postgres(databaseUrl, { prepare: false });
 
-const organizationId = "94000000-0000-4000-8000-000000000001";
+const organizationId = "94100000-0000-4000-8000-000000000001";
 const guestUserId = "user_guest_episode_lab";
 const managerUserId = "user_guest_episode_manager";
-const guestPersonId = "94000000-0000-4000-8000-000000000002";
-const managerPersonId = "94000000-0000-4000-8000-000000000010";
-const showId = "94000000-0000-4000-8000-000000000003";
-const seasonId = "94000000-0000-4000-8000-000000000004";
-const assignedEpisodeId = "94000000-0000-4000-8000-000000000005";
-const privateEpisodeId = "94000000-0000-4000-8000-000000000006";
-const workflowId = "94000000-0000-4000-8000-000000000007";
-const workflowStageId = "94000000-0000-4000-8000-000000000008";
-const approvalRuleId = "94000000-0000-4000-8000-000000000009";
+const guestPersonId = "94100000-0000-4000-8000-000000000002";
+const managerPersonId = "94100000-0000-4000-8000-000000000010";
+const showId = "94100000-0000-4000-8000-000000000003";
+const seasonId = "94100000-0000-4000-8000-000000000004";
+const assignedEpisodeId = "94100000-0000-4000-8000-000000000005";
+const privateEpisodeId = "94100000-0000-4000-8000-000000000006";
+const workflowId = "94100000-0000-4000-8000-000000000007";
+const workflowStageId = "94100000-0000-4000-8000-000000000008";
+const approvalRuleId = "94100000-0000-4000-8000-000000000009";
 
 async function useGuestSession(page: Page) {
   const user = await page.request.post("/api/debug/user", { data: { userId: guestUserId } });

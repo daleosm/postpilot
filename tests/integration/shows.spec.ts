@@ -5,15 +5,15 @@ const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required for Shows integration tests.");
 const sql = postgres(databaseUrl, { prepare: false });
 
-const organizationId = "93000000-0000-4000-8000-000000000001";
-const foreignOrganizationId = "93000000-0000-4000-8000-000000000002";
+const organizationId = "93100000-0000-4000-8000-000000000001";
+const foreignOrganizationId = "93100000-0000-4000-8000-000000000002";
 const managerUserId = "user_shows_lab_manager";
 const viewerUserId = "user_shows_lab_viewer";
-const managerPersonId = "93000000-0000-4000-8000-000000000003";
-const viewerPersonId = "93000000-0000-4000-8000-000000000004";
-const clientCompanyId = "93000000-0000-4000-8000-000000000005";
-const productionCompanyId = "93000000-0000-4000-8000-000000000006";
-const foreignCompanyId = "93000000-0000-4000-8000-000000000007";
+const managerPersonId = "93100000-0000-4000-8000-000000000003";
+const viewerPersonId = "93100000-0000-4000-8000-000000000004";
+const clientCompanyId = "93100000-0000-4000-8000-000000000005";
+const productionCompanyId = "93100000-0000-4000-8000-000000000006";
+const foreignCompanyId = "93100000-0000-4000-8000-000000000007";
 
 async function switchUser(page: Page, userId: string) {
   const user = await page.request.post("/api/debug/user", { data: { userId } });

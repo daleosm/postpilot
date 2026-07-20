@@ -60,6 +60,8 @@ test.describe("Auth.js credentials authentication", () => {
   test("protects tenant routes, restores the safe callback path, and resolves live membership", async ({ page }) => {
     await page.goto("/episodes");
     await expect(page).toHaveURL(/\/sign-in\?callbackUrl=%2Fepisodes/);
+    expect((await page.request.post("/api/debug/user", { data: {} })).status()).toBe(404);
+    await expect(page.getByRole("button", { name: "Open demo workspace" })).toHaveCount(0);
 
     const unauthenticatedApi = await page.request.post("/api/organizations/active", {
       data: { organizationId: organizationAId, pathname: "/shows" },
@@ -71,7 +73,7 @@ test.describe("Auth.js credentials authentication", () => {
     await page.goto("/shows");
     await expect(page).toHaveURL(/\/sign-in\?callbackUrl=%2Fshows/);
 
-    await signIn(page, memberEmail);
+    await signIn(page, memberEmail.toUpperCase());
     await expect(page).toHaveURL(/\/shows$/);
     await expect(page.getByRole("heading", { name: "Shows in post" })).toBeVisible();
 
@@ -130,6 +132,9 @@ test.describe("Auth.js credentials authentication", () => {
 
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/sign-in/);
+    const signedOutSession = await page.request.get("/api/auth/session");
+    expect(signedOutSession.status()).toBe(200);
+    await expect(signedOutSession.json()).resolves.toEqual({});
     await page.goto("/shows");
     await expect(page).toHaveURL(/\/sign-in\?callbackUrl=%2Fshows/);
 

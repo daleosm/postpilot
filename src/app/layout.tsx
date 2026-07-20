@@ -32,7 +32,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               key={activeOrganizationId ?? "no-active-organization"}
               debugUser={debugUser}
               debugUsers={availableDebugUsers}
-              debugMode={isDebugMode}
+              debugMode={isDebugMode && Boolean(debugUser)}
               activeOrganization={organizationContext?.organization ?? null}
               organizations={organizationContext?.memberships ?? []}
               shows={showOptions}

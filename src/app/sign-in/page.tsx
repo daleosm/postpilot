@@ -1,6 +1,6 @@
 import { SignInForm } from "@/components/sign-in-form";
-import { isDebugDemoMode } from "@/lib/runtime";
+import { isDebugMode } from "@/lib/runtime";
 
 export default function SignInPage() {
-  return <SignInForm debugMode={isDebugDemoMode} />;
+  return <SignInForm debugMode={isDebugMode} />;
 }

@@ -5,13 +5,14 @@ import { cookies } from "next/headers";
 
 import { db } from "@/lib/db";
 import { organizationMembers, people, users } from "@/lib/db/schema";
-import { debugUsers, type DebugUser } from "@/lib/debug-users";
+import { DEBUG_SIGNED_OUT_VALUE, debugUsers, type DebugUser } from "@/lib/debug-users";
 import { isDebugMode } from "@/lib/runtime";
 
 export async function getDebugUser() {
   if (!isDebugMode) return null;
   const store = await cookies();
   const storedId = store.get("postpilot.debugUser")?.value;
+  if (storedId === DEBUG_SIGNED_OUT_VALUE) return null;
   // Older debug sessions used a display-only debug ID. New sessions store the
   // real Auth.js user ID, allowing every seeded tenant user to be assumed.
   const preset = debugUsers.find((user) => user.id === storedId || user.userId === storedId);

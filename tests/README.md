@@ -7,7 +7,7 @@ All automated browser tests use Playwright and the database-backed debug environ
 | Folder | Purpose | Current coverage |
 | --- | --- | --- |
 | `ui/` | Screen-level user journeys: visible controls, filtering, validation, navigation, and role-specific workspace access. | Shows, Episodes, Bookings, Approvals, My time, Users & access. |
-| `integration/` | Business rules exercised through real API routes with isolated database fixtures. | Configurable workflow, work orders/commercial rules, QC lifecycle, tenant context, OTP boundaries, role policies, user access, and management-route permissions. |
+| `integration/` | Business rules exercised through real API routes with isolated database fixtures. | Credentials authentication, configurable workflow, work orders/commercial rules, QC lifecycle, tenant context, role policies, user access, and management-route permissions. |
 | `integration/tenant-isolation/` | Tenant-boundary checks for pages, mutations, and safe route switching. | Shows, Episodes, Bookings, Approvals. |
 | `fixtures/` | Shared test helpers only; these are not test specs. | Debug user and active-tenant session helper. |
 
@@ -15,6 +15,7 @@ All automated browser tests use Playwright and the database-backed debug environ
 
 ```sh
 pnpm test:e2e
+pnpm test:auth
 pnpm test:ui
 pnpm test:integration
 pnpm test:tenant-isolation
@@ -29,6 +30,7 @@ pnpm test:booking-guests
 - Use `ui/` for a user-visible journey. These are UI regression tests, not a substitute for moderated human usability research.
 - Use `integration/` when the point of the test is a permission, workflow, billing, or data-integrity rule.
 - Put tenant-boundary coverage in `integration/tenant-isolation/`, including cross-tenant route and API attempts.
+- `test:e2e` runs the standard debug-mode browser suite and the isolated credentials-auth suite. The latter uses a separate non-debug server because it verifies the real Auth.js route guard.
 - Each spec that writes fixture data must use its own ID range, clean up after itself, and run serially when it switches debug identities or mutates shared fixture state.
 - Prefer helpers from `fixtures/` over repeating debug-cookie setup.
 

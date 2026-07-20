@@ -5,22 +5,22 @@ const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required for booking guest-account tests.");
 const sql = postgres(databaseUrl, { prepare: false });
 
-const organizationId = "95000000-0000-4000-8000-000000000001";
+const organizationId = "95100000-0000-4000-8000-000000000001";
 const managerUserId = "user_booking_guest_manager";
 const guestUserId = "user_booking_guest_attendee";
 const memberUserId = "user_booking_member_attendee";
-const managerPersonId = "95000000-0000-4000-8000-000000000002";
-const guestPersonId = "95000000-0000-4000-8000-000000000003";
-const memberPersonId = "95000000-0000-4000-8000-000000000004";
-const showId = "95000000-0000-4000-8000-000000000005";
-const seasonId = "95000000-0000-4000-8000-000000000006";
-const episodeId = "95000000-0000-4000-8000-000000000007";
-const roomId = "95000000-0000-4000-8000-000000000008";
+const managerPersonId = "95100000-0000-4000-8000-000000000002";
+const guestPersonId = "95100000-0000-4000-8000-000000000003";
+const memberPersonId = "95100000-0000-4000-8000-000000000004";
+const showId = "95100000-0000-4000-8000-000000000005";
+const seasonId = "95100000-0000-4000-8000-000000000006";
+const episodeId = "95100000-0000-4000-8000-000000000007";
+const roomId = "95100000-0000-4000-8000-000000000008";
 const createdGuestEmail = "new-booking-guest@postpilot.test";
-const foreignOrganizationId = "95000000-0000-4000-8000-000000000009";
-const foreignShowId = "95000000-0000-4000-8000-000000000010";
-const foreignSeasonId = "95000000-0000-4000-8000-000000000011";
-const foreignEpisodeId = "95000000-0000-4000-8000-000000000012";
+const foreignOrganizationId = "95100000-0000-4000-8000-000000000009";
+const foreignShowId = "95100000-0000-4000-8000-000000000010";
+const foreignSeasonId = "95100000-0000-4000-8000-000000000011";
+const foreignEpisodeId = "95100000-0000-4000-8000-000000000012";
 
 function bookingPayload(guestPersonId: string | null) {
   return {

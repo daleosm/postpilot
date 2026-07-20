@@ -14,6 +14,7 @@ const foreignShowId = "94700000-0000-4000-8000-000000000003";
 const foreignCompanyId = "94700000-0000-4000-8000-000000000004";
 const foreignRoomId = "94700000-0000-4000-8000-000000000005";
 const foreignRateId = "94700000-0000-4000-8000-000000000006";
+const foreignCateringRequestId = "94700000-0000-4000-8000-000000000007";
 
 async function assume(page: Page, userId: string) {
   expect((await page.request.post("/api/debug/user", { data: { userId } })).status()).toBe(200);
@@ -38,7 +39,7 @@ test.describe("Management endpoint permission and tenant boundaries", () => {
       (${organizationId}, ${commercialUserId}, 'member'),
       (${organizationId}, ${assignedUserId}, 'member')`;
     await sql`insert into organization_role_policies (organization_id, role, label, permissions) values
-      (${organizationId}, 'production_manager', 'Production manager', '["manage_production"]'::jsonb),
+      (${organizationId}, 'production_manager', 'Production manager', '["manage_production", "manage_catering"]'::jsonb),
       (${organizationId}, 'commercial_manager', 'Commercial manager', '["manage_commercial"]'::jsonb),
       (${organizationId}, 'assigned_worker', 'Assigned worker', '["do_assigned_work"]'::jsonb)`;
     await sql`insert into people (organization_id, user_id, name, email, role) values
@@ -49,6 +50,7 @@ test.describe("Management endpoint permission and tenant boundaries", () => {
     await sql`insert into crm_companies (id, organization_id, name, type, currency) values (${foreignCompanyId}, ${foreignOrganizationId}, 'Foreign client', 'client', 'GBP')`;
     await sql`insert into rooms (id, organization_id, name, type) values (${foreignRoomId}, ${foreignOrganizationId}, 'Foreign room', 'edit')`;
     await sql`insert into service_rates (id, organization_id, name, category, unit, rate, currency) values (${foreignRateId}, ${foreignOrganizationId}, 'Foreign rate', 'Suite', 'hour', '120', 'GBP')`;
+    await sql`insert into catering_requests (id, organization_id, request_type, item) values (${foreignCateringRequestId}, ${foreignOrganizationId}, 'lunch', 'Foreign room lunch')`;
   });
 
   test.afterAll(async () => {
@@ -94,5 +96,21 @@ test.describe("Management endpoint permission and tenant boundaries", () => {
     await assume(page, productionUserId);
     expect((await page.request.patch(`/api/rooms/${foreignRoomId}`, { data: { name: "Foreign changed" } })).status()).toBe(404);
     expect((await page.request.patch(`/api/crm/companies/${foreignCompanyId}`, { data: { accountStatus: "inactive", bookingClearance: "on_hold" } })).status()).toBe(404);
+    expect((await page.request.patch(`/api/catering-requests/${foreignCateringRequestId}`, { data: { status: "preparing" } })).status()).toBe(404);
+    expect((await page.request.post("/api/crm/contacts", { data: { companyId: foreignCompanyId, name: "Foreign Contact", contactType: "general" } })).status()).toBe(404);
+  });
+
+  test("scopes singleton commercial settings to the active post house", async ({ page }) => {
+    await assume(page, commercialUserId);
+    expect((await page.request.patch("/api/settings/currency", { data: { currency: "USD" } })).status()).toBe(200);
+    expect((await page.request.patch("/api/settings/invoicing", { data: { legalName: "Management Route Lab Ltd", legalAddress: "1 Lab Way", billingEmail: "accounts@management-lab.test", taxEnabled: false, taxName: "VAT", taxRatePercent: 0, paymentTermsDays: 30, paymentInstructions: "Pay by bank transfer" } })).status()).toBe(200);
+    expect((await page.request.patch("/api/settings/catering", { data: { markupPercent: 12.5 } })).status()).toBe(200);
+
+    expect(await sql`select currency from organizations where id = ${organizationId}`).toMatchObject([{ currency: "USD" }]);
+    expect(await sql`select currency from organizations where id = ${foreignOrganizationId}`).toMatchObject([{ currency: "GBP" }]);
+    expect(await sql`select legal_name from invoice_settings where organization_id = ${organizationId}`).toMatchObject([{ legal_name: "Management Route Lab Ltd" }]);
+    expect(await sql`select legal_name from invoice_settings where organization_id = ${foreignOrganizationId}`).toHaveLength(0);
+    expect(Number((await sql`select markup_percent from catering_settings where organization_id = ${organizationId}`)[0]?.markup_percent)).toBe(12.5);
+    expect(await sql`select markup_percent from catering_settings where organization_id = ${foreignOrganizationId}`).toHaveLength(0);
   });
 });

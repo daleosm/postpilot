@@ -1,4 +1,6 @@
 export const DEBUG_USER_COOKIE = "postpilot.debugUser";
+/** A deliberate debug logout must override the otherwise convenient default actor. */
+export const DEBUG_SIGNED_OUT_VALUE = "signed-out";
 
 export type DebugUser = {
   id: string;

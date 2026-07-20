@@ -12,12 +12,14 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "pnpm exec next dev --port 5001",
+    command: "./node_modules/.bin/next dev --port 5001",
     url: "http://localhost:5001",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {
       NEXT_DIST_DIR: ".next-playwright",
+      NEXTAUTH_URL: "http://localhost:5001",
+      NEXTAUTH_SECRET: "postpilot-auth-test-secret",
     },
   },
 });
