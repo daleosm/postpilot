@@ -128,7 +128,29 @@ const episodeDeliveryItemFieldsSchema = z.object({
 export const addEpisodeDeliveryItemSchema = episodeDeliveryItemFieldsSchema.extend({
   reason: z.string().trim().min(3, "Explain why this delivery item is being added.").max(2000),
 });
-export const updateEpisodeDeliveryItemSchema = episodeDeliveryItemFieldsSchema.partial().extend({
+// Do not derive this schema through `.partial()` from the create schema: Zod
+// defaults inside an optional field still materialise during parsing, which
+// turns a single-field edit into an unintended overwrite of required/QC/position.
+const episodeDeliveryItemUpdateFieldsSchema = z.object({
+  componentType: z.string().trim().min(2, "Component type is required.").max(80).optional(),
+  label: z.string().trim().min(2, "Delivery item label is required.").max(240).optional(),
+  required: z.boolean().optional(),
+  formatSpecification: z.string().trim().max(4000).nullable().optional(),
+  version: z.string().trim().max(120).nullable().optional(),
+  territory: z.string().trim().max(120).nullable().optional(),
+  language: z.string().trim().max(120).nullable().optional(),
+  recipientContactId: nullableId.optional(),
+  requiresExternalRecipient: z.boolean().optional(),
+  qcRequired: z.boolean().optional(),
+  dueDate: optionalDate.nullable(),
+  externalUrl: z.string().url("Enter a valid external link.").max(2000).nullable().optional(),
+  externalReference: z.string().trim().max(500).nullable().optional(),
+  isExternallyShared: z.boolean().optional(),
+  submissionMethod: z.string().trim().max(120).nullable().optional(),
+  position: z.coerce.number().int().positive().optional(),
+});
+
+export const updateEpisodeDeliveryItemSchema = episodeDeliveryItemUpdateFieldsSchema.extend({
   reason: z.string().trim().min(3, "Explain why this delivery item is being overridden.").max(2000),
 }).refine((value) => Object.keys(value).some((key) => key !== "reason"), "Provide at least one delivery item change.");
 export const removeEpisodeDeliveryItemSchema = z.object({

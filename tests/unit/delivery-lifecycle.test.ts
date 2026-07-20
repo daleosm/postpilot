@@ -126,6 +126,14 @@ test("the Delivery gate requires passing required QC and facility dispatch", () 
   assert.equal(ready.ready, true);
 });
 
+test("a configured delivery stage cannot pass against an empty checklist", () => {
+  const facility = getDeliveryWorkflowGateState([], "facility_dispatch");
+  assert.equal(facility.ready, false);
+  assert.match(facility.message ?? "", /no required items/);
+  const acceptance = getDeliveryWorkflowGateState([], "client_acceptance");
+  assert.equal(acceptance.ready, false);
+});
+
 test("client acceptance requires receipt or a narrow authorised exception", () => {
   const dispatched = [{ required: true, status: "dispatched" as const, qcRequired: true, qcResult: "passed" as const }];
   const missingReceipt = getDeliveryWorkflowGateState(dispatched, "client_acceptance");

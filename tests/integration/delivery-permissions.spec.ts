@@ -174,7 +174,7 @@ test.describe("Delivery manifest permissions and external visibility", () => {
     const [snapshotItem] = await sql`select label from episode_delivery_items where organization_id = ${organizationId} and episode_id = ${snapshotEpisodeId}`;
     expect(snapshotItem.label).toBe("Original snapshot master");
     await page.goto("/deliveries");
-    await expect(page.getByText("Profile not applied")).toBeVisible();
+    await expect(page.locator("span", { hasText: "Checklist not set up" })).toBeVisible();
     await expect(page.getByText("S1 · E03 Pre-manifest episode", { exact: true })).toBeVisible();
     const manuallyApplied = await page.request.post(`/api/episodes/${unprofiledEpisodeId}/delivery-manifest/apply`, { data: { deliveryProfileId: profileId, reason: "Delivery requirements are now confirmed." } });
     expect(manuallyApplied.status()).toBe(200);

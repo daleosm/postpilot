@@ -745,6 +745,7 @@ export async function updateActiveEpisodeDeliveryItem(episodeId: string, itemId:
   if (!episode) throw new DeliveryManifestError(404, "Episode not found in this post house.");
   const [item] = await getDb().select({
     id: episodeDeliveryItems.id,
+    episodeDeliveryManifestId: episodeDeliveryItems.episodeDeliveryManifestId,
     label: episodeDeliveryItems.label,
     dueDate: episodeDeliveryItems.dueDate,
     recipientContactId: episodeDeliveryItems.recipientContactId,
@@ -754,6 +755,15 @@ export async function updateActiveEpisodeDeliveryItem(episodeId: string, itemId:
     .where(and(eq(episodeDeliveryItems.id, itemId), eq(episodeDeliveryItems.episodeId, episodeId), eq(episodeDeliveryItems.organizationId, context.organizationId))).limit(1);
   if (!item) throw new DeliveryManifestError(404, "Delivery item not found.");
   const { reason, dueDate, recipientContactId, ...changes } = parsed.data;
+  if (parsed.data.position !== undefined) {
+    const [positionConflict] = await getDb().select({ id: episodeDeliveryItems.id }).from(episodeDeliveryItems).where(and(
+      eq(episodeDeliveryItems.organizationId, context.organizationId),
+      eq(episodeDeliveryItems.episodeDeliveryManifestId, item.episodeDeliveryManifestId),
+      eq(episodeDeliveryItems.position, parsed.data.position),
+      ne(episodeDeliveryItems.id, itemId),
+    )).limit(1);
+    if (positionConflict) throw new DeliveryManifestError(409, "A delivery item already uses that position on this checklist.");
+  }
   const contact = recipientContactId === undefined ? undefined : await getEligibleDeliveryRecipientSnapshot(context.organizationId, episode, recipientContactId);
   await getDb().update(episodeDeliveryItems).set({
     ...changes,

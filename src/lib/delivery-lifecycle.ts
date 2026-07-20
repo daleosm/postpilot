@@ -107,6 +107,12 @@ type WorkflowGateItem = {
 export function getDeliveryWorkflowGateState(items: WorkflowGateItem[], gate: DeliveryWorkflowGate, hasLocalAcceptanceException = false) {
   if (gate === "none") return { ready: true, facilityReady: true, clientReceiptComplete: true, message: null };
   const required = items.filter((item) => item.required);
+  if (!required.length) return {
+    ready: false,
+    facilityReady: false,
+    clientReceiptComplete: false,
+    message: "This delivery manifest has no required items. Add or apply the confirmed delivery requirements before signing off this stage.",
+  };
   const failedOrRejected = required.filter((item) => item.status === "qc_failed" || item.status === "rejected");
   if (failedOrRejected.length) return {
     ready: false,
