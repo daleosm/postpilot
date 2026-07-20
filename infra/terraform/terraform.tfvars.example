@@ -4,6 +4,13 @@ project_name    = "postpilot"
 gitops_repo_url = "https://github.com/YOUR-ORG/postpilot.git"
 github_repository = "YOUR-ORG/postpilot"
 
+# GitHub's standard OIDC subject formats. If your GitHub organisation has a
+# custom OIDC subject template, copy the exact `sub` claim from an Actions run.
+github_oidc_subjects = [
+  "repo:YOUR-ORG/postpilot:environment:production",
+  "repo:YOUR-ORG/postpilot:ref:refs/heads/main",
+]
+
 # Set this only if the AWS account already has a GitHub OIDC provider managed
 # outside this Terraform state.
 # github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"

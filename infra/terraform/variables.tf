@@ -96,6 +96,17 @@ variable "github_repository" {
   }
 }
 
+variable "github_oidc_subjects" {
+  description = "Optional exact GitHub Actions OIDC subject claims allowed to publish images. Leave null for standard production-environment and main-branch subjects derived from github_repository; set it if GitHub has a custom OIDC subject template."
+  type        = list(string)
+  default     = null
+
+  validation {
+    condition     = var.github_oidc_subjects == null || (length(var.github_oidc_subjects) > 0 && alltrue([for subject in var.github_oidc_subjects : startswith(subject, "repo:")]))
+    error_message = "github_oidc_subjects must contain at least one GitHub repository OIDC subject beginning with repo:."
+  }
+}
+
 variable "github_oidc_provider_arn" {
   description = "Optional existing GitHub Actions OIDC provider ARN. Set this when the AWS account already manages token.actions.githubusercontent.com outside this Terraform state."
   type        = string

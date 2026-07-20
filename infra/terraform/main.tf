@@ -6,6 +6,11 @@ locals {
     try(aws_iam_openid_connect_provider.github[0].arn, null),
   )
 
+  github_oidc_subjects = coalesce(var.github_oidc_subjects, [
+    "repo:${var.github_repository}:environment:production",
+    "repo:${var.github_repository}:ref:refs/heads/main",
+  ])
+
   tags = merge({
     Project   = var.project_name
     ManagedBy = "terraform"
@@ -67,15 +72,12 @@ data "aws_iam_policy_document" "github_ecr_publish_assume_role" {
     }
 
     condition {
-      # GitHub emits an environment subject when the protected environment is
-      # resolved, and a branch subject for a direct main-branch run. Allow only
-      # these two forms for this repository.
+      # Allow only the GitHub OIDC subjects explicitly configured for this
+      # repository. GitHub supports customised OIDC subjects, so deriving
+      # these values from the owner/repository slug is not always safe.
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values = [
-        "repo:${var.github_repository}:environment:production",
-        "repo:${var.github_repository}:ref:refs/heads/main",
-      ]
+      values   = local.github_oidc_subjects
     }
   }
 }
