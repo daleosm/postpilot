@@ -17,7 +17,10 @@ RUN pnpm install --frozen-lockfile
 FROM dependencies AS build
 
 COPY . .
-RUN pnpm build
+# Auth.js validates its secret while Next.js evaluates server modules during
+# compilation. This placeholder is available only to this build layer; the
+# running container receives the real NEXTAUTH_SECRET from Kubernetes.
+RUN NEXTAUTH_SECRET="postpilot-build-only-not-a-runtime-secret" pnpm build
 
 # This image deliberately retains the migration CLI and Drizzle files. The
 # Argo CD PreSync migration Job uses the same tested dependency graph as the
