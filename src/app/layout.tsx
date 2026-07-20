@@ -12,6 +12,12 @@ export const metadata: Metadata = {
   description: "Post-production operations for episodic television.",
 };
 
+// The shell resolves the authenticated user's tenant, active show and
+// permission-aware navigation. It must render per request, including for the
+// generated not-found route, rather than attempting a database/session lookup
+// while Next.js is collecting static page data during a container build.
+export const dynamic = "force-dynamic";
+
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const [debugUser, organizationContext] = await Promise.all([getDebugUser(), getActiveOrganizationContext()]);
   const activeOrganizationId = organizationContext?.organization?.organizationId;
