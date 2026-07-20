@@ -226,7 +226,7 @@ resource "aws_eks_addon" "vpc_cni" {
 
   # The initial managed node group must exist before Terraform waits for an
   # add-on's Kubernetes pods to become healthy.
-  depends_on = [aws_eks_node_group.on_demand]
+  depends_on = [aws_eks_node_group.spot]
 }
 
 resource "aws_eks_addon" "kube_proxy" {
@@ -234,7 +234,7 @@ resource "aws_eks_addon" "kube_proxy" {
   addon_name                  = "kube-proxy"
   resolve_conflicts_on_create = "OVERWRITE"
 
-  depends_on = [aws_eks_node_group.on_demand]
+  depends_on = [aws_eks_node_group.spot]
 }
 
 resource "aws_eks_addon" "coredns" {
@@ -242,16 +242,18 @@ resource "aws_eks_addon" "coredns" {
   addon_name                  = "coredns"
   resolve_conflicts_on_create = "OVERWRITE"
 
-  depends_on = [aws_eks_node_group.on_demand]
+  depends_on = [aws_eks_node_group.spot]
 }
 
-resource "aws_eks_node_group" "on_demand" {
+resource "aws_eks_node_group" "spot" {
   cluster_name    = aws_eks_cluster.this.name
-  node_group_name = "on-demand-micro"
+  node_group_name = "spot-small"
   node_role_arn   = aws_iam_role.node.arn
   subnet_ids      = aws_subnet.public[*].id
 
-  capacity_type  = "ON_DEMAND"
+  # This is a non-essential pilot workload. Use multiple same-sized Spot
+  # pools so EKS can choose capacity-optimised availability across them.
+  capacity_type  = "SPOT"
   instance_types = var.node_instance_types
   ami_type       = "AL2023_x86_64_STANDARD"
   disk_size      = 20
@@ -271,6 +273,13 @@ resource "aws_eks_node_group" "on_demand" {
     aws_iam_role_policy_attachment.node_cni,
     aws_iam_role_policy_attachment.node_ecr,
   ]
+}
+
+# Preserve the existing managed-node-group state address while replacing the
+# original On-Demand micro group with the Spot small group above.
+moved {
+  from = aws_eks_node_group.on_demand
+  to   = aws_eks_node_group.spot
 }
 
 resource "aws_db_subnet_group" "postgres" {

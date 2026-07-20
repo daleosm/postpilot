@@ -62,11 +62,13 @@ resource "helm_release" "argocd" {
       enabled = false
     }
     applicationSet = {
-      enabled = false
+      # This cluster bootstraps a single Application directly; it does not use
+      # ApplicationSet generators, so do not spend a pod on its controller.
+      replicas = 0
     }
   })]
 
-  depends_on = [aws_eks_node_group.on_demand]
+  depends_on = [aws_eks_node_group.spot]
 }
 
 # The Application CRD is installed by the Helm release above, so it cannot be

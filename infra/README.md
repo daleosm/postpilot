@@ -3,14 +3,14 @@
 This directory supplies a deliberately compact EKS and Argo CD footprint for a pilot or small self-hosted PostPilot installation:
 
 - one EKS control plane;
-- two fixed On-Demand x86 micro nodes (t3.micro/t3a.micro);
+- two fixed x86 Spot small nodes (t3.small/t3a.small);
 - one private, single-AZ RDS PostgreSQL db.t3.micro instance with 20 GiB gp3 storage;
 - public subnets and no NAT gateway, which avoids the usual fixed NAT cost;
 - Argo CD exposed only as a ClusterIP service;
 - a GitOps Application that reconciles this repository's Kubernetes manifests;
 - no load balancer, ingress controller, or DNS zone created by default.
 
-This is the lowest-cost **fixed two-node EKS** profile, not a high-availability production topology. It removes Spot-interruption risk, but t3.micro nodes have only 1 GiB each and are deliberately tight for PostPilot plus Argo CD. EKS also charges for the control plane independently of EC2 nodes, and EC2, RDS, storage, network, public-IP, and Secrets Manager charges remain separate. Read the current [Amazon EKS pricing](https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html#eks-pricing) before creating the cluster.
+This is a low-cost **fixed two-node EKS pilot** profile, not a high-availability production topology. It uses two Spot nodes, which can be interrupted or temporarily unavailable, and must not be used for essential workloads. EKS also charges for the control plane independently of EC2 nodes, and EC2, RDS, storage, network, public-IP, and Secrets Manager charges remain separate. Read the current [Amazon EKS pricing](https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html#eks-pricing) before creating the cluster.
 
 For a live facility, start with this only as a pilot. Move application nodes into private networking, use larger nodes with headroom, turn on RDS deletion protection and Multi-AZ, set a restrictive API CIDR allow-list, and add backups/monitoring.
 
@@ -286,7 +286,7 @@ The migration Job is an Argo CD PreSync hook. If a migration fails, the release 
 
 | Choice | Saves | Trade-off |
 | --- | --- | --- |
-| Two On-Demand micro nodes | Lower fixed EC2 cost and no Spot interruption | Only 2 GiB of total node memory; Argo CD and PostPilot have very little headroom. |
+| Two Spot small nodes | Lower worker compute cost with enough practical pod/memory headroom for this pilot | Spot capacity can be reclaimed or unavailable; this is unsuitable for essential facility operations. |
 | Single-AZ RDS db.t3.micro | Lowest RDS PostgreSQL class/storage baseline | No database failover; deletion protection is off and the final snapshot is skipped for low-cost iteration. |
 | Public subnets, no NAT gateway | A fixed NAT gateway charge | Requires deliberate network/API allow-list and database connectivity design. |
 | ClusterIP services | Load balancer cost | Access requires a private ingress, VPN, port-forward, or a deliberate public overlay. |

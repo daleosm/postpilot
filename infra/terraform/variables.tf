@@ -40,25 +40,25 @@ variable "cluster_endpoint_public_access_cidrs" {
 }
 
 variable "node_instance_types" {
-  description = "Compatible x86_64 On-Demand micro instances for the fixed two-node managed group."
+  description = "Compatible x86_64 Spot small instances for the fixed two-node managed group."
   type        = list(string)
-  default     = ["t3.micro", "t3a.micro"]
+  default     = ["t3.small", "t3a.small"]
 }
 
 variable "node_min_size" {
-  description = "Minimum On-Demand nodes. Two is the fixed baseline for this configuration."
+  description = "Minimum Spot nodes. Two is the fixed baseline for this non-essential pilot configuration."
   type        = number
   default     = 2
 }
 
 variable "node_desired_size" {
-  description = "Desired On-Demand nodes."
+  description = "Desired Spot nodes."
   type        = number
   default     = 2
 }
 
 variable "node_max_size" {
-  description = "Maximum On-Demand nodes. Keep this at two for the fixed micro baseline."
+  description = "Maximum Spot nodes. Keep this at two for the fixed small-node baseline."
   type        = number
   default     = 2
 }
