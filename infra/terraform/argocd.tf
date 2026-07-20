@@ -1,3 +1,11 @@
+locals {
+  postpilot_argocd_application = templatefile("${path.module}/templates/postpilot-application.yaml.tftpl", {
+    repo_url        = var.gitops_repo_url
+    target_revision = var.gitops_target_revision
+    manifest_path   = var.gitops_manifest_path
+  })
+}
+
 resource "helm_release" "argocd" {
   name             = "argocd"
   namespace        = "argocd"
@@ -56,21 +64,42 @@ resource "helm_release" "argocd" {
     applicationSet = {
       enabled = false
     }
-    extraObjects = [
-      {
-        apiVersion = "v1"
-        kind       = "Namespace"
-        metadata = {
-          name = "postpilot"
-        }
-      },
-      yamldecode(templatefile("${path.module}/templates/postpilot-application.yaml.tftpl", {
-        repo_url        = var.gitops_repo_url
-        target_revision = var.gitops_target_revision
-        manifest_path   = var.gitops_manifest_path
-      })),
-    ]
   })]
 
   depends_on = [aws_eks_node_group.on_demand]
+}
+
+# The Application CRD is installed by the Helm release above, so it cannot be
+# included in that same release's manifest. Apply it only after the CRD is
+# established. kubectl uses the operator's existing AWS SSO credentials.
+resource "terraform_data" "postpilot_argocd_application" {
+  input = local.postpilot_argocd_application
+
+  triggers_replace = [
+    helm_release.argocd.id,
+    sha256(local.postpilot_argocd_application),
+  ]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws eks update-kubeconfig --region ${var.aws_region} --name ${aws_eks_cluster.this.name}
+      kubectl wait --for=condition=established --timeout=180s crd/applications.argoproj.io
+      printf '%s' "$APPLICATION_MANIFEST" | kubectl apply --server-side -f -
+    EOT
+
+    environment = {
+      APPLICATION_MANIFEST = local.postpilot_argocd_application
+    }
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "printf '%s' \"$APPLICATION_MANIFEST\" | kubectl delete --ignore-not-found -f -"
+
+    environment = {
+      APPLICATION_MANIFEST = self.input
+    }
+  }
+
+  depends_on = [helm_release.argocd]
 }
