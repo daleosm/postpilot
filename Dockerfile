@@ -30,7 +30,9 @@ FROM dependencies AS migrations
 COPY drizzle ./drizzle
 COPY drizzle.config.ts ./
 COPY src/lib/db/schema.ts ./src/lib/db/schema.ts
-USER node
+# Node's Alpine image creates this account with UID/GID 1000. Use the numeric
+# identity so Kubernetes can verify runAsNonRoot before starting the container.
+USER 1000:1000
 CMD ["./node_modules/.bin/drizzle-kit", "migrate"]
 
 # The demo seed is deliberately a separate, opt-in image/job. Application
@@ -38,7 +40,7 @@ CMD ["./node_modules/.bin/drizzle-kit", "migrate"]
 FROM dependencies AS seed
 
 COPY . .
-USER node
+USER 1000:1000
 CMD ["./node_modules/.bin/tsx", "scripts/seed.ts"]
 
 FROM base AS runtime
@@ -52,6 +54,6 @@ COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public
 COPY package.json ./
 
-USER node
+USER 1000:1000
 EXPOSE 3000
 CMD ["./node_modules/.bin/next", "start"]
