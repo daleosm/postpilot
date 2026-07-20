@@ -176,8 +176,11 @@ resource "aws_eks_cluster" "this" {
   }
 
   vpc_config {
-    subnet_ids              = aws_subnet.public[*].id
-    endpoint_private_access = false
+    subnet_ids = aws_subnet.public[*].id
+    # Worker nodes use the private endpoint inside the VPC. Operator kubectl
+    # access remains on the public endpoint and is restricted by the CIDR
+    # allow-list below.
+    endpoint_private_access = true
     endpoint_public_access  = true
     public_access_cidrs     = var.cluster_endpoint_public_access_cidrs
   }
