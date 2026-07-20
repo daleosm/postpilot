@@ -38,6 +38,9 @@ resource "aws_s3_bucket_public_access_block" "terraform_state" {
 }
 
 resource "aws_dynamodb_table" "terraform_lock" {
+  # Retained for existing installations that were bootstrapped before
+  # Terraform's native S3 lockfile support. The main stack now uses S3
+  # lockfiles and does not rely on this table.
   name         = var.lock_table_name
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "LockID"

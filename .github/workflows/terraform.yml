@@ -43,8 +43,8 @@ jobs:
           -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
           -backend-config="key=postpilot/terraform.tfstate"
           -backend-config="region=${{ vars.AWS_REGION }}"
-          -backend-config="dynamodb_table=${{ vars.TF_LOCK_TABLE }}"
           -backend-config="encrypt=true"
+          -backend-config="use_lockfile=true"
       - run: terraform fmt -check -recursive
       - run: terraform validate
       - run: terraform plan -out=tfplan

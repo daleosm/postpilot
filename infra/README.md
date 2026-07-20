@@ -71,7 +71,7 @@ This machine needs outbound HTTPS access to AWS. It does not need a bastion host
 
 ### 3. Create encrypted Terraform state storage
 
-Run this once per AWS account/region. Terraform will ask for the bucket name and lock-table name from `terraform.tfvars`.
+Run this once per AWS account/region. It creates the encrypted, versioned state bucket and a legacy compatibility lock table. The main deployment uses Terraform's current native S3 lockfile mechanism; do not remove the existing table while this bootstrap state still manages it.
 
 ~~~bash
 cd infra/bootstrap
@@ -96,8 +96,8 @@ terraform init \
   -backend-config="bucket=YOUR_STATE_BUCKET" \
   -backend-config="key=postpilot/terraform.tfstate" \
   -backend-config="region=us-east-1" \
-  -backend-config="dynamodb_table=postpilot-terraform-lock" \
-  -backend-config="encrypt=true"
+  -backend-config="encrypt=true" \
+  -backend-config="use_lockfile=true"
 terraform plan
 terraform apply
 ~~~
@@ -194,7 +194,7 @@ The concise version below is retained as a reference for experienced operators. 
 1. Copy and edit the variable example:
 
    ~~~bash
-   # One-time: create encrypted, versioned remote state and a lock table.
+   # One-time: create encrypted, versioned remote state.
    cd infra/bootstrap
    cp terraform.tfvars.example terraform.tfvars
    terraform init
@@ -212,8 +212,8 @@ The concise version below is retained as a reference for experienced operators. 
      -backend-config="bucket=YOUR_STATE_BUCKET" \
      -backend-config="key=postpilot/terraform.tfstate" \
      -backend-config="region=us-east-1" \
-     -backend-config="dynamodb_table=postpilot-terraform-lock" \
-     -backend-config="encrypt=true"
+     -backend-config="encrypt=true" \
+     -backend-config="use_lockfile=true"
    ~~~
 
 3. Review the plan and apply it from a secured operator machine. The first apply is intentionally local: the GitHub Actions Terraform role and remote state bucket are infrastructure-account bootstrap concerns.
@@ -262,7 +262,6 @@ For the optional **Terraform EKS** workflow, create a protected GitHub environme
 | AWS_REGION | Region used by Terraform |
 | AWS_TERRAFORM_ROLE_ARN | Short-lived OIDC-assumed role for Terraform |
 | TF_STATE_BUCKET | Existing versioned, encrypted S3 state bucket |
-| TF_LOCK_TABLE | Existing DynamoDB lock table |
 | GITOPS_REPO_URL | HTTPS URL for the repository Argo CD should reconcile |
 
 The AWS IAM trust policy must limit GitHub OIDC to this repository and the protected **production** environment. GitHub recommends OIDC instead of long-lived AWS keys and AWS requires a condition on the GitHub subject claim. See [GitHub's OIDC guide](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws) and the [AWS IAM guidance](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html).
