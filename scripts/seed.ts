@@ -1,6 +1,8 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+
+import { hashPassword } from "../src/lib/password";
 
 import {
   activityLog,
@@ -326,7 +328,7 @@ const globalUsers = [
   ["user_copper_client", "Slate+ Review", "review@slateplus.test"],
 ] as const;
 
-async function seedTenant(tenant: TenantSeed) {
+async function seedTenant(tenant: TenantSeed, demoPasswordHash: string) {
   const workflowId = id(tenant.number, "21", 1);
   const stageId = (position: number) => id(tenant.number, "22", position);
   const ruleId = (position: number) => id(tenant.number, "23", position);
@@ -365,7 +367,7 @@ async function seedTenant(tenant: TenantSeed) {
     billingEmail: `accounts@${tenant.slug}.test`, taxEnabled: false, taxName: "VAT", taxRegistrationNumber: `GB ${String(100000000 + tenant.number * 1010101).replace(/(\d{3})(?=\d)/g, "$1 ")}`,
     taxRatePercent: "20", paymentTermsDays: 30, paymentInstructions: `Please pay by bank transfer, quoting the invoice number. Remittance advice: accounts@${tenant.slug}.test.`,
   });
-  await db.insert(users).values(tenantPeople.map((person) => ({ id: person.userId, name: person.name, email: person.email }))).onConflictDoUpdate({ target: users.id, set: { name: sql`excluded.name`, email: sql`excluded.email` } });
+  await db.insert(users).values(tenantPeople.map((person) => ({ id: person.userId, name: person.name, email: person.email, passwordHash: demoPasswordHash }))).onConflictDoUpdate({ target: users.id, set: { name: sql`excluded.name`, email: sql`excluded.email`, passwordHash: sql`excluded.password_hash` } });
   await db.insert(organizationMembers).values(tenantPeople.map((person) => ({ organizationId: tenant.id, userId: person.userId, role: person.membershipRole })));
   await db.insert(people).values(tenantPeople.map((person, index) => ({
     id: personId(index + 1), organizationId: tenant.id, name: person.name, email: person.email, role: person.role, userId: person.userId,
@@ -626,8 +628,11 @@ async function seed() {
   // Removed fixture identity from the former single-tenant seed. All remaining
   // seeded users have exactly one tenant membership, except Maya by design.
   await db.delete(users).where(eq(users.id, "user_iris"));
-  await db.insert(users).values(globalUsers.map(([id, name, email]) => ({ id, name, email }))).onConflictDoUpdate({ target: users.id, set: { name: sql`excluded.name`, email: sql`excluded.email` } });
-  for (const tenant of tenants) await seedTenant(tenant);
+  const demoPasswordHash = await hashPassword("password");
+  await db.insert(users).values(globalUsers.map(([id, name, email]) => ({ id, name, email, passwordHash: demoPasswordHash }))).onConflictDoUpdate({ target: users.id, set: { name: sql`excluded.name`, email: sql`excluded.email`, passwordHash: sql`excluded.password_hash` } });
+  for (const tenant of tenants) await seedTenant(tenant, demoPasswordHash);
+  // Keep retained local test/debug identities usable after a reseed too.
+  await db.update(users).set({ passwordHash: demoPasswordHash }).where(isNull(users.passwordHash));
   const showCount = tenants.reduce((total, tenant) => total + tenant.shows.length, 0);
   const episodeCount = tenants.reduce((total, tenant) => total + tenant.shows.reduce((showsTotal, show) => showsTotal + show.episodes.length, 0), 0);
   console.log(`Seeded ${tenants.length} isolated PostPilot post houses with ${showCount} shows, ${episodeCount} episodes, tenant-specific workflows, bookings, work orders, budgets, catering, QC, and activity.`);

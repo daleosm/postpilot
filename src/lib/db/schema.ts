@@ -61,10 +61,25 @@ export const users = pgTable("users", {
   id: text("id").primaryKey(),
   name: text("name"),
   email: text("email").notNull().unique(),
+  /** Optional while existing accounts are migrated to password authentication. */
+  passwordHash: text("password_hash"),
   emailVerified: timestamp("email_verified", { mode: "date", withTimezone: true }),
   image: text("image"),
   ...auditColumns,
 });
+
+/**
+ * Address-based login throttle. It intentionally has no user foreign key so
+ * unknown addresses receive the same treatment and cannot be enumerated.
+ */
+export const authLoginAttempts = pgTable("auth_login_attempts", {
+  email: text("email").primaryKey(),
+  failedAttempts: integer("failed_attempts").default(0).notNull(),
+  windowStartedAt: timestamp("window_started_at", { withTimezone: true }).defaultNow().notNull(),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }).defaultNow().notNull(),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  ...auditColumns,
+}, (table) => [index("auth_login_attempts_locked_until_idx").on(table.lockedUntil)]);
 
 export const accounts = pgTable("accounts", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

@@ -10,6 +10,7 @@
     "test:e2e": "playwright test",
     "test:ui": "playwright test tests/ui",
     "test:integration": "playwright test tests/integration",
+    "test:auth": "playwright test --config playwright.auth.config.ts",
     "test:tenant-isolation": "playwright test tests/integration/tenant-isolation",
     "test:shows": "playwright test tests/ui/shows.spec.ts tests/ui/shows-detail.spec.ts tests/integration/shows.spec.ts",
     "test:shows-isolation": "playwright test tests/integration/tenant-isolation/shows.spec.ts",

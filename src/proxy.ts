@@ -2,11 +2,12 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { withAuth } from "next-auth/middleware";
 
+import { resolveAuthSecret } from "@/lib/auth-config";
 import { isDebugMode } from "@/lib/runtime";
 
 const authProxy = withAuth({
   pages: { signIn: "/sign-in" },
-  secret: process.env.NEXTAUTH_SECRET ?? (process.env.NODE_ENV !== "production" ? "postpilot-local-development-secret" : undefined),
+  secret: resolveAuthSecret(),
 });
 
 export default function proxy(request: NextRequest) {
