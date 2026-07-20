@@ -67,9 +67,15 @@ data "aws_iam_policy_document" "github_ecr_publish_assume_role" {
     }
 
     condition {
-      test     = "StringEquals"
+      # GitHub emits an environment subject when the protected environment is
+      # resolved, and a branch subject for a direct main-branch run. Allow only
+      # these two forms for this repository.
+      test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:environment:production"]
+      values = [
+        "repo:${var.github_repository}:environment:production",
+        "repo:${var.github_repository}:ref:refs/heads/main",
+      ]
     }
   }
 }
