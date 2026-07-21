@@ -24,6 +24,8 @@ test("authentication configuration requires a production secret and secure cooki
   assert.throws(() => resolveAuthSecret({ NODE_ENV: "production" }), /NEXTAUTH_SECRET/);
   assert.equal(resolveAuthSecret({ NODE_ENV: "production", NEXTAUTH_SECRET: "secret" }), "secret");
   assert.equal(shouldUseSecureAuthCookies({ NODE_ENV: "production" }), true);
+  assert.equal(shouldUseSecureAuthCookies({ NODE_ENV: "production", NEXTAUTH_URL: "https://postpilot.example" }), true);
+  assert.equal(shouldUseSecureAuthCookies({ NODE_ENV: "production", NEXTAUTH_URL: "http://localhost:3000" }), false);
   assert.equal(shouldUseSecureAuthCookies({ NODE_ENV: "development" }), false);
 });
 

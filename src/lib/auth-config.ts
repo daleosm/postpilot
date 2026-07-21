@@ -5,5 +5,17 @@ export function resolveAuthSecret(environment: NodeJS.ProcessEnv = process.env) 
 }
 
 export function shouldUseSecureAuthCookies(environment: NodeJS.ProcessEnv = process.env) {
-  return environment.NODE_ENV === "production";
+  if (environment.NODE_ENV !== "production") return false;
+
+  // Production deployments normally use HTTPS. The local EKS port-forward is
+  // intentionally http://localhost, however, and browsers will discard a
+  // Secure cookie over that connection. Fail closed when no valid URL is set.
+  const configuredUrl = environment.NEXTAUTH_URL?.trim();
+  if (!configuredUrl) return true;
+
+  try {
+    return new URL(configuredUrl).protocol === "https:";
+  } catch {
+    return true;
+  }
 }
