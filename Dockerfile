@@ -52,7 +52,7 @@ COPY . .
 USER 1000:1000
 CMD ["./node_modules/.bin/tsx", "scripts/seed.ts"]
 
-FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runtime
+FROM gcr.io/distroless/nodejs22-debian13:nonroot AS runtime
 
 ENV NODE_ENV=production \
     PORT=3000 \
