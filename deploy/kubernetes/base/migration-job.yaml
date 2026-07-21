@@ -21,7 +21,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: migrate
-          image: 778183943831.dkr.ecr.eu-west-1.amazonaws.com/postpilot:migrations-4cca41c018097b58cb66fc279e6acf918b4f9545-29817586967
+          image: 778183943831.dkr.ecr.eu-west-1.amazonaws.com/postpilot:migrations-ac4d0b39beb39de272f7158aef08b91ee0b10359-29821115718
           imagePullPolicy: IfNotPresent
           envFrom:
             - secretRef:
