@@ -1,20 +1,65 @@
-name: CI
+name: Test and deploy PostPilot
 
 on:
   pull_request:
   push:
     branches: [main]
+    # The publish job writes only these immutable image references. Argo CD
+    # reconciles that GitOps commit, so it does not need another test/build run.
+    paths-ignore:
+      - deploy/kubernetes/base/deployment.yaml
+      - deploy/kubernetes/base/migration-job.yaml
+      - deploy/kubernetes/jobs/demo-seed.yaml
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: postpilot-${{ github.workflow }}-${{ github.ref }}
+  # Do not cancel a production deploy that has already passed its test gate.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  security:
+    name: Security and infrastructure gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan source, dependencies, and secrets with Trivy
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-dirs: node_modules,.next,.next-playwright,test-results
+      - uses: hashicorp/setup-terraform@v3
+      - name: Check Terraform formatting
+        working-directory: infra/terraform
+        run: terraform fmt -check -recursive
+      - name: Validate Terraform
+        working-directory: infra/terraform
+        run: |
+          terraform init -backend=false
+          terraform validate
+      - name: Scan Terraform policy with Checkov
+        run: >-
+          docker run --rm
+          -v "$GITHUB_WORKSPACE:/repo:ro"
+          bridgecrew/checkov@sha256:c64ffb6d6fc8087c896341a2c697770a04a1cf558db04fa7b8129d8ca6bce336
+          -d /repo/infra/terraform
+          --framework terraform
+          --compact
+          --quiet
+          --config-file /repo/infra/terraform/.checkov.yaml
+
   validate:
-    name: Type, lint, and full test suite
+    name: App test suite
+    needs: security
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -46,16 +91,6 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Scan source, dependencies, and secrets with Trivy
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,secret
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-          skip-dirs: node_modules,.next,.next-playwright,test-results
       - run: pnpm exec next typegen
       - run: pnpm exec tsc --noEmit
       - run: pnpm lint
@@ -64,26 +99,74 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:all
 
-  infrastructure:
-    name: Terraform validation
+  publish:
+    name: Build, scan, and deploy
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: infra/terraform
+    environment: production
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-      - run: terraform fmt -check -recursive
-      - run: terraform init -backend=false
-      - run: terraform validate
-      - name: Scan Terraform policy with Checkov
-        run: >-
-          docker run --rm
-          -v "$GITHUB_WORKSPACE:/repo:ro"
-          bridgecrew/checkov@sha256:c64ffb6d6fc8087c896341a2c697770a04a1cf558db04fa7b8129d8ca6bce336
-          -d /repo/infra/terraform
-          --framework terraform
-          --compact
-          --quiet
-          --config-file /repo/infra/terraform/.checkov.yaml
+        with:
+          fetch-depth: 0
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ECR_PUBLISH_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Resolve the ECR repository name
+        id: image
+        run: |
+          echo "name=${{ vars.ECR_REPOSITORY_URL }}" >> "$GITHUB_OUTPUT"
+          # ECR tags are immutable. The run ID makes a retry or a separately
+          # dispatched build of the same commit publishable without replacing
+          # an existing image, while retaining the commit SHA for traceability.
+          echo "tag=${GITHUB_SHA}-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+        with:
+          mask-password: true
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+      - name: Scan the published runtime image with Trivy
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrations
+          push: true
+          tags: ${{ steps.image.outputs.name }}:migrations-${{ steps.image.outputs.tag }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: seed
+          push: true
+          tags: ${{ steps.image.outputs.name }}:seed-${{ steps.image.outputs.tag }}
+      - name: Commit the immutable image references for Argo CD
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          # Replace the value of each image field, whether it is still the
+          # local placeholder or an immutable ECR reference from a prior run.
+          sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:${IMAGE_TAG}|" deploy/kubernetes/base/deployment.yaml
+          sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:migrations-${IMAGE_TAG}|" deploy/kubernetes/base/migration-job.yaml
+          sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:seed-${IMAGE_TAG}|" deploy/kubernetes/jobs/demo-seed.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/kubernetes/base/deployment.yaml deploy/kubernetes/base/migration-job.yaml deploy/kubernetes/jobs/demo-seed.yaml
+          git diff --cached --quiet || git commit -m "chore(deploy): postpilot ${IMAGE_TAG}"
+          git push
