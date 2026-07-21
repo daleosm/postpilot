@@ -19,9 +19,10 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {
-      // Reuse the configured Playwright build directory so Next does not
-      // amend tsconfig.json whenever this isolated suite starts.
-      NEXT_DIST_DIR: ".next-playwright",
+      // This suite runs after the main browser suite but uses a different
+      // NEXTAUTH_URL (port 5002). Keep its development build separate so it
+      // cannot reuse a client bundle initialised for the port 5001 server.
+      NEXT_DIST_DIR: ".next-playwright-auth",
       NEXTAUTH_URL: `http://localhost:${port}`,
       NEXTAUTH_SECRET: "postpilot-auth-test-secret",
       POSTPILOT_DEBUG_DEMO: "false",
