@@ -9,7 +9,11 @@ export function LogoutButton() {
     // This is a no-op outside debug mode. In debug it prevents the implicit
     // demo actor from restoring access after Auth.js signs out.
     await fetch("/api/debug/user", { method: "DELETE" });
-    await signOut({ callbackUrl: "/sign-in" });
+    // Auth.js returns a callback URL from its session cookie. In a credentials
+    // flow that cookie can still hold the prior safe destination (for example
+    // "/"), so own the post-logout navigation rather than depending on it.
+    await signOut({ redirect: false });
+    window.location.assign("/sign-in");
   }
 
   return <Button variant="tertiary" onPress={logout} className="mt-2 flex h-8 w-full justify-start gap-3 px-3 text-[12px] text-[#7b7f7d] hover:bg-[#f0f1ee] hover:text-[#353a39]"><LogOut size={15} /> Sign out</Button>;
