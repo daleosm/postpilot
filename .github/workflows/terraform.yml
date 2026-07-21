@@ -57,6 +57,7 @@ jobs:
           --compact
           --quiet
           --config-file /repo/infra/terraform/.checkov.yaml
+          --var-file /repo/infra/terraform/terraform.tfvars.example
       - run: terraform plan -out=tfplan
       - if: ${{ inputs.command == 'apply' }}
         run: terraform apply -auto-approve tfplan

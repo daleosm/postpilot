@@ -34,9 +34,15 @@ variable "vpc_cidr" {
 }
 
 variable "cluster_endpoint_public_access_cidrs" {
-  description = "CIDRs permitted to use the EKS API endpoint. Replace the permissive demo default with your VPN/office egress ranges before production."
+  description = "CIDRs permitted to use the EKS API endpoint. Set this to your current public IP, VPN, or office egress ranges."
   type        = list(string)
-  default     = ["0.0.0.0/0"]
+
+  validation {
+    condition = length(var.cluster_endpoint_public_access_cidrs) > 0 && alltrue([
+      for cidr in var.cluster_endpoint_public_access_cidrs : cidr != "0.0.0.0/0"
+    ])
+    error_message = "cluster_endpoint_public_access_cidrs must contain at least one restricted CIDR and must not include 0.0.0.0/0."
+  }
 }
 
 variable "node_instance_types" {

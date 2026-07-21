@@ -56,6 +56,7 @@ jobs:
           --compact
           --quiet
           --config-file /repo/infra/terraform/.checkov.yaml
+          --var-file /repo/infra/terraform/terraform.tfvars.example
 
   validate:
     name: App test suite
