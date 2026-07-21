@@ -29,6 +29,23 @@ resource "aws_ecr_repository" "postpilot" {
   }
 }
 
+# Keep registry scanning in ECR's Basic mode: every newly pushed image is
+# scanned once, without Amazon Inspector's paid continuous re-scanning. This
+# applies at registry level, so any future repositories in this demo account
+# get the same predictable, no-extra-cost baseline.
+resource "aws_ecr_registry_scanning_configuration" "basic" {
+  scan_type = "BASIC"
+
+  rule {
+    scan_frequency = "SCAN_ON_PUSH"
+
+    repository_filter {
+      filter      = "*"
+      filter_type = "WILDCARD"
+    }
+  }
+}
+
 resource "aws_ecr_lifecycle_policy" "postpilot" {
   repository = aws_ecr_repository.postpilot.name
 

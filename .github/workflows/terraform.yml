@@ -47,6 +47,16 @@ jobs:
           -backend-config="use_lockfile=true"
       - run: terraform fmt -check -recursive
       - run: terraform validate
+      - name: Scan Terraform policy with Checkov
+        run: >-
+          docker run --rm
+          -v "$GITHUB_WORKSPACE:/repo:ro"
+          bridgecrew/checkov@sha256:c64ffb6d6fc8087c896341a2c697770a04a1cf558db04fa7b8129d8ca6bce336
+          -d /repo/infra/terraform
+          --framework terraform
+          --compact
+          --quiet
+          --config-file /repo/infra/terraform/.checkov.yaml
       - run: terraform plan -out=tfplan
       - if: ${{ inputs.command == 'apply' }}
         run: terraform apply -auto-approve tfplan

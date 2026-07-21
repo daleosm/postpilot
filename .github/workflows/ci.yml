@@ -46,6 +46,16 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Scan source, dependencies, and secrets with Trivy
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-dirs: node_modules,.next,.next-playwright,test-results
       - run: pnpm exec next typegen
       - run: pnpm exec tsc --noEmit
       - run: pnpm lint
@@ -67,3 +77,13 @@ jobs:
       - run: terraform fmt -check -recursive
       - run: terraform init -backend=false
       - run: terraform validate
+      - name: Scan Terraform policy with Checkov
+        run: >-
+          docker run --rm
+          -v "$GITHUB_WORKSPACE:/repo:ro"
+          bridgecrew/checkov@sha256:c64ffb6d6fc8087c896341a2c697770a04a1cf558db04fa7b8129d8ca6bce336
+          -d /repo/infra/terraform
+          --framework terraform
+          --compact
+          --quiet
+          --config-file /repo/infra/terraform/.checkov.yaml

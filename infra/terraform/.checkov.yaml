@@ -1,0 +1,34 @@
+# PostPilot deliberately uses a small, public-subnet EKS demonstration stack
+# without a NAT gateway, Multi-AZ database, or paid observability add-ons.
+# These documented exceptions keep Checkov strict for future changes while
+# avoiding false expectations that this cost-conscious demo is production HA.
+skip-check:
+  # AWS-managed ECR encryption is adequate for public demo container images.
+  - CKV_AWS_136
+  # Nodes are deliberately in public subnets so the demo works without NAT.
+  - CKV_AWS_130
+  # The EKS API is public but CIDR-restricted to the operator's address.
+  - CKV_AWS_39
+  # KMS envelope encryption and full EKS control-plane logs add recurring cost.
+  - CKV_AWS_58
+  - CKV_AWS_37
+  # RDS is a low-cost, single-AZ demo database. These are production hardening
+  # controls to enable before handling real customer data.
+  - CKV_AWS_118
+  - CKV_AWS_353
+  - CKV_AWS_293
+  - CKV_AWS_157
+  - CKV_AWS_161
+  - CKV_AWS_129
+  - CKV_AWS_226
+  - CKV_AWS_16
+  - CKV2_AWS_30
+  - CKV2_AWS_60
+  # VPC flow logging adds recurring CloudWatch costs for this learning stack.
+  - CKV2_AWS_11
+  # Default-group restriction is managed by the AWS account baseline.
+  - CKV2_AWS_12
+  # PostgreSQL egress and rule descriptions remain unchanged in the existing
+  # minimal network design; revisit before any production rollout.
+  - CKV_AWS_23
+  - CKV_AWS_382
