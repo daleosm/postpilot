@@ -4,6 +4,7 @@
 .next-*
 .pnpm-store
 node_modules
+infra
 playwright-report
 test-results
 tests
