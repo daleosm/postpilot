@@ -18,11 +18,12 @@ Post facilities cannot afford to be blocked by a vendor outage, a slow support q
 
 Self-hosting is an operational responsibility, not a guarantee of zero downtime. A production deployment still needs backups, monitoring, tested upgrades, secure credentials, and someone responsible for it. The trade-off is that the facility—not an opaque third party—has the ability to diagnose and recover the system.
 
-## What it covers
+## Features
 
 | Area | Operational coverage |
 | --- | --- |
 | Shows and episodes | Show → season → episode structure, deadlines, contacts, per-episode teams, and live activity |
+| Multi-tenant operations | Isolated post-house workspaces, active-organisation switching, organisation memberships, tenant-scoped data access, and debug-only user/context switching for safe permission testing |
 | Workflow and approvals | One configurable ordered workflow per facility, named episode signers, capability-based access, practical QC/delivery gates |
 | Bookings | Room and person bookings, conflicts, buffers, option holds, guest attendance, copied episode sequences, and 09:00–18:00 Gantt scheduling |
 | My time and work orders | Assigned work, actual time/overtime, internal or vendor work, billing status, and drag-to-book room reservations |
@@ -31,6 +32,7 @@ Self-hosting is an operational responsibility, not a guarantee of zero downtime.
 | Budget and rates | Master, network, show, and episode rate cards; booking-derived costs; actuals; client invoicing readiness; and budgets by episode |
 | CRM and procurement | Client/network/vendor accounts, operational contacts, vendor POs, client POs, allocations, and supplier actuals |
 | Facility services | Catering requests, runner desk, fulfilment costs, and episode cost attribution |
+| Workflow-only media model | No mandatory uploads or hosted review media; store operational metadata and external references while retaining project media in the facility’s existing systems |
 
 ## Core principles
 
