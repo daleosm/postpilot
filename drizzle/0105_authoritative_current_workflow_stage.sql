@@ -22,7 +22,10 @@ WITH resolved AS (
     INNER JOIN "workflow_stages" s ON s."id" = t."workflow_stage_id" AND s."organization_id" = e."organization_id"
     WHERE t."organization_id" = e."organization_id"
       AND t."episode_id" = e."id"
-      AND t."status" NOT IN ('complete', 'approved', 'not_started')
+      -- `complete` was added to this enum by an earlier migration in the
+      -- same fresh-schema batch. Compare its textual form so PostgreSQL does
+      -- not resolve it as an uncommitted enum literal.
+      AND t."status"::text NOT IN ('complete', 'approved', 'not_started')
     ORDER BY CASE t."status" WHEN 'blocked' THEN 0 WHEN 'submitted' THEN 1 ELSE 2 END, s."position"
     LIMIT 1
   ) current_track ON true
@@ -32,7 +35,7 @@ WITH resolved AS (
     INNER JOIN "workflow_stages" s ON s."id" = t."workflow_stage_id" AND s."organization_id" = e."organization_id"
     WHERE t."organization_id" = e."organization_id"
       AND t."episode_id" = e."id"
-      AND t."status" IN ('complete', 'approved')
+      AND t."status"::text IN ('complete', 'approved')
     ORDER BY s."position" DESC
     LIMIT 1
   ) complete_track ON true

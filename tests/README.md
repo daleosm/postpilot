@@ -14,6 +14,8 @@ All automated browser tests use Playwright and the database-backed debug environ
 ## Commands
 
 ```sh
+pnpm test:unit
+pnpm test:all
 pnpm test:e2e
 pnpm test:auth
 pnpm test:ui
@@ -24,6 +26,10 @@ pnpm test:qc
 pnpm test:guest-episodes
 pnpm test:booking-guests
 ```
+
+`test:all` runs every Node unit test and every Playwright browser/integration
+test, including the isolated credentials-auth suite. It requires a migrated,
+seeded PostgreSQL database; GitHub Actions provisions one automatically.
 
 ## Conventions
 

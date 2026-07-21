@@ -43,7 +43,10 @@ SELECT
   "organization_id", episode_id, stage_id,
   CASE
     WHEN valid_current_stage_id IS NULL THEN 'not_started'::"workflow_track_status"
-    WHEN stage_position < current_position THEN 'complete'::"workflow_track_status"
+    -- `complete` is added by 0097 in this same migration batch. Use the
+    -- established completed equivalent so PostgreSQL can apply a fresh schema
+    -- without referencing an enum value before its transaction commits.
+    WHEN stage_position < current_position THEN 'approved'::"workflow_track_status"
     WHEN stage_id = valid_current_stage_id AND current_has_pending_approval THEN 'submitted'::"workflow_track_status"
     WHEN stage_id = valid_current_stage_id THEN 'in_progress'::"workflow_track_status"
     ELSE 'not_started'::"workflow_track_status"

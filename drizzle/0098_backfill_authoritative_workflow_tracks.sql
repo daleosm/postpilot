@@ -10,7 +10,11 @@ SELECT
   s."id",
   CASE
     WHEN current_stage."id" IS NULL THEN 'not_started'::"workflow_track_status"
-    WHEN s."position" < current_stage."position" THEN 'complete'::"workflow_track_status"
+    -- `complete` is introduced by 0097. PostgreSQL does not permit a new
+    -- enum value to be used while this clean-database migration batch is
+    -- still open, so use the pre-existing equivalent state here. Later
+    -- workflow logic already treats `approved` as a completed track.
+    WHEN s."position" < current_stage."position" THEN 'approved'::"workflow_track_status"
     WHEN e."workflow_stage_id" = s."id" AND EXISTS (
       SELECT 1 FROM "episode_workflow_approvals" a
       WHERE a."organization_id" = e."organization_id"

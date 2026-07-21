@@ -2,6 +2,10 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests",
+  // Node's built-in test runner owns tests/unit/*.test.ts. Keep Playwright's
+  // browser pass restricted to browser and API specs so test:all runs each
+  // test exactly once.
+  testMatch: "**/*.spec.ts",
   testIgnore: ["**/auth-credentials.spec.ts"],
   fullyParallel: false,
   workers: 1,

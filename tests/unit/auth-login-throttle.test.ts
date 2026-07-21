@@ -9,6 +9,17 @@ if (!databaseUrl) throw new Error("DATABASE_URL is required for login-throttle t
 const sql = postgres(databaseUrl, { prepare: false });
 const email = "parallel-login-throttle@postpilot.test";
 
+test.after(async () => {
+  await sql`delete from auth_login_attempts where email = ${email}`;
+  await sql.end();
+
+  // auth-login-throttle uses the app's shared client. Explicitly close it in
+  // this Node test process so the complete unit suite can terminate cleanly.
+  const appClient = (globalThis as typeof globalThis & { postpilotDbClient?: ReturnType<typeof postgres> }).postpilotDbClient;
+  await appClient?.end();
+  delete (globalThis as typeof globalThis & { postpilotDbClient?: ReturnType<typeof postgres> }).postpilotDbClient;
+});
+
 test("parallel failed credentials attempts cannot lose increments or bypass the lockout", async () => {
   await sql`delete from auth_login_attempts where email = ${email}`;
   const now = new Date("2035-01-01T10:00:00.000Z");
@@ -28,6 +39,4 @@ test("parallel failed credentials attempts cannot lose increments or bypass the 
   `;
   assert.equal(reset?.failed_attempts, 1);
   assert.equal(reset?.locked_until, null);
-  await sql`delete from auth_login_attempts where email = ${email}`;
-  await sql.end();
 });

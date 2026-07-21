@@ -8,7 +8,7 @@ const clientRenameMigration = readFileSync(resolve(process.cwd(), "drizzle/0108_
 
 test("workflow backfill infers progress only from a valid legacy stage pointer", () => {
   assert.match(migration, /WHEN valid_current_stage_id IS NULL THEN 'not_started'/);
-  assert.match(migration, /WHEN stage_position < current_position THEN 'complete'/);
+  assert.match(migration, /WHEN stage_position < current_position THEN 'approved'/);
   assert.match(migration, /WHEN stage_id = valid_current_stage_id AND current_has_pending_approval THEN 'submitted'/);
   assert.match(migration, /WHEN stage_id = valid_current_stage_id THEN 'in_progress'/);
   assert.doesNotMatch(migration, /WHEN e\."status" = 'delivered' THEN 'complete'/);
