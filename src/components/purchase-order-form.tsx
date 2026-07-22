@@ -67,9 +67,12 @@ export function PurchaseOrderForm({ currency, vendors, shows, episodes, purchase
     });
     if (!response.ok) { const body = await response.json().catch(() => null); setSubmitError(body?.error ?? "Unable to save this purchase order."); return; }
     const saved = await response.json();
+    if (!purchaseOrder && saved?.id) {
+      router.push(`/budget/purchase-orders/${saved.id}`);
+      return;
+    }
     close();
-    if (!purchaseOrder && saved?.id) router.push(`/budget/purchase-orders/${saved.id}`);
-    else router.refresh();
+    router.refresh();
   }
 
   return <>
