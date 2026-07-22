@@ -5,6 +5,7 @@ import { PurchaseOrderError, createActivePurchaseOrder } from "@/server/purchase
 import { listActivePurchaseOrders, listEligiblePurchaseOrdersForWorkOrder } from "@/server/data/purchase-orders";
 import { can } from "@/lib/permissions";
 import { getActiveOrganizationContext } from "@/lib/organizations";
+import { unexpectedApiError } from "@/lib/api-errors";
 
 const optionsQuerySchema = z.object({ vendorId: z.string().uuid(), episodeId: z.string().uuid() });
 
@@ -26,6 +27,6 @@ export async function POST(request: Request) {
     return NextResponse.json(await createActivePurchaseOrder(await request.json()), { status: 201 });
   } catch (error) {
     if (error instanceof PurchaseOrderError) return NextResponse.json({ error: error.message }, { status: error.status });
-    return NextResponse.json({ error: "Unable to create the purchase order." }, { status: 500 });
+    return unexpectedApiError(request, "purchase_order_create_failed", error, "Unable to create the purchase order.");
   }
 }

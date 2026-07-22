@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { unexpectedApiError } from "@/lib/api-errors";
 import { PurchaseOrderError, recordActivePurchaseOrderActualCost } from "@/server/purchase-orders";
 
 export async function POST(request: Request, { params }: { params: Promise<{ purchaseOrderId: string }> }) {
@@ -8,6 +9,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ pur
     return NextResponse.json(await recordActivePurchaseOrderActualCost(purchaseOrderId, await request.json()), { status: 201 });
   } catch (error) {
     if (error instanceof PurchaseOrderError) return NextResponse.json({ error: error.message }, { status: error.status });
-    return NextResponse.json({ error: "Unable to record the supplier actual cost." }, { status: 500 });
+    return unexpectedApiError(request, "purchase_order_actual_cost_failed", error, "Unable to record the supplier actual cost.");
   }
 }

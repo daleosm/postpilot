@@ -46,7 +46,7 @@ variable "cluster_endpoint_public_access_cidrs" {
 }
 
 variable "node_instance_types" {
-  description = "Compatible x86_64 Spot small instances for the fixed two-node managed group."
+  description = "Compatible x86_64 Spot small instances for the fixed two-node managed group. VPC CNI prefix delegation provides extra pod IP capacity."
   type        = list(string)
   default     = ["t3.small", "t3a.small"]
 }
@@ -85,6 +85,31 @@ variable "argocd_chart_version" {
   description = "Pinned Argo CD Helm chart version. Upgrade deliberately after testing."
   type        = string
   default     = "10.1.3"
+}
+
+variable "application_log_retention_days" {
+  description = "How long to retain EKS application logs in CloudWatch Logs. Thirty days is the low-cost production baseline."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365], var.application_log_retention_days)
+    error_message = "application_log_retention_days must be a supported CloudWatch Logs retention period."
+  }
+}
+
+variable "observability_alarm_email" {
+  description = "Optional email address subscribed to PostPilot CloudWatch alarm notifications. AWS sends a confirmation email before delivery begins."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "public_load_balancer_name" {
+  description = "Optional Kubernetes-created Classic Load Balancer name used for 5xx and healthy-target alarms. Leave null until the service has created one."
+  type        = string
+  default     = null
+  nullable    = true
 }
 
 variable "gitops_repo_url" {

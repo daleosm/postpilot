@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { unexpectedApiError } from "@/lib/api-errors";
 import { can } from "@/lib/permissions";
 import { ClientPurchaseOrderError, updateActiveClientPurchaseOrder } from "@/server/client-purchase-orders";
 import { getActiveClientPurchaseOrderDetail } from "@/server/data/client-purchase-orders";
@@ -18,6 +19,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ cl
     return NextResponse.json(await updateActiveClientPurchaseOrder(clientPurchaseOrderId, await request.json()));
   } catch (error) {
     if (error instanceof ClientPurchaseOrderError) return NextResponse.json({ error: error.message }, { status: error.status });
-    return NextResponse.json({ error: "Unable to update the client purchase order." }, { status: 500 });
+    return unexpectedApiError(request, "client_purchase_order_update_failed", error, "Unable to update the client purchase order.");
   }
 }

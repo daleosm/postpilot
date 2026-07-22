@@ -17,3 +17,9 @@ github_oidc_subjects = [
 
 # Lock this down to the public egress IP ranges of your office/VPN/CI runner.
 cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
+
+# Optional: confirm the resulting SNS subscription email in your inbox after
+# Terraform applies. Set the Classic Load Balancer name once Kubernetes creates
+# it (the name is the first hostname segment in `kubectl get svc -n postpilot`).
+# observability_alarm_email = "ops@example.com"
+# public_load_balancer_name = "a1b2c3d4e5f6"

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { can } from "@/lib/permissions";
 import { getActivePurchaseOrderDetail } from "@/server/data/purchase-orders";
 import { PurchaseOrderError, updateActivePurchaseOrder } from "@/server/purchase-orders";
+import { unexpectedApiError } from "@/lib/api-errors";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ purchaseOrderId: string }> }) {
   if (!(await can("manage_budget"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -18,6 +19,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ pu
     return NextResponse.json(await updateActivePurchaseOrder(purchaseOrderId, await request.json()));
   } catch (error) {
     if (error instanceof PurchaseOrderError) return NextResponse.json({ error: error.message }, { status: error.status });
-    return NextResponse.json({ error: "Unable to update the purchase order." }, { status: 500 });
+    return unexpectedApiError(request, "purchase_order_update_failed", error, "Unable to update the purchase order.");
   }
 }

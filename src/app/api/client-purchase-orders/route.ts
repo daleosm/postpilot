@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { unexpectedApiError } from "@/lib/api-errors";
 import { ClientPurchaseOrderError, createActiveClientPurchaseOrder } from "@/server/client-purchase-orders";
 import { listActiveClientPurchaseOrders } from "@/server/data/client-purchase-orders";
 import { can } from "@/lib/permissions";
@@ -30,6 +31,6 @@ export async function POST(request: Request) {
     return NextResponse.json(await createActiveClientPurchaseOrder(await request.json()), { status: 201 });
   } catch (error) {
     if (error instanceof ClientPurchaseOrderError) return NextResponse.json({ error: error.message }, { status: error.status });
-    return NextResponse.json({ error: "Unable to create the client purchase order." }, { status: 500 });
+    return unexpectedApiError(request, "client_purchase_order_create_failed", error, "Unable to create the client purchase order.");
   }
 }

@@ -250,6 +250,16 @@ resource "aws_eks_addon" "vpc_cni" {
   addon_name                  = "vpc-cni"
   resolve_conflicts_on_create = "OVERWRITE"
 
+  # Prefix delegation gives each Nitro ENI a /28 IP prefix instead of only a
+  # few secondary addresses. It is required before raising kubelet maxPods on
+  # the small Spot nodes below.
+  configuration_values = jsonencode({
+    env = {
+      ENABLE_PREFIX_DELEGATION = "true"
+      WARM_PREFIX_TARGET       = "1"
+    }
+  })
+
   # The initial managed node group must exist before Terraform waits for an
   # add-on's Kubernetes pods to become healthy.
   depends_on = [aws_eks_node_group.spot]
@@ -271,9 +281,35 @@ resource "aws_eks_addon" "coredns" {
   depends_on = [aws_eks_node_group.spot]
 }
 
+# EKS's default t3.small pod limit is deliberately conservative. This custom
+# launch template raises it only after VPC CNI prefix delegation is enabled,
+# so the scheduler never assigns more Pods than the CNI can network.
+resource "aws_launch_template" "spot" {
+  name_prefix            = "${local.name}-spot-small-"
+  update_default_version = true
+
+  user_data = base64encode(<<-EOT
+    MIME-Version: 1.0
+    Content-Type: multipart/mixed; boundary="NODEADM"
+
+    --NODEADM
+    Content-Type: application/node.eks.aws
+
+    ---
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      kubelet:
+        config:
+          maxPods: 16
+    --NODEADM--
+  EOT
+  )
+}
+
 resource "aws_eks_node_group" "spot" {
   cluster_name    = aws_eks_cluster.this.name
-  node_group_name = "spot-small"
+  node_group_name = "spot-small-prefix"
   node_role_arn   = aws_iam_role.node.arn
   subnet_ids      = aws_subnet.public[*].id
 
@@ -282,7 +318,11 @@ resource "aws_eks_node_group" "spot" {
   capacity_type  = "SPOT"
   instance_types = var.node_instance_types
   ami_type       = "AL2023_x86_64_STANDARD"
-  disk_size      = 20
+
+  launch_template {
+    id      = aws_launch_template.spot.id
+    version = tostring(aws_launch_template.spot.latest_version)
+  }
 
   scaling_config {
     min_size     = var.node_min_size
@@ -292,6 +332,13 @@ resource "aws_eks_node_group" "spot" {
 
   update_config {
     max_unavailable = 1
+  }
+
+  # Instance-family changes force EKS node-group replacement. Use a distinct
+  # name and create the new two-node group first so Kubernetes can reschedule
+  # PostPilot before the previous Spot nodes are drained.
+  lifecycle {
+    create_before_destroy = true
   }
 
   depends_on = [

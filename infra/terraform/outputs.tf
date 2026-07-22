@@ -43,3 +43,13 @@ output "github_ecr_publish_role_arn" {
   value       = aws_iam_role.github_ecr_publish.arn
   description = "GitHub Actions OIDC role allowed to publish immutable PostPilot images to ECR."
 }
+
+output "application_log_group_name" {
+  value       = aws_cloudwatch_log_group.postpilot_application.name
+  description = "CloudWatch log group receiving PostPilot container stdout/stderr for the configured retention period."
+}
+
+output "observability_sns_topic_arn" {
+  value       = aws_sns_topic.postpilot_observability.arn
+  description = "SNS topic used by optional PostPilot observability alarm subscriptions."
+}
