@@ -5,6 +5,7 @@ resources:
   - namespace.yaml
   - migration-job.yaml
   - deployment.yaml
+  - pod-disruption-budget.yaml
   - service.yaml
 
 labels:
