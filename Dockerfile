@@ -60,12 +60,14 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-COPY --chown=nonroot:nonroot --from=production-dependencies /app/node_modules ./node_modules
-COPY --chown=nonroot:nonroot --from=build /app/.next ./.next
-COPY --chown=nonroot:nonroot --from=build /app/public ./public
-COPY --chown=nonroot:nonroot package.json ./
+COPY --chown=65532:65532 --from=production-dependencies /app/node_modules ./node_modules
+COPY --chown=65532:65532 --from=build /app/.next ./.next
+COPY --chown=65532:65532 --from=build /app/public ./public
+COPY --chown=65532:65532 package.json ./
 
-USER nonroot
+# Kubernetes validates runAsNonRoot before starting the container. Use the
+# distroless non-root UID/GID numerically rather than the named account.
+USER 65532:65532
 EXPOSE 3000
 # Distroless uses Node as its entrypoint, so invoke Next's JavaScript CLI
 # directly rather than the shell wrapper from node_modules/.bin.
