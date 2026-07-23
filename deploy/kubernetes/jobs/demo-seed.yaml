@@ -19,7 +19,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: seed
-          image: 778183943831.dkr.ecr.eu-west-1.amazonaws.com/postpilot:seed-86341d0cd9ca14046662a70f3d41089f61531e56-29932156680
+          image: 778183943831.dkr.ecr.eu-west-1.amazonaws.com/postpilot:seed-f07f0d050c2b3c875ca5a2ef65a2155e3d50b397-29995504683
           imagePullPolicy: IfNotPresent
           envFrom:
             - secretRef:
