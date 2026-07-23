@@ -2,68 +2,12 @@
 # PostPilot writes only unexpected errors to stderr; routine request access logs
 # intentionally remain disabled to control noise and log-ingestion cost.
 #checkov:skip=CKV_AWS_338:Thirty-day retention is an intentional low-cost demo baseline; production operators can set application_log_retention_days to 365.
-data "aws_caller_identity" "current" {}
-
-data "aws_iam_policy_document" "observability_kms" {
-  statement {
-    sid       = "AllowAccountAdministration"
-    actions   = ["kms:*"]
-    resources = ["*"]
-
-    principals {
-      type        = "AWS"
-      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
-    }
-  }
-
-  statement {
-    sid = "AllowCloudWatchLogs"
-    actions = [
-      "kms:Encrypt*",
-      "kms:Decrypt*",
-      "kms:ReEncrypt*",
-      "kms:GenerateDataKey*",
-      "kms:Describe*",
-    ]
-    resources = ["*"]
-
-    principals {
-      type        = "Service"
-      identifiers = ["logs.${var.aws_region}.amazonaws.com"]
-    }
-  }
-
-  statement {
-    sid = "AllowSns"
-    actions = [
-      "kms:Decrypt",
-      "kms:GenerateDataKey*",
-    ]
-    resources = ["*"]
-
-    principals {
-      type        = "Service"
-      identifiers = ["sns.amazonaws.com"]
-    }
-  }
-}
-
-resource "aws_kms_key" "observability" {
-  description             = "Encrypts PostPilot CloudWatch application logs and alert messages."
-  deletion_window_in_days = 7
-  enable_key_rotation     = true
-  policy                  = data.aws_iam_policy_document.observability_kms.json
-}
-
-resource "aws_kms_alias" "observability" {
-  name          = "alias/${local.name}-observability"
-  target_key_id = aws_kms_key.observability.key_id
-}
-
 resource "aws_cloudwatch_log_group" "postpilot_application" {
   name              = "/aws/containerinsights/${local.name}/application"
   retention_in_days = var.application_log_retention_days
-  kms_key_id        = aws_kms_key.observability.arn
+  # AWS-managed encryption avoids an unnecessary customer-managed KMS key
+  # while keeping container logs encrypted at rest.
+  kms_key_id = "alias/aws/logs"
 }
 
 data "aws_iam_policy_document" "cloudwatch_observability_assume_role" {
@@ -149,7 +93,7 @@ resource "aws_cloudwatch_log_metric_filter" "postpilot_server_errors" {
 
 resource "aws_sns_topic" "postpilot_observability" {
   name              = "${local.name}-observability-alerts"
-  kms_master_key_id = aws_kms_key.observability.arn
+  kms_master_key_id = "alias/aws/sns"
 }
 
 resource "aws_sns_topic_subscription" "postpilot_observability_email" {

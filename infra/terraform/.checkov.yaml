@@ -26,6 +26,10 @@ skip-check:
   - CKV2_AWS_60
   # VPC flow logging adds recurring CloudWatch costs for this learning stack.
   - CKV2_AWS_11
+  # Application error logs retain for thirty days by design. Raising this to a
+  # year is opt-in through application_log_retention_days for real production
+  # deployments with longer audit requirements.
+  - CKV_AWS_338
   # Default-group restriction is managed by the AWS account baseline.
   - CKV2_AWS_12
   # PostgreSQL egress and rule descriptions remain unchanged in the existing
