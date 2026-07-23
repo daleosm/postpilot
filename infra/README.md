@@ -5,15 +5,16 @@ This directory supplies a deliberately compact EKS and Argo CD footprint for a p
 - one EKS control plane;
 - two fixed x86 Spot small nodes (t3.small/t3a.small);
 - one private, single-AZ RDS PostgreSQL db.t3.micro instance with 20 GiB gp3 storage;
-- public subnets and no NAT gateway, which avoids the usual fixed NAT cost;
+- public ALB/NAT subnets, private worker-node subnets, and isolated database subnets across two AZs;
+- one public NAT Gateway for low-cost private-node egress;
 - Argo CD exposed only as a ClusterIP service;
 - a GitOps Application that reconciles this repository's Kubernetes manifests;
 - an AWS Load Balancer Controller with a Pod Identity role; and
 - a public-overlay ALB Ingress for PostPilot. The base manifests remain internal.
 
-This is a low-cost **fixed two-node EKS pilot** profile, not a high-availability production topology. It uses two Spot nodes, which can be interrupted or temporarily unavailable, and must not be used for essential workloads. EKS also charges for the control plane independently of EC2 nodes, and EC2, RDS, storage, network, public-IP, and Secrets Manager charges remain separate. Read the current [Amazon EKS pricing](https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html#eks-pricing) before creating the cluster.
+This is a low-cost **fixed two-node EKS pilot** profile, not a high-availability production topology. It uses two Spot nodes, which can be interrupted or temporarily unavailable, and must not be used for essential workloads. The single NAT Gateway is also an intentional cost/reliability compromise: an AZ failure can interrupt private-node egress. Use one NAT Gateway per AZ for a high-availability facility deployment. EKS also charges for the control plane independently of EC2 nodes, and EC2, RDS, storage, network, public-IP, NAT, and Secrets Manager charges remain separate. Read the current [Amazon EKS pricing](https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html#eks-pricing) before creating the cluster.
 
-For a live facility, start with this only as a pilot. Move application nodes into private networking, use larger nodes with headroom, turn on RDS deletion protection and Multi-AZ, set a restrictive API CIDR allow-list, and add backups/monitoring.
+For a live facility, start with this only as a pilot. Use one NAT Gateway per AZ, larger nodes with headroom, RDS deletion protection and Multi-AZ, a restrictive API CIDR allow-list, and stronger backup/monitoring policies.
 
 ## Architecture
 

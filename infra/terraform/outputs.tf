@@ -28,6 +28,11 @@ output "rds_port" {
   description = "PostgreSQL port."
 }
 
+output "nat_gateway_id" {
+  value       = aws_nat_gateway.this.id
+  description = "Single-AZ NAT Gateway used by private PostPilot worker nodes."
+}
+
 output "application_secrets_manager_name" {
   description = "AWS Secrets Manager secret that supplies PostPilot runtime configuration."
   value       = aws_secretsmanager_secret.postpilot_application.name

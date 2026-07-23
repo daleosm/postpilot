@@ -170,6 +170,94 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
+# Application nodes do not receive public addresses. A single NAT Gateway is a
+# deliberate low-cost compromise for this pilot: both AZs use it for ECR,
+# package, and AWS API egress. A high-availability facility deployment should
+# use one NAT Gateway and private route table per AZ instead.
+resource "aws_eip" "nat" {
+  domain = "vpc"
+
+  tags = {
+    Name = "${local.name}-nat"
+  }
+}
+
+resource "aws_nat_gateway" "this" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public[0].id
+
+  tags = {
+    Name = "${local.name}-nat"
+  }
+
+  depends_on = [aws_internet_gateway.this]
+}
+
+resource "aws_subnet" "private" {
+  count = 2
+
+  vpc_id                  = aws_vpc.this.id
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  cidr_block              = cidrsubnet(var.vpc_cidr, 4, count.index + 2)
+  map_public_ip_on_launch = false
+
+  tags = {
+    Name                                  = "${local.name}-private-${count.index + 1}"
+    "kubernetes.io/role/internal-elb"     = "1"
+    "kubernetes.io/cluster/${local.name}" = "shared"
+  }
+}
+
+resource "aws_route_table" "private" {
+  vpc_id = aws_vpc.this.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.this.id
+  }
+
+  tags = {
+    Name = "${local.name}-private"
+  }
+}
+
+resource "aws_route_table_association" "private" {
+  count = length(aws_subnet.private)
+
+  subnet_id      = aws_subnet.private[count.index].id
+  route_table_id = aws_route_table.private.id
+}
+
+# Database subnets deliberately have no default route. RDS is non-public and
+# accepts PostgreSQL only from the EKS cluster security group.
+resource "aws_subnet" "database" {
+  count = 2
+
+  vpc_id                  = aws_vpc.this.id
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  cidr_block              = cidrsubnet(var.vpc_cidr, 4, count.index + 4)
+  map_public_ip_on_launch = false
+
+  tags = {
+    Name = "${local.name}-database-${count.index + 1}"
+  }
+}
+
+resource "aws_route_table" "database" {
+  vpc_id = aws_vpc.this.id
+
+  tags = {
+    Name = "${local.name}-database"
+  }
+}
+
+resource "aws_route_table_association" "database" {
+  count = length(aws_subnet.database)
+
+  subnet_id      = aws_subnet.database[count.index].id
+  route_table_id = aws_route_table.database.id
+}
+
 data "aws_iam_policy_document" "cluster_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -202,7 +290,9 @@ resource "aws_eks_cluster" "this" {
   }
 
   vpc_config {
-    subnet_ids = aws_subnet.public[*].id
+    # EKS control-plane ENIs and all worker nodes use private subnets. The
+    # public subnets are reserved for the ALB and NAT Gateway.
+    subnet_ids = aws_subnet.private[*].id
     # Worker nodes use the private endpoint inside the VPC. Operator kubectl
     # access remains on the public endpoint and is restricted by the CIDR
     # allow-list below.
@@ -315,9 +405,9 @@ resource "aws_launch_template" "spot" {
 
 resource "aws_eks_node_group" "spot" {
   cluster_name    = aws_eks_cluster.this.name
-  node_group_name = "spot-small-prefix"
+  node_group_name = "spot-small-private"
   node_role_arn   = aws_iam_role.node.arn
-  subnet_ids      = aws_subnet.public[*].id
+  subnet_ids      = aws_subnet.private[*].id
 
   # This is a non-essential pilot workload. Use multiple same-sized Spot
   # pools so EKS can choose capacity-optimised availability across them.
@@ -348,6 +438,7 @@ resource "aws_eks_node_group" "spot" {
   }
 
   depends_on = [
+    aws_route_table_association.private,
     aws_iam_role_policy_attachment.node_worker,
     aws_iam_role_policy_attachment.node_cni,
     aws_iam_role_policy_attachment.node_ecr,
@@ -361,12 +452,12 @@ moved {
   to   = aws_eks_node_group.spot
 }
 
-resource "aws_db_subnet_group" "postgres" {
-  name       = "${local.name}-postgres"
-  subnet_ids = aws_subnet.public[*].id
+resource "aws_db_subnet_group" "postgres_isolated" {
+  name       = "${local.name}-postgres-isolated"
+  subnet_ids = aws_subnet.database[*].id
 
   tags = {
-    Name = "${local.name}-postgres"
+    Name = "${local.name}-postgres-isolated"
   }
 }
 
@@ -392,7 +483,7 @@ resource "aws_security_group" "postgres" {
 }
 
 resource "aws_db_instance" "postgres" {
-  identifier                  = "${var.project_name}-postgres"
+  identifier                  = "${var.project_name}-postgres-private"
   engine                      = "postgres"
   instance_class              = var.rds_instance_class
   allocated_storage           = var.rds_allocated_storage_gb
@@ -401,17 +492,18 @@ resource "aws_db_instance" "postgres" {
   username                    = "postpilot"
   manage_master_user_password = true
 
-  db_subnet_group_name   = aws_db_subnet_group.postgres.name
+  db_subnet_group_name   = aws_db_subnet_group.postgres_isolated.name
   vpc_security_group_ids = [aws_security_group.postgres.id]
   publicly_accessible    = false
   multi_az               = false
 
   backup_retention_period = 1
+  copy_tags_to_snapshot   = true
   deletion_protection     = false
   skip_final_snapshot     = true
   apply_immediately       = true
 
   tags = {
-    Name = "${local.name}-postgres"
+    Name = "${local.name}-postgres-private"
   }
 }

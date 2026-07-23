@@ -2,6 +2,8 @@
 
 > Open-source, self-hosted operations software for episodic television post-production.
 
+[View the public demo](http://postpilot-189307880.eu-west-1.elb.amazonaws.com) — sign in with `maya@postpilot.demo` / `password`.
+
 PostPilot is a workflow-first operating system for post houses. It brings programme structure, episode workflow, sign-off, suites, people, QC, delivery, commercial controls, and facility services into one tenant-safe application.
 
 It is deliberately **not** a media-hosting platform. Facilities retain masters, cuts, project files, and review media in the MAM, storage, transfer, and review systems they already trust. PostPilot records the operational work around them and can store external references where useful.
