@@ -185,6 +185,16 @@ resource "aws_eks_addon" "secrets_store_csi" {
   addon_name                  = "aws-secrets-store-csi-driver-provider"
   resolve_conflicts_on_create = "OVERWRITE"
 
+  # The application consumes the synced Kubernetes Secret through envFrom.
+  # Rotation keeps that mirror aligned with AWS Secrets Manager; restarting the
+  # Deployment remains necessary for a process to receive new environment vars.
+  configuration_values = jsonencode({
+    "secrets-store-csi-driver" = {
+      enableSecretRotation = true
+      rotationPollInterval = "2m"
+    }
+  })
+
   depends_on = [
     aws_eks_addon.pod_identity_agent,
     aws_eks_node_group.spot,

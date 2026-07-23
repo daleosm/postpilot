@@ -205,7 +205,9 @@ Sign in to Argo CD as `admin`, then rotate or disable that initial account.
 Before a real facility deployment, add a domain and ACM certificate, change the
 Ingress to HTTPS-only, and update `NEXTAUTH_URL` in `postpilot/application` to
 the exact public HTTPS origin. Restart the PostPilot Deployment after changing
-an environment-variable secret.
+an environment-variable secret. The CSI driver refreshes its Kubernetes Secret
+mirror from AWS Secrets Manager every two minutes; a restart is still required
+because environment variables are fixed when a container starts.
 
 ## First cluster deployment
 
