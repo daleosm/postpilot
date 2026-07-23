@@ -5,18 +5,34 @@ import { cookies } from "next/headers";
 
 import { db } from "@/lib/db";
 import { organizationMembers, people, users } from "@/lib/db/schema";
+import { authOptions } from "@/lib/auth";
 import { DEBUG_SIGNED_OUT_VALUE, debugUsers, type DebugUser } from "@/lib/debug-users";
-import { isDebugMode } from "@/lib/runtime";
+import { isDebugMode, isDevelopmentDebugMode, isPublicDemoMode } from "@/lib/runtime";
+import { getServerSession } from "next-auth";
+
+const PUBLIC_DEMO_SWITCHER_USER_ID = process.env.POSTPILOT_DEMO_SWITCHER_USER_ID ?? "user_maya";
+
+/** Public demos preserve normal authentication and only the demo admin can impersonate users. */
+export async function canUseDebugUserSwitcher() {
+  if (isDevelopmentDebugMode) return true;
+  if (!isPublicDemoMode) return false;
+  return (await getServerSession(authOptions))?.user?.id === PUBLIC_DEMO_SWITCHER_USER_ID;
+}
 
 export async function getDebugUser() {
   if (!isDebugMode) return null;
+  const canSwitch = await canUseDebugUserSwitcher();
+  if (!canSwitch) return null;
   const store = await cookies();
   const storedId = store.get("postpilot.debugUser")?.value;
-  if (storedId === DEBUG_SIGNED_OUT_VALUE) return null;
+  if (storedId === DEBUG_SIGNED_OUT_VALUE) {
+    if (isDevelopmentDebugMode) return null;
+    return getDebugUserByUserId(PUBLIC_DEMO_SWITCHER_USER_ID);
+  }
   // Older debug sessions used a display-only debug ID. New sessions store the
   // real Auth.js user ID, allowing every seeded tenant user to be assumed.
   const preset = debugUsers.find((user) => user.id === storedId || user.userId === storedId);
-  const userId = preset?.userId ?? storedId ?? debugUsers[0].userId;
+  const userId = preset?.userId ?? storedId ?? (isDevelopmentDebugMode ? debugUsers[0].userId : PUBLIC_DEMO_SWITCHER_USER_ID);
   return getDebugUserByUserId(userId, preset);
 }
 

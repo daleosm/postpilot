@@ -4,7 +4,7 @@ import { withAuth } from "next-auth/middleware";
 
 import { resolveAuthSecret } from "@/lib/auth-config";
 import { DEBUG_SIGNED_OUT_VALUE, DEBUG_USER_COOKIE } from "@/lib/debug-users";
-import { isDebugMode } from "@/lib/runtime";
+import { isDevelopmentDebugMode } from "@/lib/runtime";
 import { resolveRequestId } from "@/lib/server-logging";
 
 const authProxy = withAuth({
@@ -28,7 +28,7 @@ export default async function proxy(request: NextRequest) {
     return passThrough();
   }
   const debugActor = request.cookies.get(DEBUG_USER_COOKIE)?.value;
-  if (isDebugMode && debugActor !== DEBUG_SIGNED_OUT_VALUE) return passThrough();
+  if (isDevelopmentDebugMode && debugActor !== DEBUG_SIGNED_OUT_VALUE) return passThrough();
   const response = await authProxy(request as never, {} as never);
   if (response) response.headers.set("x-request-id", requestId);
   return response;

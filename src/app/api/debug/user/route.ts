@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { DEBUG_SIGNED_OUT_VALUE, DEBUG_USER_COOKIE, debugUsers } from "@/lib/debug-users";
-import { getDebugUserByUserId } from "@/lib/debug-user";
+import { canUseDebugUserSwitcher, getDebugUserByUserId } from "@/lib/debug-user";
 import { getOrganizationMembershipsForUser } from "@/lib/organization-data";
 import { ACTIVE_ORGANIZATION_COOKIE, ACTIVE_SHOW_COOKIE, activeOrganizationCookieOptions } from "@/lib/organizations";
 import { isDebugMode } from "@/lib/runtime";
@@ -11,6 +11,7 @@ const schema = z.object({ userId: z.string().min(1).optional() });
 
 export async function POST(request: Request) {
   if (!isDebugMode) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!(await canUseDebugUserSwitcher())) return NextResponse.json({ error: "Demo administrator sign-in required." }, { status: 403 });
   let body: unknown;
   try {
     body = await request.json();
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
 /** Clears debug impersonation without letting the default demo actor reappear. */
 export async function DELETE() {
   if (!isDebugMode) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!(await canUseDebugUserSwitcher())) return NextResponse.json({ error: "Demo administrator sign-in required." }, { status: 403 });
   const response = NextResponse.json({ ok: true });
   response.cookies.set(DEBUG_USER_COOKIE, DEBUG_SIGNED_OUT_VALUE, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 12 });
   response.cookies.delete(ACTIVE_ORGANIZATION_COOKIE);
