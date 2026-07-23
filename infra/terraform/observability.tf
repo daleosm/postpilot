@@ -208,12 +208,28 @@ resource "aws_secretsmanager_secret" "postpilot_application" {
   kms_key_id              = aws_kms_key.postpilot_application_secrets.arn
 }
 
+data "aws_iam_policy_document" "postpilot_application_secrets_kms" {
+  # This is AWS's standard root-account bootstrap statement. IAM policies grant
+  # the workload's narrowly scoped decrypt permission below.
+  statement {
+    sid       = "AllowAccountAdministration"
+    actions   = ["kms:*"]
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+}
+
 # A dedicated customer-managed key keeps the application secret separately
-# encrypted while avoiding a broad KMS policy in the Terraform configuration.
+# encrypted while retaining an explicit, auditable key policy.
 resource "aws_kms_key" "postpilot_application_secrets" {
   description             = "Encrypts the PostPilot EKS application secret."
   deletion_window_in_days = 7
   enable_key_rotation     = true
+  policy                  = data.aws_iam_policy_document.postpilot_application_secrets_kms.json
 }
 
 resource "aws_kms_alias" "postpilot_application_secrets" {

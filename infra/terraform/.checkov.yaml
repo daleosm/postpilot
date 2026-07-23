@@ -43,3 +43,8 @@ skip-check:
   # minimal network design; revisit before any production rollout.
   - CKV_AWS_23
   - CKV_AWS_382
+  # Application secret rotation needs an application-aware runbook: the same
+  # document contains Auth.js and database configuration, so a generic Lambda
+  # rotation would not safely rotate it. Add that coordinated workflow before
+  # handling customer data.
+  - CKV2_AWS_57
