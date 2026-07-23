@@ -18,6 +18,7 @@ spec:
       labels:
         app.kubernetes.io/name: postpilot
     spec:
+      serviceAccountName: postpilot
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
@@ -70,6 +71,15 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: postpilot-application-secrets

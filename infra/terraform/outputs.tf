@@ -28,6 +28,16 @@ output "rds_port" {
   description = "PostgreSQL port."
 }
 
+output "application_secrets_manager_name" {
+  description = "AWS Secrets Manager secret that supplies PostPilot runtime configuration."
+  value       = aws_secretsmanager_secret.postpilot_application.name
+}
+
+output "application_secrets_manager_arn" {
+  description = "ARN of the PostPilot runtime configuration secret."
+  value       = aws_secretsmanager_secret.postpilot_application.arn
+}
+
 output "rds_master_user_secret_arn" {
   value       = aws_db_instance.postgres.master_user_secret[0].secret_arn
   description = "RDS-managed Secrets Manager ARN containing the bootstrap PostgreSQL master credentials."

@@ -3,6 +3,9 @@ kind: Kustomization
 
 resources:
   - namespace.yaml
+  - service-account.yaml
+  - secret-provider-class.yaml
+  - secrets-sync-job.yaml
   - migration-job.yaml
   - deployment.yaml
   - pod-disruption-budget.yaml

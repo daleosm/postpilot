@@ -1,13 +1,63 @@
 # The AWS-supported EKS add-on forwards container stdout/stderr to CloudWatch.
 # PostPilot writes only unexpected errors to stderr; routine request access logs
 # intentionally remain disabled to control noise and log-ingestion cost.
+data "aws_caller_identity" "current" {}
+
+data "aws_iam_policy_document" "cloudwatch_logs_kms" {
+  statement {
+    sid       = "AllowAccountAdministration"
+    actions   = ["kms:*"]
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+
+  # CloudWatch Logs requires the regional service principal in the key policy.
+  # The encryption-context condition restricts it to PostPilot's one log group.
+  statement {
+    sid = "AllowPostPilotCloudWatchLogs"
+    actions = [
+      "kms:Decrypt*",
+      "kms:Describe*",
+      "kms:Encrypt*",
+      "kms:GenerateDataKey*",
+      "kms:ReEncrypt*",
+    ]
+    resources = ["*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["logs.${var.aws_region}.amazonaws.com"]
+    }
+
+    condition {
+      test     = "ArnEquals"
+      variable = "kms:EncryptionContext:aws:logs:arn"
+      values   = ["arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/containerinsights/${local.name}/application"]
+    }
+  }
+}
+
+resource "aws_kms_key" "cloudwatch_logs" {
+  description             = "Encrypts PostPilot CloudWatch application logs."
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+  policy                  = data.aws_iam_policy_document.cloudwatch_logs_kms.json
+}
+
+resource "aws_kms_alias" "cloudwatch_logs" {
+  name          = "alias/${local.name}-cloudwatch-logs"
+  target_key_id = aws_kms_key.cloudwatch_logs.key_id
+}
+
 #checkov:skip=CKV_AWS_338:Thirty-day retention is an intentional low-cost demo baseline; production operators can set application_log_retention_days to 365.
 resource "aws_cloudwatch_log_group" "postpilot_application" {
   name              = "/aws/containerinsights/${local.name}/application"
   retention_in_days = var.application_log_retention_days
-  # AWS-managed encryption avoids an unnecessary customer-managed KMS key
-  # while keeping container logs encrypted at rest.
-  kms_key_id = "alias/aws/logs"
+  kms_key_id        = aws_kms_key.cloudwatch_logs.arn
 }
 
 data "aws_iam_policy_document" "cloudwatch_observability_assume_role" {
@@ -44,6 +94,91 @@ resource "aws_eks_addon" "pod_identity_agent" {
   resolve_conflicts_on_create = "OVERWRITE"
 
   depends_on = [aws_eks_node_group.spot]
+}
+
+# Application credentials live in AWS Secrets Manager. This EKS-managed add-on
+# mounts them through the AWS Secrets and Configuration Provider (ASCP); it
+# also supports syncing selected values into the existing Kubernetes Secret
+# required by envFrom without storing secret values in Git or Terraform state.
+resource "aws_eks_addon" "secrets_store_csi" {
+  cluster_name                = aws_eks_cluster.this.name
+  addon_name                  = "aws-secrets-store-csi-driver-provider"
+  resolve_conflicts_on_create = "OVERWRITE"
+
+  depends_on = [
+    aws_eks_addon.pod_identity_agent,
+    aws_eks_node_group.spot,
+  ]
+}
+
+resource "aws_secretsmanager_secret" "postpilot_application" {
+  name                    = "${var.project_name}/application"
+  description             = "PostPilot runtime configuration for EKS workloads."
+  recovery_window_in_days = 7
+  kms_key_id              = aws_kms_key.postpilot_application_secrets.arn
+}
+
+# A dedicated customer-managed key keeps the application secret separately
+# encrypted while avoiding a broad KMS policy in the Terraform configuration.
+resource "aws_kms_key" "postpilot_application_secrets" {
+  description             = "Encrypts the PostPilot EKS application secret."
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+}
+
+resource "aws_kms_alias" "postpilot_application_secrets" {
+  name          = "alias/${local.name}-application-secrets"
+  target_key_id = aws_kms_key.postpilot_application_secrets.key_id
+}
+
+data "aws_iam_policy_document" "postpilot_secrets_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole", "sts:TagSession"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["pods.eks.amazonaws.com"]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "postpilot_secrets_read" {
+  statement {
+    actions = [
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+    ]
+    resources = [aws_secretsmanager_secret.postpilot_application.arn]
+  }
+
+  statement {
+    actions   = ["kms:Decrypt"]
+    resources = [aws_kms_key.postpilot_application_secrets.arn]
+  }
+}
+
+resource "aws_iam_role" "postpilot_secrets" {
+  name               = "${local.name}-application-secrets"
+  assume_role_policy = data.aws_iam_policy_document.postpilot_secrets_assume_role.json
+}
+
+resource "aws_iam_role_policy" "postpilot_secrets_read" {
+  name   = "read-postpilot-application-secret"
+  role   = aws_iam_role.postpilot_secrets.id
+  policy = data.aws_iam_policy_document.postpilot_secrets_read.json
+}
+
+resource "aws_eks_pod_identity_association" "postpilot_secrets" {
+  cluster_name    = aws_eks_cluster.this.name
+  namespace       = "postpilot"
+  service_account = "postpilot"
+  role_arn        = aws_iam_role.postpilot_secrets.arn
+
+  depends_on = [
+    aws_eks_addon.pod_identity_agent,
+    aws_eks_addon.secrets_store_csi,
+    aws_iam_role_policy.postpilot_secrets_read,
+  ]
 }
 
 resource "aws_eks_addon" "cloudwatch_observability" {

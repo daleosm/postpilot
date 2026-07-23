@@ -30,6 +30,13 @@ skip-check:
   # year is opt-in through application_log_retention_days for real production
   # deployments with longer audit requirements.
   - CKV_AWS_338
+  # AWS KMS key policies must use Resource "*". The only service-principal
+  # statement is constrained to the PostPilot CloudWatch log-group encryption
+  # context, and the account-administration statement is AWS's standard key
+  # policy bootstrap requirement.
+  - CKV_AWS_109
+  - CKV_AWS_111
+  - CKV_AWS_356
   # Default-group restriction is managed by the AWS account baseline.
   - CKV2_AWS_12
   # PostgreSQL egress and rule descriptions remain unchanged in the existing

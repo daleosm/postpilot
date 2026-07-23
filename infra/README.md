@@ -121,9 +121,9 @@ terraform output -raw ecr_repository_url
 
 From the **Actions** tab, run **Build and publish PostPilot** manually, or push a new commit to `main`. It authenticates with GitHub OIDC, pushes immutable images to ECR, and commits the ECR image tags to the GitOps manifests. EKS pulls private ECR images with its node IAM role: no Kubernetes image-pull secret, GitHub package, or long-lived AWS key is required.
 
-### 6. Connect kubectl and create the application secret
+### 6. Create the application secret in AWS Secrets Manager
 
-The first secret supplies the RDS connection string and Auth.js configuration. Start with the local port-forward URL below, then replace `NEXTAUTH_URL` with your real HTTPS address before exposing the app through an ingress or reverse proxy.
+Terraform creates the empty `postpilot/application` Secrets Manager record, and the EKS Secrets Store CSI add-on retrieves it using a Pod Identity role limited to that one secret. Its values are synchronised to the runtime `postpilot-secrets` Kubernetes Secret only for containers that need environment variables. Start with the local port-forward URL below, then replace `NEXTAUTH_URL` with your real HTTPS address before exposing the app publicly.
 
 ~~~bash
 aws eks update-kubeconfig --region us-east-1 --name postpilot-eks
@@ -133,18 +133,21 @@ RDS_USERNAME=$(printf '%s' "$RDS_SECRET" | jq -r .username)
 RDS_PASSWORD=$(printf '%s' "$RDS_SECRET" | jq -r .password)
 RDS_HOST=$(terraform output -raw rds_endpoint)
 AUTH_SECRET=$(openssl rand -base64 48 | tr -d '\n')
+APP_SECRET_NAME=$(terraform output -raw application_secrets_manager_name)
 
-kubectl -n postpilot create secret generic postpilot-secrets \
-  --from-literal=DATABASE_URL="postgres://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_HOST}:5432/postpilot?sslmode=require" \
-  --from-literal=NEXTAUTH_SECRET="$AUTH_SECRET" \
-  --from-literal=NEXTAUTH_URL='http://localhost:3000' \
-  --from-literal=POSTPILOT_DEBUG_DEMO='true'
+jq -n \
+  --arg database_url "postgres://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_HOST}:5432/postpilot?sslmode=require" \
+  --arg nextauth_secret "$AUTH_SECRET" \
+  --arg nextauth_url 'http://localhost:3000' \
+  '{DATABASE_URL: $database_url, NEXTAUTH_SECRET: $nextauth_secret, NEXTAUTH_URL: $nextauth_url, POSTPILOT_DEBUG_DEMO: "true"}' \
+  | aws secretsmanager put-secret-value --secret-id "$APP_SECRET_NAME" --secret-string file:///dev/stdin
 ~~~
 
-Argo CD automatically retries the application once this secret exists. Check that the PreSync migration Job completes before proceeding:
+Argo CD first runs a PreSync secret-sync Job, which mounts the AWS secret and creates `postpilot-secrets`; it then runs the migration Job. Check both complete before proceeding:
 
 ~~~bash
 kubectl -n postpilot get jobs,pods,svc
+kubectl -n postpilot logs job/postpilot-secrets-sync
 kubectl -n postpilot logs job/postpilot-migrations
 ~~~
 
@@ -185,7 +188,7 @@ kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath='{.data.password}' | base64 --decode; echo
 ~~~
 
-Sign in to Argo CD as `admin`, then rotate or disable that initial account. When you are ready for a real URL, deploy a TLS-enabled ingress or private VPN/reverse proxy and update `NEXTAUTH_URL` in `postpilot-secrets` to the exact public HTTPS origin.
+Sign in to Argo CD as `admin`, then rotate or disable that initial account. When you are ready for a real URL, deploy a TLS-enabled ingress or private VPN/reverse proxy and update `NEXTAUTH_URL` in `postpilot/application` in AWS Secrets Manager to the exact public HTTPS origin. Restart the PostPilot Deployment after changing an environment-variable secret.
 
 ## First cluster deployment
 
@@ -223,7 +226,7 @@ The concise version below is retained as a reference for experienced operators. 
    terraform apply
    ~~~
 
-4. Configure kubectl using the Terraform output, then retrieve the RDS-managed credentials and create the application secret. The RDS password is generated and stored in AWS Secrets Manager rather than Terraform state or Git:
+4. Configure kubectl using the Terraform output, then retrieve the RDS-managed credentials and create the application secret in AWS Secrets Manager. The CSI driver synchronises the necessary runtime values into Kubernetes; neither the database URL nor Auth.js secret is committed to Git:
 
    ~~~bash
    aws eks update-kubeconfig --region us-east-1 --name postpilot-eks
@@ -232,14 +235,16 @@ The concise version below is retained as a reference for experienced operators. 
    RDS_USERNAME=$(printf '%s' "$RDS_SECRET" | jq -r .username)
    RDS_PASSWORD=$(printf '%s' "$RDS_SECRET" | jq -r .password)
    RDS_HOST=$(terraform output -raw rds_endpoint)
-   kubectl -n postpilot create secret generic postpilot-secrets \
-     --from-literal=DATABASE_URL="postgres://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_HOST}:5432/postpilot?sslmode=require" \
-     --from-literal=NEXTAUTH_SECRET='replace-with-a-long-random-secret' \
-     --from-literal=NEXTAUTH_URL='https://postpilot.example.com' \
-     --from-literal=POSTPILOT_DEBUG_DEMO='false'
+   APP_SECRET_NAME=$(terraform output -raw application_secrets_manager_name)
+   jq -n \
+     --arg database_url "postgres://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_HOST}:5432/postpilot?sslmode=require" \
+     --arg nextauth_secret "$(openssl rand -base64 48 | tr -d '\n')" \
+     --arg nextauth_url 'https://postpilot.example.com' \
+     '{DATABASE_URL: $database_url, NEXTAUTH_SECRET: $nextauth_secret, NEXTAUTH_URL: $nextauth_url, POSTPILOT_DEBUG_DEMO: "false"}' \
+     | aws secretsmanager put-secret-value --secret-id "$APP_SECRET_NAME" --secret-string file:///dev/stdin
    ~~~
 
-   Argo CD will retry the application after the required secret exists. The default Service is ClusterIP; use a secure internal ingress/VPN for production. The **public** Kustomize overlay intentionally creates a cloud load balancer and therefore increases cost.
+   Argo CD will first synchronise the AWS secret, then retry the migration and application. The default Service is ClusterIP; use a secure internal ingress/VPN for production. The **public** Kustomize overlay intentionally creates a cloud load balancer and therefore increases cost.
 
 5. Get the initial Argo CD password and access it without exposing a public service:
 
@@ -291,4 +296,4 @@ The migration Job is an Argo CD PreSync hook. If a migration fails, the release 
 | Public subnets, no NAT gateway | A fixed NAT gateway charge | Requires deliberate network/API allow-list and database connectivity design. |
 | ClusterIP services | Load balancer cost | Access requires a private ingress, VPN, port-forward, or a deliberate public overlay. |
 
-The application uses the RDS master user only as a bootstrap simplification. After the first migration, create a least-privilege application database user and update the Kubernetes secret; AWS recommends applications avoid using the RDS master user directly. [RDS PostgreSQL guidance](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.MasterAccounts.html) and [Argo CD automated sync guidance](https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/) explain the underlying platform behaviour.
+The application uses the RDS master user only as a bootstrap simplification. After the first migration, create a least-privilege application database user and update `postpilot/application` in AWS Secrets Manager; AWS recommends applications avoid using the RDS master user directly. [RDS PostgreSQL guidance](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.MasterAccounts.html) and [Argo CD automated sync guidance](https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/) explain the underlying platform behaviour.
