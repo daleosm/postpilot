@@ -3,6 +3,4 @@ kind: Kustomization
 
 resources:
   - ../../base
-
-patches:
-  - path: service-load-balancer.yaml
+  - ingress.yaml

@@ -22,4 +22,4 @@ cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
 # Terraform applies. Set the Classic Load Balancer name once Kubernetes creates
 # it (the name is the first hostname segment in `kubectl get svc -n postpilot`).
 # observability_alarm_email = "ops@example.com"
-# public_load_balancer_name = "a1b2c3d4e5f6"
+# public_application_load_balancer_arn_suffix = "app/postpilot/abc123"

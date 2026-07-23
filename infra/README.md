@@ -8,7 +8,8 @@ This directory supplies a deliberately compact EKS and Argo CD footprint for a p
 - public subnets and no NAT gateway, which avoids the usual fixed NAT cost;
 - Argo CD exposed only as a ClusterIP service;
 - a GitOps Application that reconciles this repository's Kubernetes manifests;
-- no load balancer, ingress controller, or DNS zone created by default.
+- an AWS Load Balancer Controller with a Pod Identity role; and
+- a public-overlay ALB Ingress for PostPilot. The base manifests remain internal.
 
 This is a low-cost **fixed two-node EKS pilot** profile, not a high-availability production topology. It uses two Spot nodes, which can be interrupted or temporarily unavailable, and must not be used for essential workloads. EKS also charges for the control plane independently of EC2 nodes, and EC2, RDS, storage, network, public-IP, and Secrets Manager charges remain separate. Read the current [Amazon EKS pricing](https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html#eks-pricing) before creating the cluster.
 
@@ -169,9 +170,20 @@ kubectl -n postpilot apply -f deploy/kubernetes/jobs/demo-seed.yaml
 
 For a real facility, leave `POSTPILOT_DEBUG_DEMO` set to `false`, do not use this Job, and provision the first organization and administrator through an approved onboarding/bootstrap process. That production bootstrap flow is not included in this initial infrastructure package.
 
-### 8. Open PostPilot and Argo CD privately
+### 8. Open PostPilot and Argo CD
 
-No public load balancer is created by default. Keep two terminals open while testing:
+Argo CD remains private. The default GitOps path is the public overlay, which
+creates an internet-facing HTTP Application Load Balancer for PostPilot. Get
+its generated AWS hostname with:
+
+~~~bash
+kubectl -n postpilot get ingress postpilot
+~~~
+
+Until a domain and ACM certificate are configured, use that hostname with
+`http://`. Update `NEXTAUTH_URL` in `postpilot/application` to exactly that
+origin and restart the deployment. Keep two terminals open if you also want
+local service access or private Argo CD access:
 
 ~~~bash
 # Terminal 1: PostPilot
@@ -181,14 +193,19 @@ kubectl -n postpilot port-forward svc/postpilot 3000:80
 kubectl -n argocd port-forward svc/argocd-server 8080:80
 ~~~
 
-Open http://localhost:3000 for PostPilot and http://localhost:8080 for Argo CD. Retrieve the one-time Argo CD password with:
+Open http://localhost:3000 for locally port-forwarded PostPilot and
+http://localhost:8080 for Argo CD. Retrieve the one-time Argo CD password with:
 
 ~~~bash
 kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath='{.data.password}' | base64 --decode; echo
 ~~~
 
-Sign in to Argo CD as `admin`, then rotate or disable that initial account. When you are ready for a real URL, deploy a TLS-enabled ingress or private VPN/reverse proxy and update `NEXTAUTH_URL` in `postpilot/application` in AWS Secrets Manager to the exact public HTTPS origin. Restart the PostPilot Deployment after changing an environment-variable secret.
+Sign in to Argo CD as `admin`, then rotate or disable that initial account.
+Before a real facility deployment, add a domain and ACM certificate, change the
+Ingress to HTTPS-only, and update `NEXTAUTH_URL` in `postpilot/application` to
+the exact public HTTPS origin. Restart the PostPilot Deployment after changing
+an environment-variable secret.
 
 ## First cluster deployment
 
@@ -244,7 +261,7 @@ The concise version below is retained as a reference for experienced operators. 
      | aws secretsmanager put-secret-value --secret-id "$APP_SECRET_NAME" --secret-string file:///dev/stdin
    ~~~
 
-   Argo CD will first synchronise the AWS secret, then retry the migration and application. The default Service is ClusterIP; use a secure internal ingress/VPN for production. The **public** Kustomize overlay intentionally creates a cloud load balancer and therefore increases cost.
+   Argo CD will first synchronise the AWS secret, then retry the migration and application. The default Service is ClusterIP; the **public** Kustomize overlay adds an ALB Ingress and therefore increases cost. Use the base manifests for a private/VPN-only installation.
 
 5. Get the initial Argo CD password and access it without exposing a public service:
 

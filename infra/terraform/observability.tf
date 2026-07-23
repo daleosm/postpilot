@@ -96,6 +96,86 @@ resource "aws_eks_addon" "pod_identity_agent" {
   depends_on = [aws_eks_node_group.spot]
 }
 
+# The AWS Load Balancer Controller creates and reconciles the application ALB
+# from Kubernetes Ingress objects. Keep its AWS permissions separate from the
+# node role, then bind them only to its kube-system service account through
+# EKS Pod Identity.
+resource "aws_iam_policy" "load_balancer_controller" {
+  name        = "${local.name}-load-balancer-controller"
+  description = "AWS Load Balancer Controller permissions from the AWS-supported v2.14.1 policy."
+  policy      = file("${path.module}/policies/aws-load-balancer-controller.json")
+}
+
+data "aws_iam_policy_document" "load_balancer_controller_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole", "sts:TagSession"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["pods.eks.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "load_balancer_controller" {
+  name               = "${local.name}-load-balancer-controller"
+  assume_role_policy = data.aws_iam_policy_document.load_balancer_controller_assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "load_balancer_controller" {
+  role       = aws_iam_role.load_balancer_controller.name
+  policy_arn = aws_iam_policy.load_balancer_controller.arn
+}
+
+resource "aws_eks_pod_identity_association" "load_balancer_controller" {
+  cluster_name    = aws_eks_cluster.this.name
+  namespace       = "kube-system"
+  service_account = "aws-load-balancer-controller"
+  role_arn        = aws_iam_role.load_balancer_controller.arn
+
+  depends_on = [
+    aws_eks_addon.pod_identity_agent,
+    aws_iam_role_policy_attachment.load_balancer_controller,
+  ]
+}
+
+# AWS recommends Helm for this controller. Pin the chart deliberately: upgrades
+# can include CRD changes and should be reviewed rather than applied implicitly.
+resource "helm_release" "aws_load_balancer_controller" {
+  name            = "aws-load-balancer-controller"
+  namespace       = "kube-system"
+  repository      = "https://aws.github.io/eks-charts"
+  chart           = "aws-load-balancer-controller"
+  version         = "1.14.0"
+  wait            = true
+  timeout         = 900
+  atomic          = true
+  cleanup_on_fail = true
+
+  values = [yamlencode({
+    clusterName  = aws_eks_cluster.this.name
+    region       = var.aws_region
+    vpcId        = aws_vpc.this.id
+    replicaCount = 2
+    serviceAccount = {
+      create = true
+      name   = "aws-load-balancer-controller"
+    }
+    resources = {
+      requests = {
+        cpu    = "100m"
+        memory = "128Mi"
+      }
+      limits = {
+        cpu    = "250m"
+        memory = "256Mi"
+      }
+    }
+  })]
+
+  depends_on = [aws_eks_pod_identity_association.load_balancer_controller]
+}
+
 # Application credentials live in AWS Secrets Manager. This EKS-managed add-on
 # mounts them through the AWS Secrets and Configuration Provider (ASCP); it
 # also supports syncing selected values into the existing Kubernetes Secret
@@ -254,16 +334,16 @@ resource "aws_cloudwatch_metric_alarm" "postpilot_server_errors" {
   insufficient_data_actions = []
 }
 
-# Kubernetes creates this Classic Load Balancer, so its stable AWS name is a
-# supplied value rather than an application secret. Setting it enables direct
-# edge and backend availability alarms in addition to application-error logs.
-resource "aws_cloudwatch_metric_alarm" "postpilot_elb_backend_5xx" {
-  count = var.public_load_balancer_name == null ? 0 : 1
+# The ALB is created by the Kubernetes controller rather than Terraform. Its
+# ARN suffix is supplied after the first Ingress reconciliation so these alarms
+# observe the real public edge without Terraform owning the ALB resource.
+resource "aws_cloudwatch_metric_alarm" "postpilot_alb_target_5xx" {
+  count = var.public_application_load_balancer_arn_suffix == null ? 0 : 1
 
-  alarm_name                = "${local.name}-elb-backend-5xx"
-  alarm_description         = "The PostPilot Classic Load Balancer received backend 5xx responses."
-  namespace                 = "AWS/ELB"
-  metric_name               = "HTTPCode_Backend_5XX"
+  alarm_name                = "${local.name}-alb-target-5xx"
+  alarm_description         = "The PostPilot Application Load Balancer received backend 5xx responses."
+  namespace                 = "AWS/ApplicationELB"
+  metric_name               = "HTTPCode_Target_5XX_Count"
   statistic                 = "Sum"
   period                    = 300
   evaluation_periods        = 1
@@ -274,17 +354,17 @@ resource "aws_cloudwatch_metric_alarm" "postpilot_elb_backend_5xx" {
   insufficient_data_actions = []
 
   dimensions = {
-    LoadBalancerName = var.public_load_balancer_name
+    LoadBalancer = var.public_application_load_balancer_arn_suffix
   }
 }
 
-resource "aws_cloudwatch_metric_alarm" "postpilot_elb_5xx" {
-  count = var.public_load_balancer_name == null ? 0 : 1
+resource "aws_cloudwatch_metric_alarm" "postpilot_alb_5xx" {
+  count = var.public_application_load_balancer_arn_suffix == null ? 0 : 1
 
-  alarm_name                = "${local.name}-elb-5xx"
-  alarm_description         = "The PostPilot Classic Load Balancer itself returned 5xx responses."
-  namespace                 = "AWS/ELB"
-  metric_name               = "HTTPCode_ELB_5XX"
+  alarm_name                = "${local.name}-alb-5xx"
+  alarm_description         = "The PostPilot Application Load Balancer itself returned 5xx responses."
+  namespace                 = "AWS/ApplicationELB"
+  metric_name               = "HTTPCode_ELB_5XX_Count"
   statistic                 = "Sum"
   period                    = 300
   evaluation_periods        = 1
@@ -295,16 +375,16 @@ resource "aws_cloudwatch_metric_alarm" "postpilot_elb_5xx" {
   insufficient_data_actions = []
 
   dimensions = {
-    LoadBalancerName = var.public_load_balancer_name
+    LoadBalancer = var.public_application_load_balancer_arn_suffix
   }
 }
 
-resource "aws_cloudwatch_metric_alarm" "postpilot_elb_no_healthy_targets" {
-  count = var.public_load_balancer_name == null ? 0 : 1
+resource "aws_cloudwatch_metric_alarm" "postpilot_alb_no_healthy_targets" {
+  count = var.public_application_load_balancer_arn_suffix == null ? 0 : 1
 
-  alarm_name                = "${local.name}-elb-no-healthy-targets"
-  alarm_description         = "The PostPilot Classic Load Balancer has no healthy backend targets."
-  namespace                 = "AWS/ELB"
+  alarm_name                = "${local.name}-alb-no-healthy-targets"
+  alarm_description         = "The PostPilot Application Load Balancer has no healthy backend targets."
+  namespace                 = "AWS/ApplicationELB"
   metric_name               = "HealthyHostCount"
   statistic                 = "Minimum"
   period                    = 60
@@ -316,6 +396,6 @@ resource "aws_cloudwatch_metric_alarm" "postpilot_elb_no_healthy_targets" {
   insufficient_data_actions = []
 
   dimensions = {
-    LoadBalancerName = var.public_load_balancer_name
+    LoadBalancer = var.public_application_load_balancer_arn_suffix
   }
 }

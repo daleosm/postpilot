@@ -105,8 +105,8 @@ variable "observability_alarm_email" {
   nullable    = true
 }
 
-variable "public_load_balancer_name" {
-  description = "Optional Kubernetes-created Classic Load Balancer name used for 5xx and healthy-target alarms. Leave null until the service has created one."
+variable "public_application_load_balancer_arn_suffix" {
+  description = "Optional ARN suffix of the Kubernetes-created public ALB, for example app/postpilot/abc123. Enables ALB 5xx and healthy-target alarms after the Ingress is created."
   type        = string
   default     = null
   nullable    = true
