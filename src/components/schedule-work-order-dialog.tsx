@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { Button } from "@heroui/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -15,7 +17,7 @@ export function ScheduleWorkOrderDialog({ workOrder, rooms, initialRoomId, initi
   if (!workOrder) return null;
   const submit = async () => {
     setSaving(true); setMessage("");
-    const response = await fetch(`/api/work-orders/${workOrder.id}/booking`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roomId, startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString(), notes: notes || null }) });
+    const response = await postpilotUiFetch(`/v1/work-orders/${workOrder.id}/booking`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roomId, startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString(), notes: notes || null }) });
     const body = await response.json(); setSaving(false);
     if (!response.ok) return setMessage(body.error ?? "Could not reserve this room.");
     onClose(); router.refresh();

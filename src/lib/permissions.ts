@@ -1,9 +1,6 @@
-import { and, eq, or } from "drizzle-orm";
-
-import { db } from "@/lib/db";
-import { episodeTeamAssignments, episodes, organizationRolePolicies } from "@/lib/db/schema";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { clientRolePolicy, normalizePermission, normalizePermissions, policyGrants, type Permission, type TenantRolePolicy } from "@/lib/permissions-core";
+import { clientRolePolicy, normalizePermission, type Permission, type TenantRolePolicy } from "@/lib/permissions-core";
+import { getPostPilotApiSession, postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 
 export { clientRolePolicy, normalizePermission, normalizePermissions, permissions, policyGrants } from "@/lib/permissions-core";
 export type { Permission, TenantRolePolicy } from "@/lib/permissions-core";
@@ -15,19 +12,11 @@ export type { Permission, TenantRolePolicy } from "@/lib/permissions-core";
  */
 export const isFixedRole = (role: string) => role === clientRolePolicy.role;
 
-/**
- * A short-lived compatibility bridge for policies saved before stages became
- * the sole workflow model. The migration rewrites persisted policies, while
- * this prevents an older tenant backup from accidentally losing access during
- * a staged deployment.
- */
-/** Roles are tenant data, apart from the fixed external Client role. */
-export async function getTenantRolePolicies(organizationId: string): Promise<TenantRolePolicy[]> {
-  if (!db) return [clientRolePolicy];
-  const policies = await db.select({ role: organizationRolePolicies.role, label: organizationRolePolicies.label, permissions: organizationRolePolicies.permissions })
-    .from(organizationRolePolicies).where(eq(organizationRolePolicies.organizationId, organizationId));
-  const configurable = policies.filter((policy) => !isFixedRole(policy.role)).map((policy) => ({ role: policy.role, label: policy.label, permissions: normalizePermissions(policy.permissions) }));
-  return [clientRolePolicy, ...configurable];
+/** Tenant policy records are always read through FastAPI. */
+export async function getTenantRolePolicies(_organizationId?: string): Promise<TenantRolePolicy[]> {
+  void _organizationId;
+  const response = await postpilotApiServerFetch<{ policies: Array<{ role: string; label: string; permissions: string[] }> }>("/settings/bootstrap");
+  return response.policies.map((policy) => ({ ...policy, permissions: policy.permissions as Permission[] }));
 }
 
 export async function getCurrentPerson() {
@@ -36,19 +25,9 @@ export async function getCurrentPerson() {
 }
 
 export async function can(permission: Permission | string) {
-  const context = await getActiveOrganizationContext();
-  if (!context?.organization) return false;
   const normalized = normalizePermission(permission);
   if (!normalized) return false;
-  if (context.organization.role === "client") return policyGrants(normalized, context.organization.role, []);
-  // Tenant administrators and owners are the fixed access-administration
-  // layer. Configurable post-house roles remain capability-driven below, but
-  // an administrator must never lose essential recovery access because a
-  // tenant policy row was removed or renamed.
-  if (context.organization.role === "admin" || context.organization.role === "owner") return true;
-  if (!context.person) return false;
-  const policy = (await getTenantRolePolicies(context.organization.organizationId)).find((item) => item.role === context.person?.role);
-  return policyGrants(normalized, context.organization.role, policy?.permissions);
+  return (await getPostPilotApiSession())?.permissions.includes(normalized) ?? false;
 }
 
 /** Read-only operational observers can see the full facility plan, never mutate it. */
@@ -111,30 +90,12 @@ export async function canSignOffWorkflowTrack(episodeId: string) {
  * the legacy episode assignment fields).
  */
 export async function isAssignedToEpisode(episodeId: string) {
-  const context = await getActiveOrganizationContext();
-  const current = context?.person;
-  if (!context?.organization || !current || !db) return false;
-  if (context.organization.role !== "client" && ((await can("manage_shows")) || (await can("manage_workflow_stages")) || (await can("view_all_operations")))) return true;
-  const [assignment] = await db
-    .select({ id: episodes.id })
-    .from(episodes)
-    .leftJoin(episodeTeamAssignments, and(
-      eq(episodeTeamAssignments.organizationId, context.organization.organizationId),
-      eq(episodeTeamAssignments.episodeId, episodes.id),
-    ))
-    .where(and(
-      eq(episodes.id, episodeId),
-      eq(episodes.organizationId, context.organization.organizationId),
-      or(
-        eq(episodes.editorId, current.id),
-        eq(episodes.coloristId, current.id),
-        eq(episodes.soundMixerId, current.id),
-        eq(episodes.assignedProducerId, current.id),
-        eq(episodeTeamAssignments.personId, current.id),
-      ),
-    ))
-    .limit(1);
-  return Boolean(assignment);
+  try {
+    const access = await postpilotApiServerFetch<{ assigned: boolean }>(`/episodes/${episodeId}/access`);
+    return access.assigned || await can("manage_shows") || await can("manage_workflow_stages") || await can("view_all_operations");
+  } catch {
+    return false;
+  }
 }
 
 /** The least-privileged landing page is selected from capabilities, never a role name. */

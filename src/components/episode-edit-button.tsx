@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { Button } from "@heroui/react";
 import { Pencil, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -24,7 +26,7 @@ export function EpisodeEditButton({ episode }: { episode: EditableEpisode }) {
   async function submit(form: FormData) {
     setError("");
     const payload = Object.fromEntries(form);
-    const response = await fetch(`/api/episodes/${episode.id}/details`, {
+    const response = await postpilotUiFetch(`/v1/episodes/${episode.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

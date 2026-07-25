@@ -2,9 +2,8 @@ import { Coffee } from "lucide-react";
 
 import { CateringRequestForm } from "@/components/catering-request-form";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { isDebugDemoMode } from "@/lib/runtime";
-import { can, getCurrentPerson } from "@/lib/permissions";
-import { getCateringResources, listCateringRequests } from "@/server/data";
+import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
+import { can } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 
 export default async function CateringPage() {
@@ -14,12 +13,14 @@ export default async function CateringPage() {
 }
 
 async function load() {
-  if (isDebugDemoMode) return { organizationName: "Northstar Post · Demo workspace", resources: { rooms: [{ id: "room-1", name: "Edit Bay 1", type: "edit bay" }, { id: "room-2", name: "Colour 1", type: "colour suite" }, { id: "room-3", name: "Mix A", type: "mix room" }], bookings: [{ id: "booking-1", roomName: "Mix A" }, { id: "booking-2", roomName: "Colour 1" }] }, requests: demoRequests() };
   const context = await getActiveOrganizationContext();
-  if (!context?.organization) return { organizationName: "No workspace", resources: { rooms: [], bookings: [] }, requests: [] };
-  const [resources, person, canManage] = await Promise.all([getCateringResources(context.organization.organizationId), getCurrentPerson(), can("manage_catering")]);
-  const requests = await listCateringRequests(context.organization.organizationId, canManage ? undefined : person?.id);
-  return { organizationName: context.organization.organizationName, resources, requests };
+  const [resources, requests] = await Promise.all([
+    postpilotApiServerFetch<{ rooms: Array<{ id: string; name: string; type: string }>; bookings: Array<{ id: string; room_name: string }> }>("/catering/resources"),
+    postpilotApiServerFetch<Array<{ id: string; request_type: string; item: string; quantity: number; notes: string | null; requested_for: string | null; status: string; room_name: string | null }>>("/catering-requests"),
+  ]);
+  return {
+    organizationName: context?.organization?.organizationName ?? "Post house",
+    resources: { rooms: resources.rooms, bookings: resources.bookings.map((booking) => ({ id: booking.id, roomName: booking.room_name })) },
+    requests: requests.map((request) => ({ id: request.id, requestType: request.request_type, item: request.item, quantity: request.quantity, notes: request.notes, requestedFor: request.requested_for ? new Date(request.requested_for) : null, status: request.status, roomName: request.room_name })),
+  };
 }
-
-export function demoRequests() { return [{ id: "catering-1", requestType: "tea_coffee", item: "Oat milk flat white", quantity: 2, notes: "One decaf", requestedFor: new Date(), status: "preparing", roomName: "Edit Bay 1" }, { id: "catering-2", requestType: "lunch", item: "Chicken Caesar salad", quantity: 1, notes: null, requestedFor: new Date(), status: "requested", roomName: "Colour 1" }]; }

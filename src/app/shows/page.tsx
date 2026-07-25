@@ -4,14 +4,13 @@ import { ArrowRight, Clapperboard, DollarSign } from "lucide-react";
 import { ShowFormDialog } from "@/components/show-form-dialog";
 import { getActiveOrganizationContext, getActiveShowName } from "@/lib/organizations";
 import { can, canViewAllOperations, roleHome } from "@/lib/permissions";
-import { isDebugDemoMode } from "@/lib/runtime";
-import { getBudgetData, getDemoCommandCenterData, listCrmCompanyOptions, listEpisodes, listShows } from "@/server/data";
+import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 import { redirect } from "next/navigation";
 
 export default async function ShowsPage() {
   const [mayManageShows, mayViewAll, organizationContext] = await Promise.all([can("manage_shows"), canViewAllOperations(), getActiveOrganizationContext()]);
   if ((!mayManageShows && !mayViewAll) || organizationContext?.organization?.role === "client") redirect(await roleHome());
-  const activeShow = await getActiveShowName(); const raw = await getShowsData(); const data = raw ? { ...raw, shows: raw.shows.filter((show) => !activeShow || show.title === activeShow) } : null;
+  const activeShow = await getActiveShowName(); const raw = await getShowsData(mayManageShows); const data = raw ? { ...raw, shows: raw.shows.filter((show) => !activeShow || show.title === activeShow) } : null;
   if (!data) return <EmptyWorkspace />;
 
   return <div className="space-y-5">
@@ -22,27 +21,34 @@ export default async function ShowsPage() {
   </div>;
 }
 
-function Health({ value, label, icon, inverse = false }: { value: number; label: string; icon: React.ReactNode; inverse?: boolean }) {
+function Health({ value, label, icon, inverse = false }: { value: number | null; label: string; icon: React.ReactNode; inverse?: boolean }) {
+  if (value === null) return <div><div className="text-xs font-medium text-[#858a87]">—</div><span className="mt-1 block text-[10px] text-[#8a8e8b]">Restricted</span></div>;
   const good = inverse ? value <= 90 : value >= 80;
   return <div><div className={`flex items-center gap-1 text-xs font-semibold ${good ? "text-[#4c806b]" : "text-[#ae6844]"}`}>{icon}{value}%</div><div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[#ecebe7]"><div className={`h-full rounded-full ${good ? "bg-[#66877f]" : "bg-[#c17a4f]"}`} style={{ width: `${Math.min(value, 100)}%` }} /></div><span className="mt-1 block text-[10px] text-[#8a8e8b]">{label}</span></div>;
 }
 
-async function getShowsData() {
-  if (isDebugDemoMode) {
-    const demo = getDemoCommandCenterData();
-    return { organizationName: demo.organizationName, companies: [], shows: demo.showRows.map((show, index) => ({ ...show, seasonCount: show.seasons.length, episodeCount: show.seasons.reduce((sum, season) => sum + season.episodeCount, 0), activeEpisodeCount: show.seasons.reduce((sum, season) => sum + season.activeEpisodeCount, 0), budgetHealth: [90, 84, 96][index] })) };
-  }
+async function getShowsData(mayManageShows: boolean) {
+  const [response, options] = await Promise.all([
+      postpilotApiServerFetch<{ shows: Array<{ id: string; title: string; code: string; network: string | null; season_count: number; episode_count: number; active_episode_count: number; budget_health: number | null }> }>("/shows"),
+      mayManageShows
+        ? postpilotApiServerFetch<{ companies: Array<{ id: string; name: string; type: string }> }>("/shows/options/form")
+        : Promise.resolve(null),
+    ]);
   const context = await getActiveOrganizationContext();
-  if (!context?.organization) return null;
-  const organizationId = context.organization.organizationId;
-  const [shows, episodeRows, budget, companies] = await Promise.all([listShows(organizationId), listEpisodes(organizationId), getBudgetData(organizationId), listCrmCompanyOptions(organizationId)]);
-  return { organizationName: context.organization.organizationName, shows: shows.map((show) => {
-    const showEpisodes = episodeRows.filter((episode) => episode.showId === show.id);
-    const lines = budget.lines.filter((line) => line.showTitle === show.title);
-    const budgeted = lines.reduce((sum, line) => sum + Number(line.budgetedAmount), 0);
-    const actual = lines.reduce((sum, line) => sum + Number(line.actualAmount), 0);
-    return { ...show, seasonCount: show.seasons.length, episodeCount: showEpisodes.length, activeEpisodeCount: showEpisodes.filter((episode) => episode.status !== "complete").length, budgetHealth: budgeted ? Math.round((actual / budgeted) * 100) : 0 };
-  }), companies };
+  return {
+      organizationName: context?.organization?.organizationName ?? "Post house",
+      companies: options?.companies ?? [],
+      shows: response.shows.map((show) => ({
+        id: show.id,
+        title: show.title,
+        code: show.code,
+        network: show.network,
+        seasonCount: show.season_count,
+        episodeCount: show.episode_count,
+        activeEpisodeCount: show.active_episode_count,
+        budgetHealth: show.budget_health,
+      })),
+  };
 }
 
 function EmptyWorkspace() { return <div className="panel mx-auto mt-20 max-w-lg p-8 text-center text-sm text-[#757b77]">Join an organization to view its shows.</div>; }

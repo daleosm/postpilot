@@ -6,13 +6,13 @@ import { CrmAccountDirectory } from "@/components/crm-account-directory";
 import { CrmCreateDialogs } from "@/components/crm-create-dialogs";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
-import { getCrmData } from "@/server/data/crm";
+import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 
 export default async function CrmPage() {
   const mayManageShows = await can("manage_shows");
   if (!mayManageShows && !(await can("manage_budget"))) redirect("/");
   const context = await getActiveOrganizationContext();
-  const data = context?.organization ? await getCrmData(context.organization.organizationId) : emptyData();
+  const data = context?.organization ? await loadCrmData() : emptyData();
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const accounts = data.companies.map((company) => {
     return { id: company.id, name: company.name, type: company.type, accountStatus: company.accountStatus, bookingClearance: company.bookingClearance, ownerName: data.owners.find((owner) => owner.id === company.accountOwnerId)?.name ?? null, activeShowCount: data.showLinks.filter((show) => show.clientCompanyId === company.id || show.productionCompanyId === company.id).length, contactCount: data.contacts.filter((contact) => contact.companyId === company.id).length, nextAction: company.nextAction, nextActionDueAt: company.nextActionDueAt, currency: company.currency };
@@ -34,3 +34,21 @@ function Metric({ icon, label, value, detail, warning = false }: { icon: React.R
 function label(value: string) { return value.replaceAll("_", " "); }
 function formatDate(value: string) { return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(value)); }
 function emptyData() { return { companies: [], contacts: [], rateCards: [], vendorInvoices: [], workOrders: [], showOptions: [], episodeOptions: [], showLinks: [], owners: [] }; }
+
+async function loadCrmData() {
+  const data = await postpilotApiServerFetch<{
+    companies: Array<{ id: string; name: string; type: string; account_status: string; booking_clearance: string; account_owner_id: string | null; next_action: string | null; next_action_due_at: string | null; currency: string }>;
+    contacts: Array<{ id: string; company_id: string; name: string; title: string | null; email: string | null; phone: string | null; contact_type: string; is_primary: boolean; company_name: string | null; company_type: string | null }>;
+    show_links: Array<{ id: string; client_company_id: string | null; production_company_id: string | null }>;
+    owners: Array<{ id: string; name: string }>;
+    work_orders: Array<{ id: string; vendor_company_id: string | null; title: string; status: string; due_at: string | null; episode_title: string | null; episode_number: number | null }>;
+  }>("/crm/workspace");
+  return {
+    companies: data.companies.map((company) => ({ id: company.id, name: company.name, type: company.type, accountStatus: company.account_status, bookingClearance: company.booking_clearance, accountOwnerId: company.account_owner_id, nextAction: company.next_action, nextActionDueAt: company.next_action_due_at, currency: company.currency })),
+    contacts: data.contacts.map((contact) => ({ id: contact.id, companyId: contact.company_id, name: contact.name, title: contact.title, email: contact.email, phone: contact.phone, contactType: contact.contact_type, isPrimary: contact.is_primary, companyName: contact.company_name, companyType: contact.company_type })),
+    showLinks: data.show_links.map((show) => ({ id: show.id, clientCompanyId: show.client_company_id, productionCompanyId: show.production_company_id })),
+    owners: data.owners,
+    workOrders: data.work_orders.map((workOrder) => ({ id: workOrder.id, vendorCompanyId: workOrder.vendor_company_id, title: workOrder.title, status: workOrder.status, dueAt: workOrder.due_at, episodeTitle: workOrder.episode_title, episodeNumber: workOrder.episode_number })),
+    rateCards: [], vendorInvoices: [], showOptions: [], episodeOptions: [],
+  };
+}

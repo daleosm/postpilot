@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@heroui/react";
 import { ExternalLink, Pencil, Plus, Save, ShieldAlert } from "lucide-react";
@@ -41,8 +43,8 @@ export function EpisodeWorkOrders({ episodeId, initialWorkOrders, people, stages
   const purchaseOrders = purchaseOrderResult.key === purchaseOrderKey ? purchaseOrderResult.orders : [];
   const vendorField = form.register("vendorCompanyId");
 
-  useEffect(() => { if (!purchaseOrderKey) return; let live = true; fetch(`/api/purchase-orders?vendorId=${encodeURIComponent(vendorId ?? "")}&episodeId=${encodeURIComponent(episodeId)}`).then(async (response) => response.ok ? response.json() : []).then((orders) => { if (live) setPurchaseOrderResult({ key: purchaseOrderKey, orders: Array.isArray(orders) ? orders : [] }); }).catch(() => { if (live) setPurchaseOrderResult({ key: purchaseOrderKey, orders: [] }); }); return () => { live = false; }; }, [episodeId, purchaseOrderKey, vendorId]);
-  useEffect(() => { if (workType !== "internal" || scope !== "billable_change") return; let live = true; fetch(`/api/client-purchase-orders?episodeId=${encodeURIComponent(episodeId)}`).then(async (response) => response.ok ? response.json() : []).then((orders) => { if (live) setClientPurchaseOrders(Array.isArray(orders) ? orders : []); }).catch(() => { if (live) setClientPurchaseOrders([]); }); return () => { live = false; }; }, [episodeId, scope, workType]);
+  useEffect(() => { if (!purchaseOrderKey) return; let live = true; postpilotUiFetch(`/v1/purchase-orders?vendorId=${encodeURIComponent(vendorId ?? "")}&episodeId=${encodeURIComponent(episodeId)}`).then(async (response) => response.ok ? response.json() : []).then((payload) => { const orders = Array.isArray(payload) ? payload : Array.isArray(payload?.purchaseOrders) ? payload.purchaseOrders : []; if (live) setPurchaseOrderResult({ key: purchaseOrderKey, orders }); }).catch(() => { if (live) setPurchaseOrderResult({ key: purchaseOrderKey, orders: [] }); }); return () => { live = false; }; }, [episodeId, purchaseOrderKey, vendorId]);
+  useEffect(() => { if (workType !== "internal" || scope !== "billable_change") return; let live = true; postpilotUiFetch(`/v1/client-purchase-orders?episodeId=${encodeURIComponent(episodeId)}`).then(async (response) => response.ok ? response.json() : []).then((payload) => { const orders = Array.isArray(payload) ? payload : Array.isArray(payload?.clientPurchaseOrders) ? payload.clientPurchaseOrders : []; if (live) setClientPurchaseOrders(orders); }).catch(() => { if (live) setClientPurchaseOrders([]); }); return () => { live = false; }; }, [episodeId, scope, workType]);
 
   function beginCreate() { setEditingId(null); setWorkType("internal"); setVendorId(""); setPurchaseOrderId(""); form.reset(empty(currentStageId)); setOpen(true); }
   function beginEdit(item: WorkOrder) {
@@ -63,14 +65,14 @@ export function EpisodeWorkOrders({ episodeId, initialWorkOrders, people, stages
     const { estimatedAmount, clientQuoteAmount, billingNotes, items, ...operational } = values;
     const commercial = canManageCommercial ? { estimatedAmount: values.workType === "external_vendor" && estimatedAmount !== "" ? estimatedAmount : null, clientQuoteAmount: values.billingScope === "billable_change" && clientQuoteAmount !== "" ? clientQuoteAmount : null, billingNotes: billingNotes || null, items } : {};
     const workOrderPayload = { ...operational, ...commercial, workflowStageId: values.workflowStageId || null, assigneePersonId: values.assigneePersonId || null, assigneeRole: values.assigneeRole || null, vendorCompanyId: values.workType === "external_vendor" ? values.vendorCompanyId || null : null, purchaseOrderId: values.workType === "external_vendor" ? values.purchaseOrderId || null : null, clientPurchaseOrderId: values.workType === "internal" && values.billingScope === "billable_change" ? values.clientPurchaseOrderId || null : null, description: values.description || null, department: values.department || null, externalUrl: values.externalUrl || null, dueAt: values.dueAt || null };
-    const response = await fetch(editingId ? `/api/work-orders/${editingId}` : "/api/work-orders", { method: editingId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editingId ? workOrderPayload : { ...workOrderPayload, episodeId }) });
+    const response = await postpilotUiFetch(editingId ? `/v1/work-orders/${editingId}` : "/v1/work-orders", { method: editingId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editingId ? workOrderPayload : { ...workOrderPayload, episodeId }) });
     const body = await response.json().catch(() => null);
     if (!response.ok) return setMessage(body?.error ?? "Could not save the work order.");
     setOpen(false); setEditingId(null); form.reset(empty(currentStageId)); setMessage(editingId ? "Draft work order updated." : "Work order saved as draft."); router.refresh();
   }
   async function updateStatus(id: string, status: string) {
     setMessage("");
-    const response = await fetch(`/api/work-orders/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, approvalNote: approvalNotes[id]?.trim() || undefined, overrunReason: status === "in_progress" ? overrunReasons[id]?.trim() || undefined : undefined }) });
+    const response = await postpilotUiFetch(`/v1/work-orders/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, approvalNote: approvalNotes[id]?.trim() || undefined, overrunReason: status === "in_progress" ? overrunReasons[id]?.trim() || undefined : undefined }) });
     const body = await response.json().catch(() => null);
     if (!response.ok) return setMessage(body?.error ?? "Could not update the work order.");
     setWorkOrders((items) => items.map((item) => item.id === id ? { ...item, status, completedAt: status === "complete" ? new Date() : null } : item));

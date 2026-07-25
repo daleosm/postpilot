@@ -2,14 +2,18 @@ import { WorkflowTemplateEditor } from "@/components/workflow-template-editor";
 import Link from "next/link";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can, canManageWorkflowConfiguration } from "@/lib/permissions";
-import { getDefaultWorkflowConfig } from "@/server/data";
+import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 import { redirect } from "next/navigation";
 
 export default async function WorkflowSettingsPage() {
   if (!(await canManageWorkflowConfiguration())) redirect("/");
   const context = await getActiveOrganizationContext();
   if (!context?.organization) redirect("/");
-  const [workflow, mayManageUsers, mayManageDeliveryProfiles] = await Promise.all([getDefaultWorkflowConfig(context.organization.organizationId), can("manage_users"), can("manage_delivery_profiles")]);
+  const [workflow, mayManageUsers, mayManageDeliveryProfiles] = await Promise.all([
+    postpilotApiServerFetch<{ workflow: { id: string; name: string; description: string | null; stages: Array<{ id: string; name: string; key: string; position: number; color: string; is_terminal: boolean; can_start_early: boolean; requires_qc_pass: boolean; delivery_gate: "none" | "facility_dispatch" | "client_acceptance" }>; rules: Array<{ id: string; workflow_stage_id: string; approver_role: string | null; label: string; approval_order: number; is_required: boolean }>; work_order_templates: Array<{ id: string; workflow_stage_id: string; title: string; description: string | null; department: string | null; assignee_role: string | null; priority: "blocker" | "high" | "normal" | "low"; is_blocking: boolean; position: number }> } | null }>("/settings/bootstrap").then(({ workflow }) => workflow ? ({ id: workflow.id, name: workflow.name, description: workflow.description, stages: workflow.stages.map((stage) => ({ id: stage.id, name: stage.name, key: stage.key, position: stage.position, color: stage.color, isTerminal: stage.is_terminal, canStartEarly: stage.can_start_early, requiresQcPass: stage.requires_qc_pass, deliveryGate: stage.delivery_gate })), rules: workflow.rules.map((rule) => ({ id: rule.id, workflowStageId: rule.workflow_stage_id, approverRole: rule.approver_role, label: rule.label, approvalOrder: rule.approval_order, isRequired: rule.is_required })), workOrderTemplates: workflow.work_order_templates.map((template) => ({ id: template.id, workflowStageId: template.workflow_stage_id, title: template.title, description: template.description, department: template.department, assigneeRole: template.assignee_role, priority: template.priority, isBlocking: template.is_blocking, position: template.position })) }) : null),
+    can("manage_users"),
+    can("manage_delivery_profiles"),
+  ]);
 
   if (!workflow) {
     return <div className="panel mx-auto mt-16 max-w-xl p-8 text-center"><h1 className="text-lg font-semibold text-[#343b38]">No workflow configured</h1><p className="mt-2 text-sm text-[#747977]">Set up your organization workflow before configuring approvals.</p></div>;

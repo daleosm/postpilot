@@ -4,19 +4,18 @@ import { redirect } from "next/navigation";
 
 import { PurchaseOrderForm } from "@/components/purchase-order-form";
 import { getActiveOrganizationContext } from "@/lib/organizations";
+import { getFastApiCommercialFormOptions, listFastApiVendorPurchaseOrders } from "@/lib/postpilot-api-commercial";
 import { can } from "@/lib/permissions";
-import { listCrmCompanyOptions } from "@/server/data/crm";
-import { listEpisodes } from "@/server/data/episodes";
-import { listActivePurchaseOrders } from "@/server/data/purchase-orders";
-import { listShowOptions } from "@/server/data/shows";
 
 export default async function PurchaseOrdersPage() {
   if (!(await can("manage_budget"))) redirect("/");
   const context = await getActiveOrganizationContext();
   if (!context?.organization) redirect("/");
-  const [orders, companies, shows, episodes] = await Promise.all([
-    listActivePurchaseOrders(), listCrmCompanyOptions(context.organization.organizationId), listShowOptions(context.organization.organizationId), listEpisodes(context.organization.organizationId),
+  const [orders, options] = await Promise.all([
+    listFastApiVendorPurchaseOrders(),
+    getFastApiCommercialFormOptions(),
   ]);
+  const { companies, shows, episodes } = options;
   const vendors = companies.filter((company) => company.type === "vendor");
   const expired = orders.filter((order) => order.expiryDate && new Date(order.expiryDate) < startOfToday() && order.status === "approved").length;
   const overrun = orders.filter((order) => order.remainingAmount < 0 || order.varianceAmount > 0).length;

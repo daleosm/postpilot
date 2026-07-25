@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { Button } from "@heroui/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -19,7 +21,7 @@ export function WorkflowMigrationReviewQueue({ reviews }: { reviews: Review[] })
     if (!resolutionNote) return setMessage("Add a short review note before closing an item.");
     setSaving(review.id); setMessage("");
     try {
-      const response = await fetch(`/api/episodes/${review.episodeId}/workflow-migration-review`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, resolutionNote }) });
+      const response = await postpilotUiFetch(`/v1/episodes/${review.episodeId}/workflow-migration-review`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, resolutionNote }) });
       if (!response.ok) return setMessage((await response.json().catch(() => null))?.error ?? "Could not update the review item.");
       router.refresh();
     } catch { setMessage("Could not update the review item."); } finally { setSaving(null); }

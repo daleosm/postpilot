@@ -39,16 +39,19 @@ Self-hosting still needs backups, monitoring, secure credentials, tested upgrade
 Every request resolves an authenticated user (or local debug user), a valid active organisation membership, and tenant-scoped permissions before it reads or changes operational data. Roles grant configurable capabilities; workflow sign-off is assigned to named people on each episode team rather than hard-coded job titles.
 
 ~~~text
-Browser / React UI
+Browser / React + TypeScript UI
+        ↓  /v1
+FastAPI: sessions, tenant context, capabilities, product API
         ↓
-App Router pages and API routes
-        ↓
-Active organisation + capability checks
-        ↓
-Server-only domain and data helpers
-        ↓
-Drizzle ORM → PostgreSQL
+SQLAlchemy + Alembic → PostgreSQL
 ~~~
+
+FastAPI is the sole application backend. It owns opaque password sessions,
+active tenant/show context, debug impersonation, permissions, validation,
+business rules, migrations, and PostgreSQL access. Next.js is the React UI
+layer and calls the native FastAPI `/v1` API. See
+[backend/README.md](backend/README.md) for the API contract and migration
+rules.
 
 Read the detailed [architecture guide](docs/architecture.md) for the data model, tenant boundary, authentication, and codebase layout.
 
@@ -58,6 +61,7 @@ Read the detailed [architecture guide](docs/architecture.md) for the data model,
 
 - Node.js 20 or newer
 - pnpm
+- Python 3.12 or newer
 - PostgreSQL 14 or newer
 
 ~~~bash
@@ -69,20 +73,33 @@ Configure `.env.local` for a local database:
 
 ~~~dotenv
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/posthouse
-NEXTAUTH_SECRET=replace-with-a-long-random-string
-NEXTAUTH_URL=http://localhost:5000
+POSTPILOT_SESSION_SECRET=replace-with-a-long-random-string
+POSTPILOT_FRONTEND_ORIGINS=http://localhost:5000
+POSTPILOT_API_ORIGIN=http://127.0.0.1:8000
 
 # Local demo controls only. Never enable this in production.
 POSTPILOT_DEBUG_DEMO=true
 ~~~
 
-Apply the schema, load the demonstration workspace, and run the app:
+Apply the schema, load the demonstration workspace, and start FastAPI:
 
 ~~~bash
-pnpm db:migrate
-pnpm db:seed
+cd backend
+python -m venv .venv
+.venv/bin/pip install -e '.[dev]'
+.venv/bin/alembic upgrade head
+.venv/bin/python -m app.demo_seed
+.venv/bin/uvicorn app.main:app --reload --port 8000
+~~~
+
+In a second terminal, start the TypeScript frontend:
+
+~~~bash
 pnpm dev -- --port 5000
 ~~~
+
+FastAPI reads the root `.env.local` when run from `backend/`; Next.js reads the
+same file and forwards local `/v1` requests to `POSTPILOT_API_ORIGIN`.
 
 Open [http://localhost:5000](http://localhost:5000). Demo accounts use the password `password`; they are strictly for local development and should never be exposed publicly.
 
@@ -100,12 +117,13 @@ Open [http://localhost:5000](http://localhost:5000). Demo accounts use the passw
 
 ## Stack
 
-- Next.js App Router, React, and TypeScript
-- PostgreSQL and Drizzle ORM
-- Auth.js credentials authentication
-- Zod and React Hook Form
+- Next.js App Router, React, and TypeScript (frontend)
+- FastAPI, Pydantic, SQLAlchemy Core, and Alembic (backend)
+- PostgreSQL
+- Opaque HTTP-only FastAPI password sessions
+- Zod and React Hook Form (frontend validation)
 - Tailwind CSS and HeroUI
-- Playwright UI/integration/isolation tests and Node unit tests
+- Pytest backend/API tests plus Playwright UI and credentials-auth journeys
 
 ## Project status
 

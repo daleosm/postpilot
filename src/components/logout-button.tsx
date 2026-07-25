@@ -1,18 +1,13 @@
 "use client";
 
 import { LogOut } from "lucide-react";
-import { signOut } from "next-auth/react";
 import { Button } from "@heroui/react";
+
+import { postpilotApiFetch } from "@/lib/postpilot-api-client";
 
 export function LogoutButton() {
   async function logout() {
-    // This is a no-op outside debug mode. In debug it prevents the implicit
-    // demo actor from restoring access after Auth.js signs out.
-    await fetch("/api/debug/user", { method: "DELETE" });
-    // Auth.js returns a callback URL from its session cookie. In a credentials
-    // flow that cookie can still hold the prior safe destination (for example
-    // "/"), so own the post-logout navigation rather than depending on it.
-    await signOut({ redirect: false });
+    await postpilotApiFetch<void>("/auth/sign-out", { method: "POST" }).catch(() => undefined);
     window.location.assign("/sign-in");
   }
 

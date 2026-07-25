@@ -2,8 +2,8 @@ import { BookingFormDialog } from "@/components/booking-form-dialog";
 import { CopyEpisodeBookingsDialog } from "@/components/copy-episode-bookings-dialog";
 import { ScheduleBoard } from "@/components/schedule-board";
 import { getActiveOrganizationContext } from "@/lib/organizations";
+import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 import { canManageBookings, canRecordBookingActuals, canViewAllOperations, roleHome } from "@/lib/permissions";
-import { getScheduleResources, listCateringRequests, listSchedule, listWorkOrderInbox } from "@/server/data";
 import { redirect } from "next/navigation";
 
 export default async function SchedulePage() {
@@ -19,8 +19,62 @@ async function getScheduleData() {
   const context = await getActiveOrganizationContext();
   if (!context?.organization) return { organizationName: "No workspace", bookings: [], resources: { rooms: [], people: [], guestAccounts: [], episodes: [] }, cateringRequests: [], workOrders: [] };
   const from = new Date(Date.now() - 60 * 86_400_000); const to = new Date(Date.now() + 90 * 86_400_000);
-  const [bookings, resources, cateringRequests, workOrders] = await Promise.all([listSchedule(context.organization.organizationId, from, to), getScheduleResources(context.organization.organizationId), listCateringRequests(context.organization.organizationId), listWorkOrderInbox(context.organization.organizationId, context.userId)]);
-  return { organizationName: context.organization.organizationName, bookings, resources, cateringRequests, workOrders };
+  const query = `?from_at=${encodeURIComponent(from.toISOString())}&to_at=${encodeURIComponent(to.toISOString())}`;
+    const [schedule, resources, catering, inbox] = await Promise.all([
+      postpilotApiServerFetch<{ bookings: ApiBooking[] }>(`/bookings${query}`),
+      postpilotApiServerFetch<ApiBookingResources>("/bookings/resources"),
+      postpilotApiServerFetch<ApiCateringRequest[]>("/catering-requests"),
+      postpilotApiServerFetch<{ work_orders: ApiWorkOrder[] }>("/work-orders/inbox"),
+    ]);
+  return {
+      organizationName: context.organization.organizationName,
+      bookings: schedule.bookings.map(mapBooking),
+      resources: {
+        rooms: resources.rooms,
+        people: resources.people.map((person) => ({ ...person, isFreelancer: person.is_freelancer })),
+        guestAccounts: resources.guest_accounts,
+        episodes: resources.episodes,
+      },
+      cateringRequests: catering.map((request) => ({
+        id: request.id,
+        bookingId: request.booking_id,
+        requestedByPersonId: request.requested_by_person_id,
+        requestType: request.request_type,
+        item: request.item,
+        requestedFor: request.requested_for ? new Date(request.requested_for) : null,
+        status: request.status,
+      })),
+      workOrders: inbox.work_orders.map((workOrder) => ({
+        id: workOrder.id,
+        title: workOrder.title,
+        showTitle: workOrder.show_title,
+        episodeTitle: workOrder.episode_title,
+        episodeNumber: workOrder.episode_number,
+        workflowStageName: workOrder.workflow_stage_name,
+        dueAt: workOrder.due_at ? new Date(workOrder.due_at) : null,
+        bookingId: workOrder.booking_id,
+        workType: workOrder.work_type,
+        assigneePersonId: workOrder.assignee_person_id,
+        status: workOrder.status,
+      })),
+  };
 }
+
+type ApiBooking = {
+  id: string; title: string; starts_at: string; ends_at: string; actual_starts_at: string | null; actual_ends_at: string | null;
+  approved_overtime_minutes: number; setup_minutes: number; handover_minutes: number; is_option: boolean; option_rank: number | null;
+  status: string; booking_type: string; room_id: string | null; episode_id: string | null; person_id: string | null; guest_person_id: string | null;
+  notes: string | null; room_name: string | null; room_type: string | null; episode_title: string | null; episode_number: number | null;
+  episode_production_code: string | null; person_name: string | null; workflow_state: { display_status: string; primary_stage_name: string | null } | null;
+};
+type ApiBookingResources = {
+  rooms: Array<{ id: string; name: string; type: string }>;
+  people: Array<{ id: string; name: string; role: string; availability: string; is_freelancer: boolean }>;
+  guest_accounts: Array<{ id: string; name: string; role: string; email: string | null }>;
+  episodes: Array<{ id: string; label: string }>;
+};
+type ApiCateringRequest = { id: string; booking_id: string | null; requested_by_person_id: string | null; request_type: string; item: string; requested_for: string | null; status: string };
+type ApiWorkOrder = { id: string; title: string; show_title: string; episode_title: string; episode_number: number; workflow_stage_name: string | null; due_at: string | null; booking_id: string | null; work_type: string; assignee_person_id: string | null; status: string };
+function mapBooking(booking: ApiBooking) { return { id: booking.id, title: booking.title, startsAt: new Date(booking.starts_at), endsAt: new Date(booking.ends_at), actualStartsAt: booking.actual_starts_at ? new Date(booking.actual_starts_at) : null, actualEndsAt: booking.actual_ends_at ? new Date(booking.actual_ends_at) : null, approvedOvertimeMinutes: booking.approved_overtime_minutes, setupMinutes: booking.setup_minutes, handoverMinutes: booking.handover_minutes, isOption: booking.is_option, optionRank: booking.option_rank, status: booking.status, bookingType: booking.booking_type, roomId: booking.room_id, episodeId: booking.episode_id, personId: booking.person_id, guestPersonId: booking.guest_person_id, notes: booking.notes, roomName: booking.room_name, roomType: booking.room_type, episodeTitle: booking.episode_title, episodeNumber: booking.episode_number, episodeProductionCode: booking.episode_production_code, personName: booking.person_name, workflowState: booking.workflow_state ? { displayStatus: booking.workflow_state.display_status, primaryStageName: booking.workflow_state.primary_stage_name } : null }; }
 
 function inputDate(date: Date) { const pad = (value: number) => String(value).padStart(2, "0"); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T09:00`; }

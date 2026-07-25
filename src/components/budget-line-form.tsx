@@ -8,6 +8,8 @@ import { useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
+import { postpilotApiFetch } from "@/lib/postpilot-api-client";
+
 const categories = ["edit suite", "editor", "assistant editor", "color", "sound", "VFX", "QC", "finalisation", "storage", "overtime"] as const;
 const schema = z.object({
   episodeId: z.string().min(1, "Select an episode."),
@@ -27,7 +29,7 @@ export function BudgetLineForm({ episodes, currency, purchaseOrders, line }: { e
   const [open, setOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const router = useRouter();
-  const defaults = () => ({ episodeId: line?.episodeId ?? "", category: (categories.includes(line?.category as (typeof categories)[number]) ? line?.category : "editor") as Values["category"], description: line?.description ?? "", budgetedAmount: line ? Number(line.budgetedAmount) : 0, actualAmount: line ? Number(line.actualAmount) : 0, costType: (line?.costType === "billable" ? "billable" : "internal") as Values["costType"], externalCost: line?.externalCost ?? false, purchaseOrderId: line?.purchaseOrderId ?? null });
+  const defaults = () => ({ episodeId: line?.episodeId ?? (episodes.length === 1 ? episodes[0].id : ""), category: (categories.includes(line?.category as (typeof categories)[number]) ? line?.category : "editor") as Values["category"], description: line?.description ?? "", budgetedAmount: line ? Number(line.budgetedAmount) : 0, actualAmount: line ? Number(line.actualAmount) : 0, costType: (line?.costType === "billable" ? "billable" : "internal") as Values["costType"], externalCost: line?.externalCost ?? false, purchaseOrderId: line?.purchaseOrderId ?? null });
   const form = useForm<z.input<typeof schema>, unknown, Values>({ resolver: zodResolver(schema), defaultValues: defaults() });
   const [externalCost, selectedEpisodeId] = useWatch({ control: form.control, name: ["externalCost", "episodeId"] });
   const selectedEpisode = episodes.find((episode) => episode.id === selectedEpisodeId);
@@ -37,12 +39,19 @@ export function BudgetLineForm({ episodes, currency, purchaseOrders, line }: { e
     setSubmitError(null);
     try {
       const payload = { ...values, purchaseOrderId: values.externalCost ? values.purchaseOrderId : null };
-      const response = await fetch(line ? `/api/budget-lines/${line.id}` : "/api/budget-lines", { method: line ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        setSubmitError(body?.error ?? "Unable to save this budget line.");
-        return;
-      }
+      await postpilotApiFetch(line ? `/budget/lines/${line.id}` : "/budget/lines", {
+        method: line ? "PATCH" : "POST",
+        body: {
+          ...(line ? {} : { episode_id: payload.episodeId }),
+          category: payload.category,
+          description: payload.description || null,
+          budgeted_amount: payload.budgetedAmount,
+          actual_amount: payload.actualAmount,
+          cost_type: payload.costType,
+          external_cost: payload.externalCost,
+          purchase_order_id: payload.purchaseOrderId,
+        },
+      });
       form.reset(defaults());
       setOpen(false);
       router.refresh();
@@ -54,8 +63,8 @@ export function BudgetLineForm({ episodes, currency, purchaseOrders, line }: { e
   async function remove() {
     if (!line || !window.confirm("Remove this budget line?")) return;
     setSubmitError(null);
-    const response = await fetch(`/api/budget-lines/${line.id}`, { method: "DELETE" });
-    if (!response.ok) { const body = await response.json().catch(() => null); setSubmitError(body?.error ?? "Unable to remove this budget line."); return; }
+    try { await postpilotApiFetch(`/budget/lines/${line.id}`, { method: "DELETE" }); }
+    catch (error) { setSubmitError(error instanceof Error ? error.message : "Unable to remove this budget line."); return; }
     setOpen(false); router.refresh();
   }
 

@@ -45,6 +45,11 @@ spec:
           envFrom:
             - secretRef:
                 name: postpilot-secrets
+          env:
+            # Server-rendered UI reads use the cluster-private FastAPI service;
+            # browser /v1 calls use the public API path through the ALB.
+            - name: POSTPILOT_API_INTERNAL_URL
+              value: http://postpilot-api.postpilot.svc.cluster.local
           resources:
             requests:
               cpu: 100m

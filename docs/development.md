@@ -5,29 +5,38 @@
 Follow the [Quick start](../README.md#quick-start) first. The normal local loop is:
 
 ~~~bash
+# Terminal 1
+cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000
+
+# Terminal 2
 pnpm dev -- --port 5000
 ~~~
 
-Use `POSTPILOT_DEBUG_DEMO=true` only for a local or controlled test database. It exposes clearly labelled debug user and organisation switchers that operate on persistent data.
+Both processes read the root `.env.local`; set `POSTPILOT_API_ORIGIN` to the
+local FastAPI URL so Next.js can forward `/v1` requests during development.
+Use `POSTPILOT_DEBUG_DEMO=true` only for a local or controlled test database.
+It exposes clearly labelled debug user and organisation switchers that operate
+on persistent data.
 
 ## Database changes
 
-The Drizzle schema in `src/lib/db/schema.ts` is the source of truth.
+FastAPI owns migrations and the live PostgreSQL contract. The historical SQL
+files under `drizzle/` are an immutable bootstrap snapshot used only by the
+first Alembic revision; no Node ORM or Node migration process is deployed.
 
 ~~~bash
-# After changing the schema
-pnpm db:generate
-
-# Apply the generated migration
-pnpm db:migrate
-
-# Refresh demonstration data where appropriate
-pnpm db:seed
+cd backend
+.venv/bin/alembic upgrade head
+.venv/bin/python -m app.demo_seed
 ~~~
 
 Do not edit a migration that has already been applied outside a disposable local database. Create a forward-only migration instead.
 
-Keep schema, migration, Zod validation, tenant scoping, seed data, and tests aligned. A new tenant-owned table must be included in the tenant-boundary review rather than relying on UI filtering.
+Create a forward-only Alembic revision for a schema change; do not edit a
+released migration outside a disposable local database. Keep schema, Pydantic
+validation, Zod form validation, tenant scoping, seed data, and tests aligned.
+A new tenant-owned table must be included in the tenant-boundary review rather
+than relying on UI filtering.
 
 ## Validation and test commands
 
@@ -35,6 +44,12 @@ Keep schema, migration, Zod validation, tenant scoping, seed data, and tests ali
 # Static checks
 pnpm exec tsc --noEmit
 pnpm lint
+
+# Authoritative backend checks
+cd backend
+.venv/bin/ruff format --check .
+.venv/bin/ruff check .
+.venv/bin/pytest
 
 # Full browser suite, including credentials auth
 pnpm test:e2e
@@ -44,14 +59,10 @@ pnpm test:shows
 pnpm test:episodes
 pnpm test:bookings
 pnpm test:approvals
-pnpm test:workflow
-pnpm test:work-orders
-pnpm test:budget
-pnpm test:qc
-pnpm test:tenant-isolation
+pnpm test:deliveries
 ~~~
 
-See [tests/README.md](../tests/README.md) for suite ownership, conventions, and coverage notes.
+See [tests/README.md](../tests/README.md) for suite ownership, conventions, and coverage notes. FastAPI backend coverage is run with `pytest`; its focused tests live in `backend/tests/`.
 
 ## How to investigate a problem
 
@@ -59,17 +70,18 @@ Start at the boundary that is failing.
 
 | Symptom | First places to inspect |
 | --- | --- |
-| Wrong tenant data, 403, or 404 | `src/lib/organizations.ts`, tenant-resource helpers, the relevant `src/server/data` module, then the route handler |
-| User cannot see or change something | Capability helper, active-organisation role policy, and episode team assignment |
-| Workflow does not advance | Current episode state, named signers, workflow helper, operational gates, and approval activity |
-| Booking looks wrong or conflicts | Booking conflict/option helpers, booking API, and the custom Gantt component |
-| Budget/rate total is unexpected | Rate resolution, budget data, actual-time submission, linked budget/PO records |
-| Manifest cannot dispatch/sign off | Delivery lifecycle, workflow-gate helpers, and episode manifest item state |
-| Sign-in or redirect behaves unexpectedly | Auth configuration, login throttle, redirect helper, and `proxy.ts` |
+| Wrong tenant data, 403, or 404 | `backend/app/auth.py`, the relevant `backend/app/api/routes/` module, and its resource-scope query |
+| User cannot see or change something | `backend/app/permissions.py`, the active-organisation role policy, and episode team assignment |
+| Workflow does not advance | `backend/app/workflow_state.py`, named signers, operational gate checks, and approval activity |
+| Booking looks wrong or conflicts | `backend/app/booking_logic.py`, bookings API route, and the custom Gantt component |
+| Budget/rate total is unexpected | `backend/app/budget_logic.py`, `rate_card_logic.py`, actual-time submission, and linked budget/PO records |
+| Manifest cannot dispatch/sign off | `backend/app/delivery_lifecycle.py`, delivery route, and the episode manifest item state |
+| Sign-in or redirect behaves unexpectedly | `backend/app/auth.py`, `backend/app/security.py`, and the frontend `src/proxy.ts` session guard |
 
 ## Development conventions
 
-- Keep database access out of React components where practical; use server data/domain helpers.
+- Keep database access and business rules out of React components. Use the typed
+  FastAPI clients in `src/lib/postpilot-api-*.ts` and FastAPI route/domain code.
 - Use React Hook Form and Zod for new forms and mutations.
 - Make permission checks capability-based. Do not add workflow or operational behaviour that assumes a fixed job title.
 - Do not accept an `organizationId` supplied by a browser as authority.

@@ -4,8 +4,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { TopBar } from "@/components/top-bar";
 import { getDebugUser, listDebugUsersForOrganization } from "@/lib/debug-user";
 import { getActiveOrganizationContext, getActiveShow } from "@/lib/organizations";
-import { isDebugMode } from "@/lib/runtime";
-import { listShowOptions } from "@/server/data/shows";
+import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 
 export const metadata: Metadata = {
   title: "PostPilot · Production operations",
@@ -23,9 +22,9 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const activeOrganizationId = organizationContext?.organization?.organizationId;
   const [showOptions, activeShow, availableDebugUsers] = activeOrganizationId
     ? await Promise.all([
-      listShowOptions(activeOrganizationId),
+      listShellShowOptions(activeOrganizationId),
       getActiveShow(activeOrganizationId),
-      isDebugMode ? listDebugUsersForOrganization(activeOrganizationId) : Promise.resolve([]),
+      debugUser ? listDebugUsersForOrganization(activeOrganizationId) : Promise.resolve([]),
     ])
     : [[], null, []];
   return (
@@ -38,7 +37,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               key={activeOrganizationId ?? "no-active-organization"}
               debugUser={debugUser}
               debugUsers={availableDebugUsers}
-              debugMode={isDebugMode && Boolean(debugUser)}
+              debugMode={Boolean(debugUser)}
               activeOrganization={organizationContext?.organization ?? null}
               organizations={organizationContext?.memberships ?? []}
               shows={showOptions}
@@ -50,4 +49,10 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       </body>
     </html>
   );
+}
+
+async function listShellShowOptions(organizationId: string) {
+  void organizationId;
+  const response = await postpilotApiServerFetch<{ shows: Array<{ id: string; title: string }> }>("/shows");
+  return response.shows.map(({ id, title }) => ({ id, title }));
 }

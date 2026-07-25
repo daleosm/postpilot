@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { Button } from "@heroui/react";
 import { AlertTriangle, X } from "lucide-react";
 import { useState } from "react";
@@ -12,7 +14,7 @@ export function BookingConflictFlagDialog({ bookingId, title }: { bookingId: str
 
   async function submit() {
     setSaving(true); setMessage("");
-    const response = await fetch(`/api/bookings/${bookingId}/flag-conflict`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }) });
+    const response = await postpilotUiFetch(`/v1/bookings/${bookingId}/flag-conflict`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }) });
     const body = await response.json().catch(() => null);
     setSaving(false);
     if (!response.ok) return setMessage(body?.error ?? "Could not flag this booking.");

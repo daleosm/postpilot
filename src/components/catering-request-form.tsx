@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { Button } from "@heroui/react";
 import { Coffee, Sandwich } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -23,7 +25,7 @@ export function CateringRequestForm({ resources }: { resources: Resources }) {
     if (!item.trim() || (!bookingId && !roomId)) return setMessage("Choose a booking or room and describe the request.");
     setSaving(true); setMessage("");
     try {
-      const response = await fetch("/api/catering-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bookingId: bookingId || null, roomId: roomId || null, requestType, item, quantity, requestedFor: requestedFor ? new Date(requestedFor).toISOString() : null, notes: notes || null }) });
+      const response = await postpilotUiFetch("/v1/catering-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bookingId: bookingId || null, roomId: roomId || null, requestType, item, quantity, requestedFor: requestedFor ? new Date(requestedFor).toISOString() : null, notes: notes || null }) });
       const body = await response.json().catch(() => null);
       if (!response.ok) return setMessage(body?.error ?? "Could not send your request.");
       setItem(""); setQuantity(1); setRequestedFor(""); setNotes(""); setMessage("Request sent to the runner desk."); router.refresh();

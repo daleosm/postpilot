@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { Button } from "@heroui/react";
 import { CheckCircle2, ExternalLink, ShieldAlert } from "lucide-react";
 import Link from "next/link";
@@ -37,7 +39,7 @@ function WorkOrderRow({ item, canOpenEpisodes }: { item: WorkOrderInboxItem; can
   async function complete() {
     setSaving(true); setMessage("");
     try {
-      const response = await fetch(`/api/work-orders/${item.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: item.kind === "qc_exception" ? "ready_for_review" : "complete" }) });
+      const response = await postpilotUiFetch(`/v1/work-orders/${item.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: item.kind === "qc_exception" ? "ready_for_review" : "complete" }) });
       const body = await response.json().catch(() => null);
       if (!response.ok) setMessage(body?.error ?? "Could not complete this work order.");
       else { setMessage(item.kind === "qc_exception" ? "QC exception handed to QC for re-check." : "Work order completed."); router.refresh(); }

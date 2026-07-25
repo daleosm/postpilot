@@ -1,4 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { establishDebugSession } from "../fixtures/debug-session";
+
+const COPPERLINE_ORGANIZATION_ID = "10000000-0000-4000-8000-000000000005";
+
+test.beforeEach(async ({ context }) => {
+  await establishDebugSession(context, "user_maya", COPPERLINE_ORGANIZATION_ID);
+});
 
 test.describe("Delivery register UI", () => {
   test("renders a compact operational register and makes unprofiled episodes explicit", async ({ page }) => {
@@ -12,6 +19,10 @@ test.describe("Delivery register UI", () => {
 
   test("filters simple delivery state and can reset", async ({ page }) => {
     await page.goto("/deliveries");
+    // The register is a hydrated client filter over server-provided entries.
+    // Wait for the seeded entries rather than counting during the initial
+    // server/client handoff, when no links may have been attached yet.
+    await expect(page.getByRole("link", { name: "Open checklist →" }).first()).toBeVisible();
     const initialRowCount = await page.getByRole("link", { name: "Open checklist →" }).count();
     await page.locator('select[name="state"]').selectOption("accepted");
     const acceptedRowCount = await page.getByRole("link", { name: "Open checklist →" }).count();

@@ -1,75 +1,36 @@
 import "server-only";
 
-import { and, asc, eq } from "drizzle-orm";
-import { cookies } from "next/headers";
+import type { DebugUser } from "@/lib/debug-users";
+import { getPostPilotApiSession, postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 
-import { db } from "@/lib/db";
-import { organizationMembers, people, users } from "@/lib/db/schema";
-import { authOptions } from "@/lib/auth";
-import { DEBUG_SIGNED_OUT_VALUE, debugUsers, type DebugUser } from "@/lib/debug-users";
-import { isDebugMode, isDevelopmentDebugMode, isPublicDemoMode } from "@/lib/runtime";
-import { getServerSession } from "next-auth";
-
-const PUBLIC_DEMO_SWITCHER_USER_ID = process.env.POSTPILOT_DEMO_SWITCHER_USER_ID ?? "user_maya";
-
-/** Public demos preserve normal authentication and only the demo admin can impersonate users. */
+/** FastAPI decides whether the current opaque session may impersonate a user. */
 export async function canUseDebugUserSwitcher() {
-  if (isDevelopmentDebugMode) return true;
-  if (!isPublicDemoMode) return false;
-  return (await getServerSession(authOptions))?.user?.id === PUBLIC_DEMO_SWITCHER_USER_ID;
+  return (await getPostPilotApiSession())?.debug_can_switch ?? false;
 }
 
 export async function getDebugUser() {
-  if (!isDebugMode) return null;
-  const canSwitch = await canUseDebugUserSwitcher();
-  if (!canSwitch) return null;
-  const store = await cookies();
-  const storedId = store.get("postpilot.debugUser")?.value;
-  if (storedId === DEBUG_SIGNED_OUT_VALUE) {
-    if (isDevelopmentDebugMode) return null;
-    return getDebugUserByUserId(PUBLIC_DEMO_SWITCHER_USER_ID);
-  }
-  // Older debug sessions used a display-only debug ID. New sessions store the
-  // real Auth.js user ID, allowing every seeded tenant user to be assumed.
-  const preset = debugUsers.find((user) => user.id === storedId || user.userId === storedId);
-  const userId = preset?.userId ?? storedId ?? (isDevelopmentDebugMode ? debugUsers[0].userId : PUBLIC_DEMO_SWITCHER_USER_ID);
-  return getDebugUserByUserId(userId, preset);
-}
-
-export async function getDebugUserByUserId(userId: string, fallback?: DebugUser): Promise<DebugUser | null> {
-  if (!db) return fallback ?? null;
-  const [user] = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
-  if (!user) return fallback ?? null;
+  const session = await getPostPilotApiSession();
+  if (!session?.debug_can_switch) return null;
+  const role = session.person?.role ?? "member";
   return {
-    id: user.id,
-    userId: user.id,
-    name: user.name ?? user.id,
-    role: fallback?.role ?? "member",
-    label: fallback?.label ?? "Team member",
+    id: session.user_id,
+    userId: session.user_id,
+    name: session.user_name ?? session.user_id,
+    role,
+    label: formatRole(role),
   };
 }
 
-/** Every actual user with a membership in this tenant is available to assume in debug mode. */
-export async function listDebugUsersForOrganization(organizationId: string): Promise<DebugUser[]> {
-  if (!db) return [];
-  const rows = await db.select({
-    userId: users.id,
-    name: users.name,
-    personRole: people.role,
-    membershipRole: organizationMembers.role,
-  }).from(organizationMembers)
-    .innerJoin(users, eq(organizationMembers.userId, users.id))
-    .leftJoin(people, and(eq(people.organizationId, organizationMembers.organizationId), eq(people.userId, users.id)))
-    .where(eq(organizationMembers.organizationId, organizationId))
-    .orderBy(asc(users.name), asc(users.id));
+export async function getDebugUserByUserId(userId: string): Promise<DebugUser | null> {
+  const users = await listDebugUsersForOrganization();
+  return users.find((user) => user.userId === userId) ?? null;
+}
 
-  return rows.map((row) => ({
-    id: row.userId,
-    userId: row.userId,
-    name: row.name ?? row.userId,
-    role: row.personRole ?? row.membershipRole,
-    label: formatRole(row.personRole ?? row.membershipRole),
-  }));
+/** Every actual user returned by FastAPI is available to assume in debug mode. */
+export async function listDebugUsersForOrganization(_organizationId?: string): Promise<DebugUser[]> {
+  void _organizationId;
+  const users = await postpilotApiServerFetch<Array<{ user_id: string; name: string; role: string; label: string }>>("/debug/users");
+  return users.map((user) => ({ id: user.user_id, userId: user.user_id, name: user.name, role: user.role, label: user.label }));
 }
 
 function formatRole(value: string) {

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import postgres from "postgres";
-import { useDebugSession } from "../fixtures/debug-session";
+import { establishDebugSession } from "../fixtures/debug-session";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required for My Time UI tests.");
@@ -11,7 +11,7 @@ const TEST_BOOKING_ID = "f3000000-0000-4000-8000-000000000001";
 const TEST_BOOKING_TITLE = "My time confirmation test booking";
 
 test.beforeEach(async ({ context }) => {
-  await useDebugSession(context, COPPERLINE_EDITOR_USER_ID, COPPERLINE_ORGANIZATION_ID);
+  await establishDebugSession(context, COPPERLINE_EDITOR_USER_ID, COPPERLINE_ORGANIZATION_ID);
 });
 
 test.afterEach(async () => {

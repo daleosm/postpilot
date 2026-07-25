@@ -6,10 +6,13 @@ resources:
   - service-account.yaml
   - secret-provider-class.yaml
   - secrets-sync-job.yaml
-  - migration-job.yaml
+  - api-migration-job.yaml
   - deployment.yaml
+  - api-deployment.yaml
+  - api-pod-disruption-budget.yaml
   - pod-disruption-budget.yaml
   - service.yaml
+  - api-service.yaml
 
 labels:
   - pairs:

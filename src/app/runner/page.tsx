@@ -2,11 +2,8 @@ import { ChefHat } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { RunnerRequestList } from "@/components/runner-request-list";
-import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
-import { isDebugDemoMode } from "@/lib/runtime";
-import { listCateringRequests } from "@/server/data";
-import { demoRequests } from "../catering/page";
+import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 
 export default async function RunnerPage() {
   if (!(await can("manage_catering"))) redirect("/catering");
@@ -15,7 +12,6 @@ export default async function RunnerPage() {
 }
 
 async function load() {
-  if (isDebugDemoMode) return demoRequests().map((request, index) => ({ ...request, actualCost: null, billedAmount: null, markupPercent: null, currency: "GBP", requesterName: index ? "Priya Shah" : "James Liu" }));
-  const context = await getActiveOrganizationContext();
-  return context?.organization ? listCateringRequests(context.organization.organizationId) : [];
+  return postpilotApiServerFetch<Array<{ id: string; request_type: string; item: string; quantity: number; notes: string | null; requested_for: string | null; status: string; room_name: string | null; actual_cost: number | null; billed_amount: number | null; markup_percent: number | null; currency: string; requester_name: string | null }>>("/catering-requests")
+    .then((requests) => requests.map((request) => ({ id: request.id, requestType: request.request_type, item: request.item, quantity: request.quantity, notes: request.notes, requestedFor: request.requested_for ? new Date(request.requested_for) : null, status: request.status, roomName: request.room_name, actualCost: request.actual_cost, billedAmount: request.billed_amount, markupPercent: request.markup_percent, currency: request.currency, requesterName: request.requester_name })));
 }

@@ -1,42 +1,52 @@
 # PostPilot test suite
 
-All automated browser tests use Playwright and the database-backed debug environment. They are organised by the type of regression they protect, rather than calling screen checks “usability” tests.
+TypeScript tests use Playwright only for browser journeys. Backend behaviour,
+tenancy, security, lifecycle, and migration contracts live in the FastAPI
+`pytest` suite and are authoritative.
 
 ## Folders
 
 | Folder | Purpose | Current coverage |
 | --- | --- | --- |
-| `ui/` | Screen-level user journeys: visible controls, filtering, validation, navigation, and role-specific workspace access. | Shows, Episodes, Bookings, Approvals, My time, Users & access. |
-| `integration/` | Business rules exercised through real API routes with isolated database fixtures. | Credentials authentication, configurable workflow, work orders/commercial rules, QC lifecycle, tenant context, role policies, user access, and management-route permissions. |
-| `integration/tenant-isolation/` | Tenant-boundary checks for pages, mutations, and safe route switching. | Shows, Episodes, Bookings, Approvals. |
+| `ui/` | Screen-level user journeys: visible controls, filtering, validation, navigation, responsive layouts, and role-specific workspace access. | 91 Chromium journeys across Shows, Episodes, Bookings, workflow actions, Work orders, actual time, Deliveries, commercial registers, CRM, Settings, Approvals, and recovery states. |
+| `integration/auth-credentials.spec.ts` | Isolated real sign-in/sign-out and protected-route browser journey. | FastAPI opaque-session behaviour through the UI. |
 | `fixtures/` | Shared test helpers only; these are not test specs. | Debug user and active-tenant session helper. |
 
 ## Commands
 
 ```sh
-pnpm test:unit
 pnpm test:all
 pnpm test:e2e
 pnpm test:auth
 pnpm test:ui
-pnpm test:integration
-pnpm test:tenant-isolation
-pnpm test:budget
-pnpm test:qc
-pnpm test:guest-episodes
-pnpm test:booking-guests
+pnpm test:backend
+pnpm test:shows
+pnpm test:episodes
+pnpm test:bookings
+pnpm test:deliveries
 ```
 
-`test:all` runs every Node unit test and every Playwright browser/integration
-test, including the isolated credentials-auth suite. It requires a migrated,
-seeded PostgreSQL database; GitHub Actions provisions one automatically.
+`test:all` runs Playwright browser journeys, including the isolated
+credentials-auth suite. Backend tests are run from `backend/` with `pytest`;
+CI runs that PostgreSQL-backed suite before browser tests. The legacy Node API
+and browser/API integration suites have been retired in favour of FastAPI
+tests:
+
+| Retired Node area | Authoritative FastAPI coverage |
+| --- | --- |
+| Credential security and throttling | `test_security_contract.py`, `test_login_throttle_integration.py` |
+| Delivery lifecycle and register state | `test_delivery_lifecycle.py`, `test_delivery_register_state.py` |
+| Current-stage workflow state | `test_workflow_state.py` |
+| Capability policy resolution | `test_permissions.py` |
+| Server error logging | `test_server_logging.py` |
+| Migration rollout contract | `test_migration_contract.py` |
 
 ## Conventions
 
 - Use `ui/` for a user-visible journey. These are UI regression tests, not a substitute for moderated human usability research.
-- Use `integration/` when the point of the test is a permission, workflow, billing, or data-integrity rule.
-- Put tenant-boundary coverage in `integration/tenant-isolation/`, including cross-tenant route and API attempts.
-- `test:e2e` runs the standard debug-mode browser suite and the isolated credentials-auth suite. The latter uses a separate non-debug server because it verifies the real Auth.js route guard.
+- Keep server-side permission, workflow, billing, lifecycle, and tenant-boundary
+  rules in the FastAPI pytest suite.
+- `test:e2e` runs the standard debug-mode browser suite and the isolated credentials-auth suite. The latter uses a separate non-debug server because it verifies the FastAPI session guard and protected-route behaviour.
 - Each spec that writes fixture data must use its own ID range, clean up after itself, and run serially when it switches debug identities or mutates shared fixture state.
 - Prefer helpers from `fixtures/` over repeating debug-cookie setup.
 
@@ -44,13 +54,11 @@ seeded PostgreSQL database; GitHub Actions provisions one automatically.
 
 | Module | UI journey | Tenant isolation | Business rules |
 | --- | --- | --- | --- |
-| Shows | `ui/shows`, `ui/shows-detail` | `tenant-isolation/shows` | `integration/shows` |
-| Episodes | `ui/episodes` | `tenant-isolation/episodes`, `integration/guest-episode-access` | creation, details, team, copied-team, workflow, QC, and guest episode access |
-| Bookings | `ui/bookings`, `ui/my-time` | `tenant-isolation/bookings`, guest scheduling boundary | lifecycle/conflicts, copied sequences, immediate actual-time cost roll-up, and guest accounts |
-| Approvals | `ui/approvals` | `tenant-isolation/approvals` | workflow integration |
-| Workflow settings | stage, sign-off, checklist, validation, empty-state, and mobile journeys in `integration/workflow-settings` | cross-tenant workflow/stage mutation checks in `integration/workflow-settings` | configuration persistence, protected QC/history stages, and default work-order creation |
-| Work orders | episode work-order form and assigned-work queue | covered through tenant-scoped APIs | `integration/work-orders` |
-| Budget | episode budget drill-down and manual-line form | `integration/budget` | manual ledger, service rates, rate inheritance, booking roll-up, and commercial source locks |
-| QC | episode QC UI is covered through the episode workspace | `integration/qc-lifecycle` | `integration/qc-lifecycle` |
-| Users & access | `ui/users`, role-policy editor | tenant-local creation and cross-tenant update/delete denial | membership, owner/self-protection, fixed Client role, live policy grants/revocations |
-| Tenant context & access | top-bar and protected-route behaviour | forged/stale/removed tenant context; show selection/reset | debug-user membership and OTP request boundaries |
+| Shows | `ui/shows`, `ui/shows-detail` | FastAPI show/resource tests | FastAPI show, CRM, and tenant-scope tests |
+| Episodes | `ui/episodes` | FastAPI episode/team access tests | FastAPI workflow, QC, and delivery tests |
+| Bookings | `ui/bookings`, `ui/my-time` | FastAPI booking-scope tests | FastAPI lifecycle, conflicts, actuals, and work-order tests |
+| Approvals | `ui/approvals`, `ui/workflow-actions` | FastAPI actor/signer tests | FastAPI workflow-state tests |
+| Budget and POs | `ui/commercial-workflows`, `ui/delivery-and-commercial-actions` | FastAPI commercial-scope tests | FastAPI budget, rate-card, PO, and billing tests |
+| Work orders & actual time | `ui/work-orders-and-time-actions`, `ui/my-time` | FastAPI work-order and time-scope tests | FastAPI lifecycle, approval, billing, and actual-cost tests |
+| CRM & organisation settings | `ui/commercial-workflows`, `ui/settings-context-and-resilience`, `ui/workflow-settings`, `ui/users` | FastAPI membership and CRM-scope tests | FastAPI capability, validation, and authentication tests |
+| Responsive and recovery | `ui/access-and-responsive`, `ui/settings-context-and-resilience` | N/A | Viewport overflow, debug controls, legacy redirects, and unavailable-record recovery |

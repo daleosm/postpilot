@@ -12,7 +12,7 @@ export function safeCallbackPath(value: string | null | undefined) {
   }
 }
 
-/** Auth.js callback guard: never allow an authentication flow to leave this app. */
+/** Authentication callback guard: never allow a sign-in flow to leave this app. */
 export function safeAuthRedirect(url: string, baseUrl: string) {
   try {
     const base = new URL(baseUrl);

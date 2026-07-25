@@ -2,14 +2,12 @@
 
 import { Button } from "@heroui/react";
 import { Clapperboard, LockKeyhole, MonitorPlay } from "lucide-react";
-import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 import { safeCallbackPath } from "@/lib/auth-redirect";
+import { postpilotApiFetch } from "@/lib/postpilot-api-client";
 
 export function SignInForm({ debugMode }: { debugMode: boolean }) {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -19,21 +17,24 @@ export function SignInForm({ debugMode }: { debugMode: boolean }) {
     event.preventDefault();
     setBusy(true); setError("");
     const callbackUrl = safeCallbackPath(new URLSearchParams(window.location.search).get("callbackUrl"));
-    const result = await signIn("credentials", { email, password, callbackUrl, redirect: false });
-    setBusy(false);
-    if (result?.error) return setError("Email or password is incorrect.");
-    // Credentials sign-in writes the Auth.js session cookie immediately before
-    // this navigation. Use a document navigation so a protected route never
-    // races a client-router refresh with that freshly written cookie.
-    window.location.assign(callbackUrl);
+    try {
+      await postpilotApiFetch("/auth/sign-in", { method: "POST", body: { email, password } });
+      window.location.assign(callbackUrl);
+    } catch {
+      setError("Email or password is incorrect.");
+      setBusy(false);
+    }
   }
 
   async function openDebugWorkspace() {
     setBusy(true); setError("");
-    const response = await fetch("/api/debug/user", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-    setBusy(false);
-    if (!response.ok) return setError("Could not open the debug workspace.");
-    router.push("/"); router.refresh();
+    try {
+      await postpilotApiFetch("/debug/bootstrap", { method: "POST" });
+      window.location.assign("/");
+    } catch {
+      setError("Could not open the debug workspace.");
+      setBusy(false);
+    }
   }
 
   return (

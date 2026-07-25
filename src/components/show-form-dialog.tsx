@@ -8,10 +8,11 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { postpilotApiFetch } from "@/lib/postpilot-api-client";
 import { showFormSchema } from "@/lib/validations/entities";
 
 type ShowFormValues = z.input<typeof showFormSchema>;
-export function ShowFormDialog({ show, companies = [] }: { show?: { id: string; title: string; code: string; network: string | null; productionCompany: string | null; clientCompanyId?: string | null; productionCompanyId?: string | null; description?: string | null }; companies?: Array<{ id: string; name: string; type: string }> }) {
+export function ShowFormDialog({ show, companies = [] }: { show?: { id: string; title: string; code: string; network: string | null; productionCompany: string | null; clientCompanyId?: string | null; productionCompanyId?: string | null; description?: string | null }; companies?: Array<{ id: string; name: string; type: string }>; }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
@@ -22,8 +23,23 @@ export function ShowFormDialog({ show, companies = [] }: { show?: { id: string; 
 
   async function submit(values: ShowFormValues) {
     setError("");
-    const response = await fetch(show ? `/api/shows/${show.id}` : "/api/shows", { method: show ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
-    if (!response.ok) { setError((await response.json()).error ?? "Could not save show."); return; }
+    try {
+      await postpilotApiFetch(show ? `/shows/${show.id}` : "/shows", {
+          method: show ? "PATCH" : "POST",
+          body: {
+            title: values.title,
+            code: values.code,
+            network: values.network || null,
+            production_company: values.productionCompany || null,
+            client_company_id: values.clientCompanyId || null,
+            production_company_id: values.productionCompanyId || null,
+            description: values.description || null,
+          },
+      });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not save show.");
+      return;
+    }
     setOpen(false); form.reset(values); router.refresh();
   }
 

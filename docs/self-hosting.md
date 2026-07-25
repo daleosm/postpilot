@@ -2,13 +2,13 @@
 
 ## Production baseline
 
-PostPilot is a Next.js application backed by PostgreSQL. It can run behind an existing HTTPS reverse proxy, on a VM, a container platform, or internal facility infrastructure.
+PostPilot is a Next.js frontend and FastAPI backend backed by PostgreSQL. It can run behind an existing HTTPS reverse proxy, on a VM, a container platform, or internal facility infrastructure.
 
 Before production use:
 
 1. Use a managed or properly backed-up PostgreSQL instance.
-2. Set a long, unique `NEXTAUTH_SECRET`.
-3. Set `NEXTAUTH_URL` to the public **HTTPS** URL.
+2. Set a long, unique `POSTPILOT_SESSION_SECRET`.
+3. Set `POSTPILOT_FRONTEND_ORIGINS` to the public **HTTPS** URL.
 4. Omit `POSTPILOT_DEBUG_DEMO` or set it to `false`.
 5. Store secrets in the deployment platform’s secret manager, not Git.
 6. Apply migrations in a deliberate release step.
@@ -20,7 +20,11 @@ For a simple non-container installation:
 
 ~~~bash
 pnpm install --frozen-lockfile
-pnpm db:migrate
+cd backend
+python -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/alembic upgrade head
+cd ..
 pnpm build
 pnpm start
 ~~~
@@ -47,8 +51,8 @@ At minimum, runtime deployment needs:
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string; percent-encode reserved characters in credentials |
-| `NEXTAUTH_SECRET` | Auth.js signing secret |
-| `NEXTAUTH_URL` | Canonical public application URL; use HTTPS in production |
+| `POSTPILOT_SESSION_SECRET` | FastAPI opaque-session signing secret |
+| `POSTPILOT_FRONTEND_ORIGINS` | Comma-separated allowed frontend origins; use HTTPS in production |
 | `POSTPILOT_DEBUG_DEMO` | Local/demo-only control; do not enable in normal production |
 
 Changing a Kubernetes secret does not necessarily update environment variables in an already-running container. Restart or roll out the workload after changing a secret that is injected as environment variables.

@@ -5,6 +5,8 @@ import { Check, CircleX, LockKeyhole } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { postpilotApiFetch } from "@/lib/postpilot-api-client";
+
 export function PurchaseOrderActions({ purchaseOrderId, status, mayApprove }: { purchaseOrderId: string; status: string; mayApprove: boolean }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -12,9 +14,14 @@ export function PurchaseOrderActions({ purchaseOrderId, status, mayApprove }: { 
   if (!mayApprove || ["closed", "cancelled"].includes(status)) return null;
   async function update(nextStatus: "approved" | "closed" | "cancelled") {
     setError(null); setPending(nextStatus);
-    const response = await fetch(`/api/purchase-orders/${purchaseOrderId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: nextStatus }) });
-    setPending(null);
-    if (!response.ok) { const body = await response.json().catch(() => null); setError(body?.error ?? "Unable to update PO status."); return; }
+    try {
+      await postpilotApiFetch(`/purchase-orders/${purchaseOrderId}`, { method: "PATCH", body: { status: nextStatus } });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to update PO status.");
+      return;
+    } finally {
+      setPending(null);
+    }
     router.refresh();
   }
   return <div className="flex flex-wrap items-center justify-end gap-2">{error && <p role="alert" className="w-full text-right text-xs text-[#a35e41]">{error}</p>}

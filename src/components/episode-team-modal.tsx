@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { useCallback, useEffect, useState } from "react";
 
 import { EpisodeTeam } from "@/components/episode-team";
@@ -16,7 +18,7 @@ export function EpisodeTeamModal({ episodeId }: { episodeId: string }) {
 
   const load = useCallback(async () => {
     setError("");
-    const response = await fetch(`/api/episodes/${episodeId}/team`);
+    const response = await postpilotUiFetch(`/v1/episodes/${episodeId}/team`);
     if (!response.ok) throw new Error((await response.json()).error ?? "Could not load the episode team.");
     setData(await response.json() as TeamData);
   }, [episodeId]);

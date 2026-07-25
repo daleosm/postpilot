@@ -12,7 +12,8 @@ PostPilot is intended to be understandable and maintainable by post-production t
 ## Contribution standards
 
 - Keep changes small and focused where possible.
-- Use Zod validation for new inputs and Drizzle migrations for schema changes.
+- Use Zod validation for frontend inputs, Pydantic validation for API inputs,
+  and Alembic migrations for schema changes.
 - Scope operational reads and writes to the active organisation.
 - Validate parent/child references within the same organisation before mutation.
 - Use named episode-team signers for sign-off rather than job-title shortcuts.

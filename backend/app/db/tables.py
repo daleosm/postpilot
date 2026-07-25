@@ -1,0 +1,1028 @@
+# ruff: noqa: E501
+"""SQLAlchemy Core definitions for the live PostPilot database contract.
+
+The existing 54-table PostgreSQL schema remains unchanged during the cutover.
+These foundational tables are explicit because every FastAPI request needs to
+authenticate, resolve its active tenant, and enforce capability policies before
+loading operational records. Feature modules add their own narrow table maps.
+"""
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    MetaData,
+    Numeric,
+    String,
+    Table,
+    Text,
+    TypeDecorator,
+    cast,
+)
+from sqlalchemy.dialects.postgresql import ENUM, UUID
+from sqlalchemy.sql import func
+
+metadata = MetaData()
+
+
+class ExistingPostgresEnum(TypeDecorator):
+    """Bind strings as an existing PostgreSQL enum without owning its DDL.
+
+    The schema is migrated by Alembic from the historical SQL snapshot.  Core
+    table maps must still declare native enum columns so asyncpg casts bound
+    values correctly rather than sending them as unconstrained VARCHAR values.
+    Results deliberately stay plain strings: tenant-customizable policies mean
+    the Python map must not impose a stale in-process enum member list.
+    """
+
+    impl = Text
+    cache_ok = True
+
+    def __init__(self, name: str) -> None:
+        self.enum_name = name
+        super().__init__()
+
+    def bind_expression(self, bindvalue):
+        return cast(bindvalue, ENUM(name=self.enum_name, create_type=False))
+
+
+def existing_postgres_enum(name: str) -> ExistingPostgresEnum:
+    return ExistingPostgresEnum(name)
+
+
+users = Table(
+    "users",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column("name", Text),
+    Column("email", Text, nullable=False),
+    Column("password_hash", Text),
+    Column("email_verified", DateTime(timezone=True)),
+)
+
+auth_login_attempts = Table(
+    "auth_login_attempts",
+    metadata,
+    Column("email", Text, primary_key=True),
+    Column("failed_attempts", Integer, nullable=False),
+    Column("window_started_at", DateTime(timezone=True), nullable=False),
+    Column("last_attempt_at", DateTime(timezone=True), nullable=False),
+    Column("locked_until", DateTime(timezone=True)),
+)
+
+organizations = Table(
+    "organizations",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("name", Text, nullable=False),
+    Column("slug", Text, nullable=False),
+    Column("currency", Text, nullable=False),
+)
+
+organization_members = Table(
+    "organization_members",
+    metadata,
+    Column(
+        "organization_id",
+        UUID(as_uuid=False),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("role", existing_postgres_enum("organization_role"), nullable=False),
+    Column("joined_at", DateTime(timezone=True)),
+)
+
+people = Table(
+    "people",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("name", Text, nullable=False),
+    Column("email", Text),
+    Column("role", Text, nullable=False),
+    Column("company", Text),
+    Column("is_active", Boolean, nullable=False, server_default="true"),
+    Column("is_freelancer", Boolean, nullable=False, server_default="false"),
+    Column("availability", existing_postgres_enum("availability_status"), nullable=False, server_default="available"),
+    Column("hourly_rate", Numeric(10, 2)),
+    Column("day_rate", Numeric(10, 2)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+organization_role_policies = Table(
+    "organization_role_policies",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("role", Text, nullable=False),
+    Column("label", Text, nullable=False),
+    Column("permissions", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+# Core production records map the existing PostgreSQL contract. FastAPI owns
+# every live read and mutation; these are table maps, not a second schema.
+shows = Table(
+    "shows",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("title", Text, nullable=False),
+    Column("code", Text, nullable=False),
+    Column("network", Text),
+    Column("production_company", Text),
+    Column("client_company_id", UUID(as_uuid=False)),
+    Column("production_company_id", UUID(as_uuid=False)),
+    Column("delivery_profile_id", UUID(as_uuid=False)),
+    Column("description", Text),
+    Column("time_zone", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+seasons = Table(
+    "seasons",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("show_id", UUID(as_uuid=False), ForeignKey("shows.id", ondelete="CASCADE"), nullable=False),
+    Column("number", Integer, nullable=False),
+    Column("title", Text),
+    Column("start_date", Date),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+post_workflows = Table(
+    "post_workflows",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("show_id", UUID(as_uuid=False)),
+    Column("name", Text, nullable=False),
+    Column("description", Text),
+    Column("is_default", Boolean, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+workflow_stages = Table(
+    "workflow_stages",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("workflow_id", UUID(as_uuid=False), ForeignKey("post_workflows.id", ondelete="CASCADE"), nullable=False),
+    Column("name", Text, nullable=False),
+    Column("key", Text, nullable=False),
+    Column("position", Integer, nullable=False),
+    Column("color", Text, nullable=False),
+    Column("is_terminal", Boolean, nullable=False),
+    Column("can_start_early", Boolean, nullable=False),
+    Column("requires_qc_pass", Boolean, nullable=False),
+    Column("delivery_gate", existing_postgres_enum("delivery_workflow_gate"), nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+workflow_stage_approval_rules = Table(
+    "workflow_stage_approval_rules",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "workflow_stage_id", UUID(as_uuid=False), ForeignKey("workflow_stages.id", ondelete="CASCADE"), nullable=False
+    ),
+    Column("approver_role", Text),
+    Column("label", Text, nullable=False),
+    Column("approval_order", Integer, nullable=False),
+    Column("is_required", Boolean, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+workflow_stage_work_order_templates = Table(
+    "workflow_stage_work_order_templates",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "workflow_stage_id", UUID(as_uuid=False), ForeignKey("workflow_stages.id", ondelete="CASCADE"), nullable=False
+    ),
+    Column("title", Text, nullable=False),
+    Column("description", Text),
+    Column("department", Text),
+    Column("assignee_role", Text),
+    Column("priority", existing_postgres_enum("work_order_priority"), nullable=False),
+    Column("is_blocking", Boolean, nullable=False),
+    Column("position", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+episodes = Table(
+    "episodes",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("season_id", UUID(as_uuid=False), ForeignKey("seasons.id", ondelete="CASCADE"), nullable=False),
+    Column("workflow_stage_id", UUID(as_uuid=False), ForeignKey("workflow_stages.id", ondelete="SET NULL")),
+    Column("workflow_status", existing_postgres_enum("episode_workflow_status"), nullable=False),
+    Column("assigned_producer_id", UUID(as_uuid=False)),
+    Column("editor_id", UUID(as_uuid=False)),
+    Column("colorist_id", UUID(as_uuid=False)),
+    Column("sound_mixer_id", UUID(as_uuid=False)),
+    Column("number", Integer, nullable=False),
+    Column("production_code", Text),
+    Column("title", Text, nullable=False),
+    Column("synopsis", Text),
+    # Retained only as the legacy compatibility value. The current workflow
+    # stage and workflow_status are the operational source of truth.
+    Column("status", existing_postgres_enum("episode_status"), nullable=False),
+    Column("qc_status", existing_postgres_enum("qc_status"), nullable=False),
+    Column("air_date", Date),
+    Column("locked_cut_date", Date),
+    Column("delivery_deadline", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+episode_team_assignments = Table(
+    "episode_team_assignments",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False),
+    Column("person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="CASCADE"), nullable=False),
+    Column("is_lead", Boolean, nullable=False),
+    Column("starts_on", Date),
+    Column("ends_on", Date),
+)
+
+episode_workflow_approvals = Table(
+    "episode_workflow_approvals",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "workflow_stage_id", UUID(as_uuid=False), ForeignKey("workflow_stages.id", ondelete="CASCADE"), nullable=False
+    ),
+    Column(
+        "approval_rule_id",
+        UUID(as_uuid=False),
+        ForeignKey("workflow_stage_approval_rules.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("approver_role", Text),
+    Column("required_person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
+    Column("approver_person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
+    Column("status", existing_postgres_enum("approval_status"), nullable=False),
+    Column("comment", Text),
+    Column("submitted_at", DateTime(timezone=True)),
+    Column("responded_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+episode_workflow_signers = Table(
+    "episode_workflow_signers",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "workflow_stage_approval_rule_id",
+        UUID(as_uuid=False),
+        ForeignKey("workflow_stage_approval_rules.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="RESTRICT"), nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+episode_workflow_exceptions = Table(
+    "episode_workflow_exceptions",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "workflow_stage_id", UUID(as_uuid=False), ForeignKey("workflow_stages.id", ondelete="CASCADE"), nullable=False
+    ),
+    Column("type", existing_postgres_enum("workflow_exception_type"), nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("authorized_by_user_id", Text, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+)
+
+activity_log = Table(
+    "activity_log",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("actor_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("action", Text, nullable=False),
+    Column("entity_type", Text, nullable=False),
+    Column("entity_id", Text, nullable=False),
+    Column("metadata", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+crm_companies = Table(
+    "crm_companies",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("name", Text, nullable=False),
+    Column("type", existing_postgres_enum("crm_company_type"), nullable=False),
+    Column("address", Text),
+    Column("service_category", Text),
+    Column("is_preferred_supplier", Boolean, nullable=False),
+    Column("payment_terms_days", Integer),
+    Column("currency", Text, nullable=False),
+    Column("finance_email", Text),
+    Column("billing_email", Text),
+    Column("account_status", existing_postgres_enum("crm_account_status"), nullable=False),
+    Column("booking_clearance", existing_postgres_enum("crm_booking_clearance"), nullable=False),
+    Column("account_owner_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
+    Column("next_action", Text),
+    Column("next_action_due_at", Date),
+    Column("notes", Text),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+# Invoice configuration belongs to the tenant's legal entity.  Invoices copy
+# the values at issue time, so later settings edits cannot alter a document
+# that has already been issued.
+invoice_settings = Table(
+    "invoice_settings",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("legal_name", Text),
+    Column("legal_address", Text),
+    Column("billing_email", Text),
+    Column("tax_enabled", Boolean, nullable=False),
+    Column("tax_name", Text, nullable=False),
+    Column("tax_registration_number", Text),
+    Column("tax_rate_percent", Numeric(7, 3), nullable=False),
+    Column("payment_terms_days", Integer, nullable=False),
+    Column("payment_instructions", Text),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+crm_contacts = Table(
+    "crm_contacts",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("company_id", UUID(as_uuid=False), ForeignKey("crm_companies.id", ondelete="CASCADE"), nullable=False),
+    Column("name", Text, nullable=False),
+    Column("title", Text),
+    Column("email", Text),
+    Column("phone", Text),
+    Column("contact_type", existing_postgres_enum("crm_contact_type")),
+    Column("is_primary", Boolean, nullable=False),
+    Column("notes", Text),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+show_contacts = Table(
+    "show_contacts",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("show_id", UUID(as_uuid=False), ForeignKey("shows.id", ondelete="CASCADE"), nullable=False),
+    Column("contact_id", UUID(as_uuid=False), ForeignKey("crm_contacts.id", ondelete="CASCADE"), nullable=False),
+    Column("responsibility", existing_postgres_enum("show_contact_responsibility"), nullable=False),
+    Column("relationship", Text, nullable=False),
+    Column("is_approval_contact", Boolean, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+# Read-only mapping used by the production overview.  FastAPI derives show
+# budget health from the live ledger rather than accepting a browser-calculated
+# percentage.  Commercial figures are only returned to actors with the
+# corresponding capability.
+budget_lines = Table(
+    "budget_lines",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("show_id", UUID(as_uuid=False), ForeignKey("shows.id", ondelete="SET NULL")),
+    Column("season_id", UUID(as_uuid=False)),
+    Column("episode_id", UUID(as_uuid=False)),
+    Column("work_order_id", UUID(as_uuid=False)),
+    Column("vendor_invoice_id", UUID(as_uuid=False)),
+    Column("purchase_order_id", UUID(as_uuid=False)),
+    Column("external_cost", Boolean, nullable=False),
+    Column("code", Text),
+    Column("category", Text, nullable=False),
+    Column("description", Text),
+    Column("budgeted_amount", Numeric(14, 2), nullable=False),
+    Column("actual_amount", Numeric(14, 2), nullable=False),
+    Column("currency", Text, nullable=False),
+    Column("cost_type", existing_postgres_enum("cost_type"), nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+rooms = Table(
+    "rooms",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("name", Text, nullable=False),
+    Column("type", Text, nullable=False),
+    Column("location", Text),
+    Column("capacity", Integer),
+    Column("notes", Text),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+catering_settings = Table(
+    "catering_settings",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("markup_percent", Numeric(7, 2), nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+catering_requests = Table(
+    "catering_requests",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("booking_id", UUID(as_uuid=False), ForeignKey("bookings.id", ondelete="SET NULL")),
+    Column("room_id", UUID(as_uuid=False), ForeignKey("rooms.id", ondelete="SET NULL")),
+    Column("requested_by_person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
+    Column("fulfilled_by_person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
+    Column("request_type", existing_postgres_enum("catering_request_type"), nullable=False),
+    Column("item", Text, nullable=False),
+    Column("quantity", Integer, nullable=False),
+    Column("notes", Text),
+    Column("requested_for", DateTime(timezone=True)),
+    Column("status", existing_postgres_enum("catering_request_status"), nullable=False),
+    Column("fulfilled_at", DateTime(timezone=True)),
+    Column("actual_cost", Numeric(12, 2)),
+    Column("billed_amount", Numeric(12, 2)),
+    Column("markup_percent", Numeric(7, 2)),
+    Column("currency", Text, nullable=False),
+    Column("receipt_reference", Text),
+    Column("billable_id", UUID(as_uuid=False)),
+    Column("budget_line_id", UUID(as_uuid=False)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+# Rate cards are the facility's live room/service price source. Person rates
+# remain on the tenant person record, so time confirmations can calculate an
+# internal cost without accepting a browser-supplied amount.
+service_rates = Table(
+    "service_rates",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("name", Text, nullable=False),
+    Column("category", Text, nullable=False),
+    Column("unit", Text, nullable=False),
+    Column("rate", Numeric(14, 2), nullable=False),
+    Column("currency", Text, nullable=False),
+    Column("notes", Text),
+    Column("is_active", Boolean, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+rate_cards = Table(
+    "rate_cards",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("client_company_id", UUID(as_uuid=False)),
+    Column("network", Text),
+    Column("show_id", UUID(as_uuid=False)),
+    Column("episode_id", UUID(as_uuid=False)),
+    Column("name", Text, nullable=False),
+    Column("currency", Text, nullable=False),
+    Column("effective_from", Date),
+    Column("effective_to", Date),
+    Column("is_active", Boolean, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+rate_card_items = Table(
+    "rate_card_items",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("rate_card_id", UUID(as_uuid=False), ForeignKey("rate_cards.id", ondelete="CASCADE"), nullable=False),
+    Column("service_rate_id", UUID(as_uuid=False)),
+    Column("category", Text, nullable=False),
+    Column("unit", Text, nullable=False),
+    Column("rate", Numeric(14, 2), nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+bookings = Table(
+    "bookings",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("room_id", UUID(as_uuid=False), ForeignKey("rooms.id", ondelete="SET NULL")),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="SET NULL")),
+    Column("person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
+    Column("guest_person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
+    Column("title", Text, nullable=False),
+    Column("starts_at", DateTime(timezone=True), nullable=False),
+    Column("ends_at", DateTime(timezone=True), nullable=False),
+    Column("setup_minutes", Integer, nullable=False),
+    Column("handover_minutes", Integer, nullable=False),
+    Column("actual_starts_at", DateTime(timezone=True)),
+    Column("actual_ends_at", DateTime(timezone=True)),
+    Column("approved_overtime_minutes", Integer, nullable=False),
+    Column("is_option", Boolean, nullable=False),
+    Column("option_rank", Integer),
+    Column("status", existing_postgres_enum("booking_status"), nullable=False),
+    Column("booking_type", existing_postgres_enum("booking_type"), nullable=False),
+    Column("notes", Text),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+delivery_profiles = Table(
+    "delivery_profiles",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("client_company_id", UUID(as_uuid=False)),
+    Column("network", Text),
+    Column("show_id", UUID(as_uuid=False)),
+    Column("name", Text, nullable=False),
+    Column("specification_url", Text),
+    Column("is_active", Boolean, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+delivery_profile_items = Table(
+    "delivery_profile_items",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "delivery_profile_id",
+        UUID(as_uuid=False),
+        ForeignKey("delivery_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("component_type", Text, nullable=False),
+    Column("label", Text, nullable=False),
+    Column("required", Boolean, nullable=False),
+    Column("format_specification", Text),
+    Column("version", Text),
+    Column("territory", Text),
+    Column("language", Text),
+    Column("recipient_contact_id", UUID(as_uuid=False)),
+    Column("requires_external_recipient", Boolean, nullable=False),
+    Column("qc_required", Boolean, nullable=False),
+    Column("default_deadline_offset_days", Integer),
+    Column("position", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+episode_delivery_manifests = Table(
+    "episode_delivery_manifests",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False),
+    Column("delivery_profile_id", UUID(as_uuid=False)),
+    Column("profile_name", Text, nullable=False),
+    Column("specification_url", Text),
+    Column("applied_by_user_id", Text),
+    Column("applied_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+episode_delivery_manifest_shares = Table(
+    "episode_delivery_manifest_shares",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "episode_delivery_manifest_id",
+        UUID(as_uuid=False),
+        ForeignKey("episode_delivery_manifests.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="CASCADE"), nullable=False),
+    Column("shared_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+episode_delivery_items = Table(
+    "episode_delivery_items",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "episode_delivery_manifest_id",
+        UUID(as_uuid=False),
+        ForeignKey("episode_delivery_manifests.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False),
+    Column("delivery_profile_item_id", UUID(as_uuid=False)),
+    Column("component_type", Text, nullable=False),
+    Column("label", Text, nullable=False),
+    Column("required", Boolean, nullable=False),
+    Column("format_specification", Text),
+    Column("version", Text),
+    Column("territory", Text),
+    Column("language", Text),
+    Column("recipient_contact_id", UUID(as_uuid=False)),
+    Column("recipient_name", Text),
+    Column("recipient_email", Text),
+    Column("requires_external_recipient", Boolean, nullable=False),
+    Column("qc_required", Boolean, nullable=False),
+    Column("status", existing_postgres_enum("delivery_item_status"), nullable=False),
+    Column("due_date", Date),
+    Column("external_url", Text),
+    Column("external_reference", Text),
+    Column("is_externally_shared", Boolean, nullable=False),
+    Column("submission_method", Text),
+    Column("submitted_by_person_id", UUID(as_uuid=False)),
+    Column("submitted_at", DateTime(timezone=True)),
+    Column("qc_result", existing_postgres_enum("delivery_qc_result"), nullable=False),
+    Column("recipient_snapshot_at", DateTime(timezone=True)),
+    Column("receipt_confirmed_at", DateTime(timezone=True)),
+    Column("receipt_confirmed_by", Text),
+    Column("rejection_reason", Text),
+    Column("waiver_reason", Text),
+    Column("position", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+# A controlled local substitute for recipient confirmation.  This remains a
+# separate tenant-owned audit record rather than a mutable flag on an episode
+# or workflow stage.
+episode_delivery_acceptance_exceptions = Table(
+    "episode_delivery_acceptance_exceptions",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "workflow_stage_id", UUID(as_uuid=False), ForeignKey("workflow_stages.id", ondelete="CASCADE"), nullable=False
+    ),
+    Column("reason", Text, nullable=False),
+    Column("authorised_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("authorised_at", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+post_work_orders = Table(
+    "post_work_orders",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False),
+    Column("workflow_stage_id", UUID(as_uuid=False)),
+    Column("booking_id", UUID(as_uuid=False)),
+    Column("work_type", existing_postgres_enum("work_order_work_type"), nullable=False),
+    Column("vendor_company_id", UUID(as_uuid=False)),
+    Column("purchase_order_id", UUID(as_uuid=False)),
+    Column("client_purchase_order_id", UUID(as_uuid=False)),
+    Column("qc_issue_id", UUID(as_uuid=False)),
+    Column("delivery_item_id", UUID(as_uuid=False), ForeignKey("episode_delivery_items.id", ondelete="SET NULL")),
+    Column("kind", existing_postgres_enum("work_order_kind"), nullable=False),
+    Column("title", Text, nullable=False),
+    Column("description", Text),
+    Column("department", Text),
+    Column("assignee_person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
+    Column("assignee_role", Text),
+    Column("priority", existing_postgres_enum("work_order_priority"), nullable=False),
+    Column("is_blocking", Boolean, nullable=False),
+    Column("status", existing_postgres_enum("work_order_status"), nullable=False),
+    Column("billing_scope", existing_postgres_enum("work_order_billing_scope"), nullable=False),
+    Column("billing_status", existing_postgres_enum("work_order_billing_status"), nullable=False),
+    Column("estimated_amount", Numeric(14, 2)),
+    Column("client_quote_amount", Numeric(14, 2)),
+    Column("actual_amount", Numeric(14, 2)),
+    Column("currency", Text, nullable=False),
+    Column("client_quote_currency", Text),
+    Column("billing_notes", Text),
+    Column("external_url", Text),
+    Column("due_at", DateTime(timezone=True)),
+    Column("created_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("approved_by_person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
+    Column("approved_at", DateTime(timezone=True)),
+    Column("approval_note", Text),
+    Column("completed_by_person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
+    Column("completed_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+post_work_order_items = Table(
+    "post_work_order_items",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("work_order_id", UUID(as_uuid=False), ForeignKey("post_work_orders.id", ondelete="CASCADE"), nullable=False),
+    Column("type", existing_postgres_enum("work_order_item_type"), nullable=False),
+    Column("description", Text, nullable=False),
+    Column("quantity", Numeric(12, 2), nullable=False),
+    Column("unit", Text, nullable=False),
+    Column("unit_rate", Numeric(14, 2), nullable=False),
+    Column("discount_percent", Numeric(7, 3), nullable=False),
+    Column("notes", Text),
+    Column("position", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+# Work orders only need the narrow PO shape required to validate a reference
+# during the transition. Balance calculation remains in the commercial module.
+purchase_orders = Table(
+    "purchase_orders",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("vendor_company_id", UUID(as_uuid=False), nullable=False),
+    Column("show_id", UUID(as_uuid=False)),
+    Column("episode_id", UUID(as_uuid=False)),
+    Column("po_number", Text, nullable=False),
+    Column("currency", Text, nullable=False),
+    Column("approved_amount", Numeric(14, 2), nullable=False),
+    Column("issue_date", Date),
+    Column("expiry_date", Date),
+    Column("status", existing_postgres_enum("purchase_order_status"), nullable=False),
+    Column("notes", Text),
+    Column("external_document_url", Text),
+    Column("created_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+client_purchase_orders = Table(
+    "client_purchase_orders",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "client_company_id", UUID(as_uuid=False), ForeignKey("crm_companies.id", ondelete="RESTRICT"), nullable=False
+    ),
+    Column("show_id", UUID(as_uuid=False), ForeignKey("shows.id", ondelete="SET NULL")),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="SET NULL")),
+    Column("po_number", Text, nullable=False),
+    Column("currency", Text, nullable=False),
+    Column("approved_amount", Numeric(14, 2), nullable=False),
+    Column("issue_date", Date),
+    Column("expiry_date", Date),
+    Column("status", existing_postgres_enum("client_purchase_order_status"), nullable=False),
+    Column("notes", Text),
+    Column("external_document_url", Text),
+    Column("created_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+client_purchase_order_allocations = Table(
+    "client_purchase_order_allocations",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "client_purchase_order_id",
+        UUID(as_uuid=False),
+        ForeignKey("client_purchase_orders.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("allocation_type", existing_postgres_enum("client_purchase_order_allocation_type"), nullable=False),
+    Column("billable_id", UUID(as_uuid=False)),
+    Column("client_invoice_id", UUID(as_uuid=False)),
+    Column("client_invoice_item_id", UUID(as_uuid=False)),
+    Column("work_order_id", UUID(as_uuid=False), ForeignKey("post_work_orders.id", ondelete="CASCADE")),
+    Column("change_order_reference", Text),
+    Column("amount", Numeric(14, 2), nullable=False),
+    Column("overrun_authorised", Boolean, nullable=False),
+    Column("allocation_date", Date, nullable=False),
+    Column("reference", Text),
+    Column("description", Text),
+    Column("created_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+# Client billables and invoices are separate from the vendor procurement
+# ledger and are owned by the same FastAPI/PostgreSQL contract.
+client_invoices = Table(
+    "client_invoices",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("sequence", Integer, nullable=False),
+    Column("invoice_number", Text, nullable=False),
+    Column("client_company_id", UUID(as_uuid=False), ForeignKey("crm_companies.id", ondelete="SET NULL")),
+    Column("show_id", UUID(as_uuid=False), ForeignKey("shows.id", ondelete="SET NULL")),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="SET NULL")),
+    Column("status", existing_postgres_enum("client_invoice_status"), nullable=False),
+    Column("invoice_date", Date, nullable=False),
+    Column("due_date", Date, nullable=False),
+    Column("currency", Text, nullable=False),
+    Column("subtotal_amount", Numeric(14, 2), nullable=False),
+    Column("tax_enabled", Boolean, nullable=False),
+    Column("tax_name", Text, nullable=False),
+    Column("tax_rate_percent", Numeric(7, 3), nullable=False),
+    Column("tax_amount", Numeric(14, 2), nullable=False),
+    Column("total_amount", Numeric(14, 2), nullable=False),
+    Column("issuer_name", Text, nullable=False),
+    Column("issuer_address", Text),
+    Column("issuer_email", Text),
+    Column("issuer_tax_registration_number", Text),
+    Column("client_name", Text, nullable=False),
+    Column("client_address", Text),
+    Column("client_email", Text),
+    Column("payment_instructions", Text),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+billables = Table(
+    "billables",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("show_id", UUID(as_uuid=False), ForeignKey("shows.id", ondelete="SET NULL")),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="SET NULL")),
+    Column("client_invoice_id", UUID(as_uuid=False), ForeignKey("client_invoices.id", ondelete="SET NULL")),
+    Column(
+        "client_purchase_order_id", UUID(as_uuid=False), ForeignKey("client_purchase_orders.id", ondelete="SET NULL")
+    ),
+    Column("vendor", Text, nullable=False),
+    Column("reference", Text),
+    Column("description", Text),
+    Column("amount", Numeric(14, 2), nullable=False),
+    Column("currency", Text, nullable=False),
+    Column("status", existing_postgres_enum("billable_status"), nullable=False),
+    Column("invoice_date", Date),
+    Column("due_date", Date),
+    Column("rate_source", Text),
+    Column("rate_snapshot", JSON),
+    Column("override_reason", Text),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+client_invoice_items = Table(
+    "client_invoice_items",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "client_invoice_id", UUID(as_uuid=False), ForeignKey("client_invoices.id", ondelete="CASCADE"), nullable=False
+    ),
+    Column("billable_id", UUID(as_uuid=False), ForeignKey("billables.id", ondelete="SET NULL")),
+    Column(
+        "client_purchase_order_id", UUID(as_uuid=False), ForeignKey("client_purchase_orders.id", ondelete="SET NULL")
+    ),
+    Column("description", Text, nullable=False),
+    Column("reference", Text),
+    Column("quantity", Numeric(12, 3), nullable=False),
+    Column("unit_amount", Numeric(14, 2), nullable=False),
+    Column("amount", Numeric(14, 2), nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+purchase_order_allocations = Table(
+    "purchase_order_allocations",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "purchase_order_id", UUID(as_uuid=False), ForeignKey("purchase_orders.id", ondelete="CASCADE"), nullable=False
+    ),
+    Column("allocation_type", existing_postgres_enum("purchase_order_allocation_type"), nullable=False),
+    Column("work_order_id", UUID(as_uuid=False)),
+    Column("budget_line_id", UUID(as_uuid=False)),
+    Column("vendor_invoice_id", UUID(as_uuid=False)),
+    Column("amount", Numeric(14, 2), nullable=False),
+    Column("allocation_date", Date, nullable=False),
+    Column("reference", Text),
+    Column("description", Text),
+    Column("created_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+vendor_invoices = Table(
+    "vendor_invoices",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("vendor_company_id", UUID(as_uuid=False), nullable=False),
+    Column("work_order_id", UUID(as_uuid=False)),
+    Column("show_id", UUID(as_uuid=False)),
+    Column("episode_id", UUID(as_uuid=False)),
+    Column("invoice_number", Text, nullable=False),
+    Column("description", Text),
+    Column("amount", Numeric(14, 2), nullable=False),
+    Column("currency", Text, nullable=False),
+    Column("status", existing_postgres_enum("vendor_invoice_status"), nullable=False),
+    Column("invoice_date", Date),
+    Column("due_date", Date),
+    Column("external_document_url", Text),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+qc_reports = Table(
+    "qc_reports",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False),
+    Column("status", existing_postgres_enum("qc_report_status"), nullable=False),
+    Column("report_url", Text),
+    Column("checksum", Text),
+    Column("summary", Text),
+    Column("waiver_reason", Text),
+    Column("waived_by_person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
+    Column("completed_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+qc_issues = Table(
+    "qc_issues",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("qc_report_id", UUID(as_uuid=False), ForeignKey("qc_reports.id", ondelete="CASCADE"), nullable=False),
+    Column("code", Text),
+    Column("severity", Text, nullable=False),
+    Column("description", Text, nullable=False),
+    Column("timecode_seconds", Numeric(12, 3)),
+    Column("status", existing_postgres_enum("qc_issue_status"), nullable=False),
+    Column("resolution", Text),
+    Column("resolved_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+notifications = Table(
+    "notifications",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="CASCADE")),
+    Column("crm_contact_id", UUID(as_uuid=False), ForeignKey("crm_contacts.id", ondelete="SET NULL")),
+    Column("recipient_email", Text),
+    Column("activity_id", UUID(as_uuid=False), ForeignKey("activity_log.id", ondelete="CASCADE")),
+    Column("title", Text, nullable=False),
+    Column("body", Text, nullable=False),
+    Column("read_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+# FastAPI owns these opaque, revocable sessions. Hashing tokens means a database
+# export cannot be replayed as an authenticated browser session.
+api_sessions = Table(
+    "api_sessions",
+    metadata,
+    Column("token_hash", String(64), primary_key=True),
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("impersonated_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("active_organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="SET NULL")),
+    Column("active_show_id", UUID(as_uuid=False), ForeignKey("shows.id", ondelete="SET NULL"), nullable=True),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("last_seen_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)

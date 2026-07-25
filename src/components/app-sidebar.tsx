@@ -1,9 +1,23 @@
 import Link from "next/link";
-import { Building2, CalendarRange, Clock3, Coffee, Clapperboard, DollarSign, FileCheck2, House, Layers3, Settings, Truck, UsersRound } from "lucide-react";
+import {
+  Building2,
+  CalendarRange,
+  Clock3,
+  Coffee,
+  Clapperboard,
+  DollarSign,
+  FileCheck2,
+  House,
+  Layers3,
+  Settings,
+  Truck,
+  UsersRound,
+} from "lucide-react";
+
 import { LogoutButton } from "@/components/logout-button";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can, getCurrentPerson } from "@/lib/permissions";
-import { hasApprovalWorkspace, listWorkOrderInbox, listWorkflowSignOffInbox } from "@/server/data";
+import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 
 const navigation = [
   { label: "Dashboard", icon: House, href: "/" },
@@ -20,17 +34,79 @@ const navigation = [
 ];
 
 export async function AppSidebar() {
-  const [person, context, mayManageUsers, mayManageWorkflowConfiguration, mayManageDeliveryProfiles, maySignOffWorkflowStages, permitted] = await Promise.all([
-    getCurrentPerson(), getActiveOrganizationContext(), can("manage_users"), can("manage_workflow_configuration"), can("manage_delivery_profiles"), can("sign_off_workflow_stages"),
-    Promise.all(navigation.map(async (item) => !item.permissions || (await Promise.all(item.permissions.map((permission) => can(permission)))).some(Boolean) ? item : null)),
+  const [person, context, mayManageUsers, mayManageWorkflowConfiguration, mayManageDeliveryProfiles, permitted] = await Promise.all([
+    getCurrentPerson(),
+    getActiveOrganizationContext(),
+    can("manage_users"),
+    can("manage_workflow_configuration"),
+    can("manage_delivery_profiles"),
+    Promise.all(
+      navigation.map(async (item) =>
+        !item.permissions || (await Promise.all(item.permissions.map((permission) => can(permission)))).some(Boolean)
+          ? item
+          : null,
+      ),
+    ),
   ]);
-  const [pending, hasApprovalAccess] = context?.organization && context.person ? await Promise.all([
-    Promise.all([maySignOffWorkflowStages ? listWorkflowSignOffInbox(context.organization.organizationId, context.userId) : [], listWorkOrderInbox(context.organization.organizationId, context.userId)]).then((items) => items.reduce((total, item) => total + item.length, 0)),
-    hasApprovalWorkspace(context.organization.organizationId, context.userId),
-  ]) : [0, false];
+  const [pending, hasApprovalAccess] = await (context?.organization && context.person
+    ? loadFastApprovalSummary()
+    : Promise.resolve([0, false] as [number, boolean]));
   const visible = permitted.filter((item): item is NonNullable<typeof item> => Boolean(item));
   if (hasApprovalAccess) visible.push({ label: "Approvals", icon: FileCheck2, href: "/review" });
-  const settingsHref = mayManageWorkflowConfiguration ? "/settings/workflow" : mayManageUsers ? "/settings/users" : "/settings/delivery-profiles";
-  return <aside className="fixed inset-y-0 left-0 z-20 hidden w-[232px] flex-col border-r border-[#e6e5e1] bg-[#fbfbf9] px-3 py-5 md:flex"><Link href="/" className="mb-8 flex items-center gap-2.5 px-2"><span className="flex h-7 w-7 items-center justify-center rounded-[7px] bg-[#283131] text-[11px] font-bold tracking-[-0.1em] text-white">PH</span><span className="text-[15px] font-semibold tracking-[-0.025em] text-[#2d3332]">PostPilot</span></Link><nav className="space-y-1">{visible.map(({ label, icon: Icon, href }) => <Link key={label} href={href} className="group flex h-9 items-center gap-3 rounded-md px-3 text-[13px] text-[#6d7270] transition hover:bg-[#f0f1ee] hover:text-[#353a39]"><Icon size={16} strokeWidth={1.75} /><span className="flex-1">{label}</span>{label === "Approvals" && pending > 0 && <span className="rounded-full bg-[#e8d7c8] px-1.5 py-0.5 text-[10px] font-semibold text-[#976039]">{pending}</span>}</Link>)}</nav><div className="mt-auto border-t border-[#e9e8e4] pt-3">{(mayManageWorkflowConfiguration || mayManageUsers || mayManageDeliveryProfiles) && <Link href={settingsHref} className="flex h-9 items-center gap-3 rounded-md px-3 text-[13px] text-[#6d7270] transition hover:bg-[#f0f1ee] hover:text-[#353a39]"><Settings size={16} strokeWidth={1.75} /> Settings</Link>}<div className="mt-4 flex items-center gap-2.5 px-3 pb-1"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#b3937e] text-[10px] font-semibold text-white">{initials(person?.name)}</span><div className="min-w-0"><p className="truncate text-xs font-medium text-[#3e4342]">{person?.name ?? "PostPilot user"}</p><p className="truncate text-[10px] capitalize text-[#8a8e8c]">{person?.role?.replaceAll("_", " ") ?? "Member"}</p></div></div><LogoutButton /></div></aside>;
+  const settingsHref = mayManageWorkflowConfiguration
+    ? "/settings/workflow"
+    : mayManageUsers
+      ? "/settings/users"
+      : "/settings/delivery-profiles";
+
+  return (
+    <aside className="fixed inset-y-0 left-0 z-20 hidden w-[232px] flex-col border-r border-[#e6e5e1] bg-[#fbfbf9] px-3 py-5 md:flex">
+      <Link href="/" className="mb-8 flex items-center gap-2.5 px-2">
+        <span className="flex h-7 w-7 items-center justify-center rounded-[7px] bg-[#283131] text-[11px] font-bold tracking-[-0.1em] text-white">PH</span>
+        <span className="text-[15px] font-semibold tracking-[-0.025em] text-[#2d3332]">PostPilot</span>
+      </Link>
+      <nav className="space-y-1">
+        {visible.map(({ label, icon: Icon, href }) => (
+          <Link key={label} href={href} className="group flex h-9 items-center gap-3 rounded-md px-3 text-[13px] text-[#6d7270] transition hover:bg-[#f0f1ee] hover:text-[#353a39]">
+            <Icon size={16} strokeWidth={1.75} />
+            <span className="flex-1">{label}</span>
+            {label === "Approvals" && pending > 0 && <span className="rounded-full bg-[#e8d7c8] px-1.5 py-0.5 text-[10px] font-semibold text-[#976039]">{pending}</span>}
+          </Link>
+        ))}
+      </nav>
+      <div className="mt-auto border-t border-[#e9e8e4] pt-3">
+        {(mayManageWorkflowConfiguration || mayManageUsers || mayManageDeliveryProfiles) && (
+          <Link href={settingsHref} className="flex h-9 items-center gap-3 rounded-md px-3 text-[13px] text-[#6d7270] transition hover:bg-[#f0f1ee] hover:text-[#353a39]">
+            <Settings size={16} strokeWidth={1.75} /> Settings
+          </Link>
+        )}
+        <div className="mt-4 flex items-center gap-2.5 px-3 pb-1">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#b3937e] text-[10px] font-semibold text-white">{initials(person?.name)}</span>
+          <div className="min-w-0">
+            <p className="truncate text-xs font-medium text-[#3e4342]">{person?.name ?? "PostPilot user"}</p>
+            <p className="truncate text-[10px] capitalize text-[#8a8e8c]">{person?.role?.replaceAll("_", " ") ?? "Member"}</p>
+          </div>
+        </div>
+        <LogoutButton />
+      </div>
+    </aside>
+  );
 }
-function initials(name?: string) { return (name ?? "PP").split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase(); }
+
+async function loadFastApprovalSummary(): Promise<[number, boolean]> {
+  const inbox = await postpilotApiServerFetch<{
+    has_workspace: boolean;
+    sign_offs: Array<{ id: string }>;
+    work_orders: Array<{ id: string }>;
+  }>("/approvals");
+  return [inbox.sign_offs.length + inbox.work_orders.length, inbox.has_workspace];
+}
+
+function initials(name?: string) {
+  return (name ?? "PP")
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}

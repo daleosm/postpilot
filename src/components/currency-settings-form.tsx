@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { Button } from "@heroui/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -20,7 +22,7 @@ export function CurrencySettingsForm({ initialCurrency }: { initialCurrency: str
 
   async function save() {
     setSaving(true); setMessage("");
-    const response = await fetch("/api/settings/currency", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currency }) });
+    const response = await postpilotUiFetch("/v1/settings/currency", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currency }) });
     const body = await response.json().catch(() => null);
     setSaving(false);
     if (!response.ok) return setMessage(body?.error ?? "Could not save the reporting currency.");

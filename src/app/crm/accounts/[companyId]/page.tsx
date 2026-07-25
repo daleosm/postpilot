@@ -3,11 +3,10 @@ import { ArrowLeft, CalendarClock, ContactRound, FileText, Landmark, ReceiptText
 import { notFound, redirect } from "next/navigation";
 
 import { CrmAccountDetailsForm } from "@/components/crm-account-details-form";
-import { ClientPurchaseOrdersSummary } from "@/components/client-purchase-orders-summary";
+import { ClientPurchaseOrdersSummary, type ClientPurchaseOrderCommercialLinks, type ClientPurchaseOrderSummary } from "@/components/client-purchase-orders-summary";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
-import { getCrmAccount } from "@/server/data/crm";
-import { getClientPurchaseOrderCommercialLinksForOrganization, listClientPurchaseOrdersForAccount } from "@/server/data/client-purchase-orders";
+import { PostPilotApiServerError, postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 
 export default async function CrmAccountPage({ params }: { params: Promise<{ companyId: string }> }) {
   const [mayManageShows, mayManageBudget] = await Promise.all([can("manage_shows"), can("manage_budget")]);
@@ -15,16 +14,14 @@ export default async function CrmAccountPage({ params }: { params: Promise<{ com
   const context = await getActiveOrganizationContext();
   if (!context?.organization) notFound();
   const { companyId } = await params;
-  const data = await getCrmAccount(context.organization.organizationId, companyId, { includeVendorProcurement: mayManageBudget });
+  const data = await loadCrmAccount(companyId, mayManageBudget);
   if (!data) notFound();
   const { company } = data;
   const owner = data.owners.find((person) => person.id === company.accountOwnerId);
   const isVendor = company.type === "vendor";
   const isClientBillingAccount = company.type === "client" || company.type === "network";
-  const clientPurchaseOrders = mayManageBudget && isClientBillingAccount
-    ? await listClientPurchaseOrdersForAccount(context.organization.organizationId, company.id)
-    : [];
-  const clientPurchaseOrderLinks = await getClientPurchaseOrderCommercialLinksForOrganization(context.organization.organizationId, clientPurchaseOrders.map((order) => order.id));
+  const clientPurchaseOrders = mayManageBudget && isClientBillingAccount ? data.clientPurchaseOrders : [];
+  const clientPurchaseOrderLinks = data.clientPurchaseOrderLinks;
 
   return <div className="space-y-5">
     <Link href="/crm" className="flex w-fit items-center gap-1 text-xs font-medium text-[#617b75]"><ArrowLeft size={14}/> Clients & vendors</Link>
@@ -78,6 +75,116 @@ export default async function CrmAccountPage({ params }: { params: Promise<{ com
       <div className="divide-y divide-[#efeeea]">{data.activities.map((activity) => <div key={activity.id} className="flex justify-between gap-4 px-5 py-3"><div className="min-w-0"><p className="text-sm font-medium text-[#46504b]">{activity.action.replaceAll(".", " ").replaceAll("_", " ")}</p><p className="mt-1 truncate text-xs text-[#7d837f]">{activity.detail}</p></div><time className="shrink-0 text-xs text-[#858a87]" dateTime={activity.createdAt.toISOString()}>{formatDateTime(activity.createdAt)}</time></div>)}{!data.activities.length && <Empty message="No commercial activity recorded for this account yet." />}</div>
     </Panel>
   </div>;
+}
+
+type CrmAccountData = {
+  company: {
+    id: string; name: string; type: string; address: string | null; serviceCategory: string | null;
+    isPreferredSupplier: boolean; paymentTermsDays: number | null; currency: string; financeEmail: string | null;
+    billingEmail: string | null; accountStatus: "active" | "on_hold" | "inactive"; bookingClearance: "clear" | "authorisation_required" | "finance_approval" | "on_hold"; accountOwnerId: string | null;
+    nextAction: string | null; nextActionDueAt: string | null; notes: string | null;
+  };
+  contacts: Array<{ id: string; companyId: string; name: string; title: string | null; email: string | null; phone: string | null; contactType: string; isPrimary: boolean; notes: string | null }>;
+  shows: Array<{ id: string; title: string; code: string; network: string | null; activeEpisodeCount: number }>;
+  activeShows: Array<{ id: string; title: string; code: string; network: string | null; activeEpisodeCount: number }>;
+  pastShows: Array<{ id: string; title: string; code: string; network: string | null; activeEpisodeCount: number }>;
+  invoices: Array<{ id: string; invoiceNumber: string; amount: number; currency: string; status: string; dueDate: string | null; createdAt: Date }>;
+  workOrders: Array<{ id: string; title: string; status: string; purchaseOrderId: string | null; dueAt: Date | null; episodeNumber: number; episodeTitle: string; createdAt: Date }>;
+  vendorProcurement: { active: VendorPurchaseOrder[]; closed: VendorPurchaseOrder[] } | null;
+  budgetExposure: number;
+  owners: Array<{ id: string; name: string; role: string }>;
+  rateCards: Array<{ id: string; name: string; itemCount: number; effectiveFrom: string | null; isActive: boolean }>;
+  activities: Array<{ id: string; action: string; detail: string; createdAt: Date }>;
+  financials: { invoicedAmount: number };
+  clientPurchaseOrders: ClientPurchaseOrderSummary[];
+  clientPurchaseOrderLinks: ClientPurchaseOrderCommercialLinks;
+};
+
+/**
+ * Keep the account screen on the FastAPI read boundary. The small adapter
+ * preserves its presentational shape without a duplicate query path.
+ */
+async function loadCrmAccount(companyId: string, includeVendorProcurement: boolean): Promise<CrmAccountData | null> {
+  type Raw = {
+    account_kind: "client" | "vendor";
+    company: Record<string, unknown>;
+    contacts: Array<Record<string, unknown>>;
+    shows?: Array<Record<string, unknown>>;
+    client_purchase_orders?: Array<Record<string, unknown>>;
+    commercial_summary?: Record<string, unknown>;
+    client_billable_work_orders?: Array<Record<string, unknown>>;
+    purchase_orders?: Array<Record<string, unknown>>;
+    active_work_orders?: Array<Record<string, unknown>>;
+    vendor_invoices?: Array<Record<string, unknown>>;
+    spend_summary?: Record<string, unknown>;
+  };
+  let raw: Raw;
+  try {
+    raw = await postpilotApiServerFetch<Raw>(`/crm/accounts/${companyId}`);
+  } catch (error) {
+    if (error instanceof PostPilotApiServerError && error.status === 404) return null;
+    throw error;
+  }
+  const company = {
+    id: String(raw.company.id), name: String(raw.company.name), type: String(raw.company.type),
+    address: raw.company.address ? String(raw.company.address) : null,
+    serviceCategory: raw.company.service_category ? String(raw.company.service_category) : null,
+    isPreferredSupplier: Boolean(raw.company.is_preferred_supplier),
+    paymentTermsDays: raw.company.payment_terms_days === null || raw.company.payment_terms_days === undefined ? null : Number(raw.company.payment_terms_days),
+    currency: String(raw.company.currency), financeEmail: raw.company.finance_email ? String(raw.company.finance_email) : null,
+    billingEmail: raw.company.billing_email ? String(raw.company.billing_email) : null,
+    accountStatus: String(raw.company.account_status) as CrmAccountData["company"]["accountStatus"],
+    bookingClearance: String(raw.company.booking_clearance) as CrmAccountData["company"]["bookingClearance"],
+    accountOwnerId: raw.company.account_owner_id ? String(raw.company.account_owner_id) : null,
+    nextAction: raw.company.next_action ? String(raw.company.next_action) : null,
+    nextActionDueAt: raw.company.next_action_due_at ? String(raw.company.next_action_due_at) : null,
+    notes: raw.company.notes ? String(raw.company.notes) : null,
+  };
+  const shows = (raw.shows ?? []).map((show) => ({
+    id: String(show.id), title: String(show.title), code: String(show.code), network: show.network ? String(show.network) : null,
+    activeEpisodeCount: Number(show.active_episode_count ?? 0),
+  }));
+  const contacts = raw.contacts.map((contact) => ({
+    id: String(contact.id), companyId: String(contact.company_id), name: String(contact.name), title: contact.title ? String(contact.title) : null,
+    email: contact.email ? String(contact.email) : null, phone: contact.phone ? String(contact.phone) : null,
+    contactType: String(contact.contact_type), isPrimary: Boolean(contact.is_primary), notes: contact.notes ? String(contact.notes) : null,
+  }));
+  const workOrders = (raw.active_work_orders ?? raw.client_billable_work_orders ?? []).map((item) => ({
+    id: String(item.id), title: String(item.title), status: String(item.status), purchaseOrderId: item.purchase_order_id ? String(item.purchase_order_id) : null,
+    dueAt: item.due_at ? new Date(String(item.due_at)) : null, episodeNumber: Number(item.episode_number ?? 0),
+    episodeTitle: item.episode_title ? String(item.episode_title) : "Episode", createdAt: new Date(),
+  }));
+  const invoices = (raw.vendor_invoices ?? []).map((item) => ({
+    id: String(item.id), invoiceNumber: String(item.invoice_number), amount: Number(item.amount ?? 0), currency: String(item.currency),
+    status: String(item.status), dueDate: item.due_date ? String(item.due_date) : null, createdAt: new Date(String(item.invoice_date ?? Date.now())),
+  }));
+  const purchaseOrders = (raw.purchase_orders ?? []).map((item) => ({
+    id: String(item.id), poNumber: String(item.po_number), currency: company.currency, status: String(item.status),
+    expiryDate: item.expiry_date ? String(item.expiry_date) : null, authorisedAmount: Number(item.authorised_amount ?? 0),
+    committedAmount: Number(item.committed_amount ?? 0), actualInvoicedAmount: Number(item.actual_invoiced_amount ?? 0),
+    remainingAmount: Number(item.remaining_amount ?? 0), expiryWarning: null as "expired" | "expiring" | null,
+    workOrders: workOrders.filter((order) => order.purchaseOrderId === String(item.id)),
+  }));
+  const clientPurchaseOrders = (raw.client_purchase_orders ?? []).map((item) => ({
+    id: String(item.id), clientCompanyId: company.id, clientName: company.name, showId: item.show_id ? String(item.show_id) : null,
+    showTitle: null, episodeId: item.episode_id ? String(item.episode_id) : null, episodeNumber: null, episodeTitle: null,
+    poNumber: String(item.po_number), currency: company.currency, approvedAmount: Number(item.authorised_amount ?? 0),
+    issueDate: null, expiryDate: item.expiry_date ? String(item.expiry_date) : null, status: String(item.status), notes: null,
+    externalDocumentUrl: null, createdAt: new Date(), updatedAt: new Date(), authorisedAmount: Number(item.authorised_amount ?? 0),
+    committedToBillAmount: Number(item.committed_to_bill_amount ?? 0), invoicedAmount: Number(item.invoiced_amount ?? 0),
+    remainingAmount: Number(item.remaining_amount ?? 0), varianceAmount: Number(item.variance_amount ?? 0),
+  })) as unknown as ClientPurchaseOrderSummary[];
+  const budgetExposure = Number((raw.commercial_summary ?? raw.spend_summary ?? {}).budget_actual_amount ?? 0);
+  const invoicedAmount = Number((raw.commercial_summary ?? raw.spend_summary ?? {}).billable_amount ?? (raw.spend_summary ?? {}).actual_invoiced_amount ?? 0);
+  return {
+    company, contacts, shows, activeShows: shows.filter((show) => show.activeEpisodeCount > 0), pastShows: shows.filter((show) => show.activeEpisodeCount === 0),
+    invoices, workOrders, vendorProcurement: raw.account_kind === "vendor" && includeVendorProcurement ? {
+      active: purchaseOrders.filter((order) => ["draft", "approved"].includes(order.status)),
+      closed: purchaseOrders.filter((order) => order.status === "closed"),
+    } : null,
+    budgetExposure, owners: [], rateCards: [], activities: [], financials: { invoicedAmount },
+    clientPurchaseOrders, clientPurchaseOrderLinks: { billablesByPurchaseOrder: {}, invoicesByPurchaseOrder: {} },
+  } as unknown as CrmAccountData;
 }
 
 function AccountStatus({ status }: { status: string }) { return <span className={`rounded px-2 py-0.5 text-[10px] font-semibold capitalize ${status === "active" ? "bg-[#e5eee8] text-[#477263]" : status === "on_hold" ? "bg-[#f6ebde] text-[#9a613f]" : "bg-[#f1f0ed] text-[#707672]"}`}>{status.replaceAll("_", " ")}</span>; }

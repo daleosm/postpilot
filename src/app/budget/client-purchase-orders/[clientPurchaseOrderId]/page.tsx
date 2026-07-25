@@ -5,21 +5,22 @@ import { notFound, redirect } from "next/navigation";
 import { ClientPurchaseOrderActions } from "@/components/client-purchase-order-actions";
 import { ClientPurchaseOrderForm } from "@/components/client-purchase-order-form";
 import { getActiveOrganizationContext } from "@/lib/organizations";
+import { getFastApiClientPurchaseOrder, getFastApiCommercialFormOptions } from "@/lib/postpilot-api-commercial";
 import { can } from "@/lib/permissions";
-import { listCrmCompanyOptions } from "@/server/data/crm";
-import { listEpisodes } from "@/server/data/episodes";
-import { getActiveClientPurchaseOrderDetail } from "@/server/data/client-purchase-orders";
-import { listShowOptions } from "@/server/data/shows";
 
 export default async function ClientPurchaseOrderDetailPage({ params }: { params: Promise<{ clientPurchaseOrderId: string }> }) {
   if (!(await can("manage_budget"))) redirect("/");
   const context = await getActiveOrganizationContext();
   if (!context?.organization) redirect("/");
   const { clientPurchaseOrderId } = await params;
-  const [order, companies, shows, episodes, mayApprove] = await Promise.all([getActiveClientPurchaseOrderDetail(clientPurchaseOrderId), listCrmCompanyOptions(context.organization.organizationId), listShowOptions(context.organization.organizationId), listEpisodes(context.organization.organizationId), can("approve_budget_overruns")]);
+  const [order, options, mayApprove] = await Promise.all([
+    getFastApiClientPurchaseOrder(clientPurchaseOrderId).catch(() => null),
+    getFastApiCommercialFormOptions(),
+    can("approve_budget_overruns"),
+  ]);
   if (!order) notFound();
   const expiry = expiryState(order.expiryDate, order.status); const isOverAuthorised = order.remainingAmount < 0; const isExhausted = order.status === "active" && order.remainingAmount === 0;
-  const formOptions = { currency: context.organization.currency, clients: companies.filter((company) => company.type !== "vendor"), shows, episodes: episodes.map((episode) => ({ id: episode.id, showId: episode.showId, showTitle: episode.showTitle, number: episode.number, title: episode.title })) };
+  const formOptions = { currency: context.organization.currency, clients: options.companies.filter((company) => company.type !== "vendor"), shows: options.shows, episodes: options.episodes };
   return <div className="space-y-5"><header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><Link href="/budget/client-purchase-orders" className="inline-flex items-center gap-1 text-xs font-semibold text-[#58756b]"><ArrowLeft size={14}/> Client POs</Link><p className="mt-4 text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">{statusLabel(order.status)} client billing authorisation</p><h1 className="mt-2 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">{order.poNumber}</h1><p className="mt-1 text-sm text-[#747977]">{order.clientName ?? "Client"} · {order.showTitle ?? "All shows"}{order.episodeTitle ? ` · E${String(order.episodeNumber ?? 0).padStart(2, "0")} ${order.episodeTitle}` : ""}</p></div><div className="flex flex-wrap items-center gap-2">{order.status === "draft" && <ClientPurchaseOrderForm {...formOptions} purchaseOrder={order}/>}<ClientPurchaseOrderActions purchaseOrderId={order.id} status={order.status} mayApprove={mayApprove}/></div></header>
     {(expiry || isOverAuthorised || isExhausted) && <section role="alert" className="flex gap-3 rounded-xl border border-[#efd8cf] bg-[#fff7f3] px-4 py-3 text-sm text-[#8b4f38]"><AlertTriangle size={17} className="mt-0.5 shrink-0"/><div><p className="font-semibold">Client PO needs attention</p><p className="mt-1 text-xs leading-5">{[isOverAuthorised ? `Committed billing exceeds the authorised amount by ${money(Math.abs(order.remainingAmount), order.currency)}.` : null, isExhausted ? "All authorised value is committed; no further change work can use this PO." : null, expiry?.message].filter(Boolean).join(" ")}</p></div></section>}
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"><Metric label="Authorised" value={money(order.authorisedAmount, order.currency)}/><Metric label="Committed to bill" value={money(order.committedToBillAmount, order.currency)}/><Metric label="Invoiced" value={money(order.invoicedAmount, order.currency)}/><Metric label="Remaining" value={money(order.remainingAmount, order.currency)} warning={isOverAuthorised}/><Metric label="Variance" value={`${order.varianceAmount > 0 ? "+" : ""}${money(order.varianceAmount, order.currency)}`} warning={order.varianceAmount > 0}/></section>

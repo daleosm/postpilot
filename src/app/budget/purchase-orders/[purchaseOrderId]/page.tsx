@@ -6,20 +6,21 @@ import { PurchaseOrderActions } from "@/components/purchase-order-actions";
 import { PurchaseOrderActualCostForm } from "@/components/purchase-order-actual-cost-form";
 import { PurchaseOrderForm } from "@/components/purchase-order-form";
 import { getActiveOrganizationContext } from "@/lib/organizations";
+import { getFastApiCommercialFormOptions, getFastApiVendorPurchaseOrder } from "@/lib/postpilot-api-commercial";
 import { can } from "@/lib/permissions";
-import { listCrmCompanyOptions } from "@/server/data/crm";
-import { listEpisodes } from "@/server/data/episodes";
-import { getActivePurchaseOrderDetail } from "@/server/data/purchase-orders";
-import { listShowOptions } from "@/server/data/shows";
 
 export default async function PurchaseOrderDetailPage({ params }: { params: Promise<{ purchaseOrderId: string }> }) {
   if (!(await can("manage_budget"))) redirect("/");
   const context = await getActiveOrganizationContext();
   if (!context?.organization) redirect("/");
   const { purchaseOrderId } = await params;
-  const [order, companies, shows, episodes, mayApprove] = await Promise.all([getActivePurchaseOrderDetail(purchaseOrderId), listCrmCompanyOptions(context.organization.organizationId), listShowOptions(context.organization.organizationId), listEpisodes(context.organization.organizationId), can("approve_budget_overruns")]);
+  const [order, options, mayApprove] = await Promise.all([
+    getFastApiVendorPurchaseOrder(purchaseOrderId).catch(() => null),
+    getFastApiCommercialFormOptions(),
+    can("approve_budget_overruns"),
+  ]);
   if (!order) notFound();
-  const formOptions = { currency: context.organization.currency, vendors: companies.filter((company) => company.type === "vendor"), shows, episodes: episodes.map((episode) => ({ id: episode.id, showId: episode.showId, showTitle: episode.showTitle, number: episode.number, title: episode.title })) };
+  const formOptions = { currency: context.organization.currency, vendors: options.companies.filter((company) => company.type === "vendor"), shows: options.shows, episodes: options.episodes };
   const expiry = expiryState(order.expiryDate, order.status);
   const isOverCommitted = order.remainingAmount < 0;
   return <div className="space-y-5"><header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><Link href="/budget/purchase-orders" className="inline-flex items-center gap-1 text-xs font-semibold text-[#58756b]"><ArrowLeft size={14}/> Purchase Orders</Link><p className="mt-4 text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">{statusLabel(order.status)} vendor authorisation</p><h1 className="mt-2 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">{order.poNumber}</h1><p className="mt-1 text-sm text-[#747977]">{order.vendorName ?? "Vendor"} · {order.showTitle ?? "All shows"}{order.episodeTitle ? ` · E${String(order.episodeNumber ?? 0).padStart(2, "0")} ${order.episodeTitle}` : ""}</p></div><div className="flex flex-wrap items-center gap-2">{order.status === "draft" && <PurchaseOrderForm {...formOptions} purchaseOrder={order}/>}<PurchaseOrderActualCostForm purchaseOrderId={order.id} status={order.status} currency={order.currency} episodeId={order.episodeId} showId={order.showId} episodes={formOptions.episodes}/><PurchaseOrderActions purchaseOrderId={order.id} status={order.status} mayApprove={mayApprove}/></div></header>

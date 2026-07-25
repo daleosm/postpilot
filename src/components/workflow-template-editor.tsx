@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { Button } from "@heroui/react";
 import { GripVertical, Plus, Save, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -99,7 +101,7 @@ export function WorkflowTemplateEditor({ workflow }: { workflow: Workflow }) {
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/workflows/${workflow.id}`, {
+      const response = await postpilotUiFetch(`/v1/workflows/${workflow.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: workflow.name, description: workflow.description, stages, rules, workOrderTemplates }),

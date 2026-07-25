@@ -8,6 +8,8 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { postpilotApiFetch } from "@/lib/postpilot-api-client";
+
 const optionalSelectId = z.preprocess((value) => value === "" ? null : value, z.string().uuid().nullable().optional());
 const optionalDate = z.preprocess((value) => value === "" ? null : value, z.coerce.date().nullable().optional());
 const formSchema = z.object({
@@ -62,11 +64,26 @@ export function PurchaseOrderForm({ currency, vendors, shows, episodes, purchase
   function close() { setOpen(false); setSubmitError(null); setSelectedShowId(purchaseOrder?.showId ?? ""); form.reset(defaults()); }
   async function submit(values: FormValues) {
     setSubmitError(null);
-    const response = await fetch(purchaseOrder ? `/api/purchase-orders/${purchaseOrder.id}` : "/api/purchase-orders", {
-      method: purchaseOrder ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values),
-    });
-    if (!response.ok) { const body = await response.json().catch(() => null); setSubmitError(body?.error ?? "Unable to save this purchase order."); return; }
-    const saved = await response.json();
+    let saved: { id?: string };
+    try {
+      saved = await postpilotApiFetch<{ id: string }>(purchaseOrder ? `/purchase-orders/${purchaseOrder.id}` : "/purchase-orders", {
+          method: purchaseOrder ? "PATCH" : "POST",
+          body: {
+            vendor_company_id: values.vendorCompanyId,
+            show_id: values.showId ?? null,
+            episode_id: values.episodeId ?? null,
+            po_number: values.poNumber,
+            approved_amount: values.approvedAmount,
+            issue_date: values.issueDate ?? null,
+            expiry_date: values.expiryDate ?? null,
+            notes: values.notes ?? null,
+            external_document_url: values.externalDocumentUrl ?? null,
+          },
+      });
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Unable to save this purchase order.");
+      return;
+    }
     if (!purchaseOrder && saved?.id) {
       router.push(`/budget/purchase-orders/${saved.id}`);
       return;

@@ -8,6 +8,8 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { postpilotApiFetch } from "@/lib/postpilot-api-client";
+
 const schema = z.object({
   episodeId: z.string().uuid().nullable(),
   invoiceNumber: z.string().trim().min(1, "Enter the supplier invoice or reference number."),
@@ -31,11 +33,23 @@ export function PurchaseOrderActualCostForm({ purchaseOrderId, status, currency,
 
   async function submit(values: Values) {
     setError(null);
-    const response = await fetch(`/api/purchase-orders/${purchaseOrderId}/actual-costs`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...values, episodeId: episodeId ?? values.episodeId, externalDocumentUrl: values.externalDocumentUrl || null, overrunReason: values.overrunReason || null }),
-    });
-    if (!response.ok) { const body = await response.json().catch(() => null); setError(body?.error ?? "Unable to record the supplier actual cost."); return; }
+    try {
+      await postpilotApiFetch(`/purchase-orders/${purchaseOrderId}/actual-costs`, {
+        method: "POST",
+        body: {
+          episode_id: episodeId ?? values.episodeId,
+          invoice_number: values.invoiceNumber,
+          invoice_date: values.invoiceDate,
+          amount: values.amount,
+          description: values.description,
+          external_document_url: values.externalDocumentUrl || null,
+          overrun_reason: values.overrunReason || null,
+        },
+      });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to record the supplier actual cost.");
+      return;
+    }
     form.reset(); setOpen(false); router.refresh();
   }
 

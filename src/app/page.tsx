@@ -15,17 +15,9 @@ import {
 } from "lucide-react";
 
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { isDebugDemoMode } from "@/lib/runtime";
+import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 import { can } from "@/lib/permissions";
 import { redirect } from "next/navigation";
-import {
-  getBudgetData,
-  getDashboardData,
-  getDemoCommandCenterData,
-  listSchedule,
-  listShows,
-  listTeam,
-} from "@/server/data";
 import { WorkflowStateBadge } from "@/components/workflow-state-badge";
 
 function formatDate(value: Date | string | null) {
@@ -39,7 +31,7 @@ function formatMoney(value: number, currency: string) {
 
 export default async function DashboardPage() {
   const [organizationContext, mayManageShows, mayManageBudget, mayManageCatering] = await Promise.all([getActiveOrganizationContext(), can("manage_shows"), can("manage_budget"), can("manage_catering")]);
-  if (!organizationContext?.organization && !isDebugDemoMode) {
+  if (!organizationContext?.organization) {
     return (
       <div className="panel mx-auto mt-20 max-w-lg p-8 text-center">
         <RadioTower className="mx-auto text-[#78807d]" size={28} />
@@ -77,9 +69,9 @@ export default async function DashboardPage() {
 
   const activeShows = showRows.filter((show) => show.seasons.some((season) => season.activeEpisodeCount > 0));
   const dueThisWeek = dashboard.episodes.filter((episode) => episode.deliveryDeadline && episode.deliveryDeadline >= weekStart && episode.deliveryDeadline <= endOfWeek);
-  const lockedCuts = dashboard.episodes.filter((episode) => "workflowStageKey" in episode ? episode.workflowStageKey === "picture_lock" && episode.status === "awaiting_sign_off" : episode.status === "locked");
+  const lockedCuts = dashboard.episodes.filter((episode) => episode.workflowStageKey === "picture_lock" && episode.status === "awaiting_sign_off");
   const qcFailures = dashboard.episodes.filter((episode) => episode.qcStatus === "needs_attention");
-  const budgetBurn = budget.totals.budgeted ? Math.round((budget.totals.actual / budget.totals.budgeted) * 100) : 0;
+  const budgetBurn = budget ? (budget.totals.budgeted ? Math.round((budget.totals.actual / budget.totals.budgeted) * 100) : 0) : null;
   const suiteHours = schedule.reduce<Record<string, number>>((total, booking) => {
     if (!booking.roomName) return total;
     const hours = (booking.endsAt.getTime() - booking.startsAt.getTime()) / 3_600_000;
@@ -105,7 +97,7 @@ export default async function DashboardPage() {
         <Metric href="/episodes" label="Episodes due" value={String(dueThisWeek.length)} detail="Next 7 days" icon={<Clock3 size={15} />} alert={dueThisWeek.length > 0} />
         <Metric href="/review" label="Locks awaiting approval" value={String(lockedCuts.length)} detail="Picture lock stage" icon={<CheckCircle2 size={15} />} />
         <Metric href="/episodes" label="QC failures" value={String(qcFailures.length)} detail="Need attention" icon={<CircleAlert size={15} />} alert={qcFailures.length > 0} />
-        <Metric href="/budget" label="Budget burn" value={`${budgetBurn}%`} detail={`${formatMoney(budget.totals.actual, currency)} actual`} icon={<DollarSign size={15} />} alert={budgetBurn > 90} />
+        <Metric href="/budget" label="Budget burn" value={budgetBurn === null ? "—" : `${budgetBurn}%`} detail={budget ? `${formatMoney(budget.totals.actual, currency)} actual` : "Restricted"} icon={<DollarSign size={15} />} alert={budgetBurn !== null && budgetBurn > 90} />
       </section>
 
       <section>
@@ -151,9 +143,7 @@ export default async function DashboardPage() {
 
         <div className="panel p-5">
           <div className="flex items-start justify-between"><div><h2 className="text-sm font-semibold text-[#303534]">Budget health</h2><p className="mt-0.5 text-xs text-[#838886]">Current estimate vs actual</p></div><DollarSign size={17} className="text-[#76807d]" /></div>
-          <div className="mt-6 flex items-end gap-3"><p className="text-3xl font-semibold tracking-[-0.05em] text-[#2f3533]">{budgetBurn}%</p><p className="pb-1 text-xs text-[#777e7b]">burned</p></div>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#ecebe7]"><div className={`h-full rounded-full ${budgetBurn > 90 ? "bg-[#bd7650]" : "bg-[#64847e]"}`} style={{ width: `${Math.min(100, budgetBurn)}%` }} /></div>
-          <dl className="mt-5 space-y-2.5 text-xs"><div className="flex justify-between"><dt className="text-[#7d827f]">Estimate</dt><dd className="font-medium text-[#464d4a]">{formatMoney(budget.totals.budgeted, currency)}</dd></div><div className="flex justify-between"><dt className="text-[#7d827f]">Actual</dt><dd className="font-medium text-[#464d4a]">{formatMoney(budget.totals.actual, currency)}</dd></div><div className="flex justify-between border-t border-[#ecebe7] pt-2.5"><dt className="text-[#7d827f]">Variance</dt><dd className={`font-semibold ${budget.totals.actual > budget.totals.budgeted ? "text-[#ac633f]" : "text-[#4d8068]"}`}>{formatMoney(budget.totals.actual - budget.totals.budgeted, currency)}</dd></div></dl>
+          {budget ? <><div className="mt-6 flex items-end gap-3"><p className="text-3xl font-semibold tracking-[-0.05em] text-[#2f3533]">{budgetBurn}%</p><p className="pb-1 text-xs text-[#777e7b]">burned</p></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-[#ecebe7]"><div className={`h-full rounded-full ${(budgetBurn ?? 0) > 90 ? "bg-[#bd7650]" : "bg-[#64847e]"}`} style={{ width: `${Math.min(100, budgetBurn ?? 0)}%` }} /></div><dl className="mt-5 space-y-2.5 text-xs"><div className="flex justify-between"><dt className="text-[#7d827f]">Estimate</dt><dd className="font-medium text-[#464d4a]">{formatMoney(budget.totals.budgeted, currency)}</dd></div><div className="flex justify-between"><dt className="text-[#7d827f]">Actual</dt><dd className="font-medium text-[#464d4a]">{formatMoney(budget.totals.actual, currency)}</dd></div><div className="flex justify-between border-t border-[#ecebe7] pt-2.5"><dt className="text-[#7d827f]">Variance</dt><dd className={`font-semibold ${budget.totals.actual > budget.totals.budgeted ? "text-[#ac633f]" : "text-[#4d8068]"}`}>{formatMoney(budget.totals.actual - budget.totals.budgeted, currency)}</dd></div></dl></> : <p className="mt-6 rounded-lg bg-[#f5f7f5] px-3 py-4 text-sm leading-6 text-[#727a76]">Budget figures are available to users with commercial access.</p>}
           <Link href="/budget" className="mt-5 flex items-center gap-1 text-xs font-medium text-[#526d69] hover:text-[#314a45]">Open budget <ArrowRight size={13} /></Link>
         </div>
       </section>
@@ -170,25 +160,42 @@ export default async function DashboardPage() {
 }
 
 async function getCommandCenterData() {
-  if (isDebugDemoMode) return { ...getDemoCommandCenterData(), isDemo: true };
-
-  const context = await getActiveOrganizationContext();
-  if (!context?.organization) return null;
-
-  const organizationId = context.organization.organizationId;
-  const now = new Date();
-  const endOfWeek = new Date(now);
-  endOfWeek.setDate(now.getDate() + 7);
-  const weekStart = new Date(now);
-  weekStart.setHours(0, 0, 0, 0);
-  const [dashboard, showRows, schedule, budget, team] = await Promise.all([
-    getDashboardData(organizationId),
-    listShows(organizationId),
-    listSchedule(organizationId, weekStart, endOfWeek),
-    getBudgetData(organizationId),
-    listTeam(organizationId),
-  ]);
-  return { organizationName: context.organization.organizationName, dashboard, showRows, schedule, budget, team, isDemo: false };
+  const response = await postpilotApiServerFetch<{
+      metrics: { active_episodes: number; episodes_awaiting_sign_off: number; qc_attention: number; upcoming_deliveries: number };
+      episodes: Array<{ id: string; title: string; number: number; qc_status: string; delivery_deadline: string | null; show_id: string; show_title: string; season_id: string; season_number: number; workflow_stage_key: string | null; workflow_status: string }>;
+      shows: Array<{ id: string; title: string; code: string; seasons: Array<{ id: string; number: number }>; season_count: number; episode_count: number; active_episode_count: number }>;
+      schedule: Array<{ id: string; title: string; starts_at: string; ends_at: string; room_name: string | null; person_name: string | null }>;
+      team: Array<{ id: string; name: string; role: string }>;
+      budget: { budgeted: number; actual: number } | null;
+      activity: Array<{ id: string; action: string; entity_type: string; entity_id: string; metadata: unknown; created_at: string }>;
+    }>("/dashboard");
+    const context = await getActiveOrganizationContext();
+    const episodes = response.episodes.map((episode) => ({
+      id: episode.id, title: episode.title, number: episode.number, qcStatus: episode.qc_status,
+      deliveryDeadline: episode.delivery_deadline ? new Date(episode.delivery_deadline) : null,
+      showId: episode.show_id, showTitle: episode.show_title, seasonId: episode.season_id,
+      seasonNumber: episode.season_number, workflowStageKey: episode.workflow_stage_key,
+      status: episode.workflow_status,
+    }));
+  return {
+      organizationName: context?.organization?.organizationName ?? "Post house",
+      dashboard: {
+        metrics: { activeEpisodes: response.metrics.active_episodes, episodesInReview: response.metrics.episodes_awaiting_sign_off, qcAttention: response.metrics.qc_attention, upcomingDeliveries: response.metrics.upcoming_deliveries },
+        episodes,
+        activity: response.activity.map((item) => ({ id: item.id, action: item.action, entityType: item.entity_type, entityId: item.entity_id, metadata: item.metadata, createdAt: item.created_at })),
+      },
+      showRows: response.shows.map((show) => ({
+        id: show.id, title: show.title, code: show.code,
+        seasons: show.seasons.map((season) => {
+          const seasonEpisodes = episodes.filter((episode) => episode.seasonId === season.id);
+          return { id: season.id, number: season.number, episodeCount: seasonEpisodes.length, activeEpisodeCount: seasonEpisodes.filter((episode) => episode.status !== "complete").length };
+        }),
+      })),
+      schedule: response.schedule.map((booking) => ({ ...booking, startsAt: new Date(booking.starts_at), endsAt: new Date(booking.ends_at), roomName: booking.room_name, personName: booking.person_name })),
+      budget: response.budget ? { totals: { budgeted: response.budget.budgeted, actual: response.budget.actual } } : null,
+      team: response.team,
+      isDemo: false,
+  };
 }
 
 function Metric({ href, label, value, detail, icon, alert = false }: { href: string; label: string; value: string; detail: string; icon: React.ReactNode; alert?: boolean }) {

@@ -24,7 +24,7 @@ GitHub Actions
   ├── builds three immutable private ECR images on main
   │     runtime:        ACCOUNT.dkr.ecr.REGION.amazonaws.com/postpilot:<commit-sha>
   │     migrations:     ACCOUNT.dkr.ecr.REGION.amazonaws.com/postpilot:migrations-<commit-sha>
-  │     demo seed:      ACCOUNT.dkr.ecr.REGION.amazonaws.com/postpilot:seed-<commit-sha> (manual only)
+  │     demo seed:      ACCOUNT.dkr.ecr.REGION.amazonaws.com/postpilot:api-seed-<commit-sha> (manual only)
   └── commits those image references into deploy/kubernetes/base
                                       │
                                       ▼
@@ -125,7 +125,7 @@ From the **Actions** tab, run **Build and publish PostPilot** manually, or push 
 
 ### 6. Create the application secret in AWS Secrets Manager
 
-Terraform creates the empty `postpilot/application` Secrets Manager record, and the EKS Secrets Store CSI add-on retrieves it using a Pod Identity role limited to that one secret. Its values are synchronised to the runtime `postpilot-secrets` Kubernetes Secret only for containers that need environment variables. Start with the local port-forward URL below, then replace `NEXTAUTH_URL` with your real HTTPS address before exposing the app publicly.
+Terraform creates the empty `postpilot/application` Secrets Manager record, and the EKS Secrets Store CSI add-on retrieves it using a Pod Identity role limited to that one secret. Its values are synchronised to the runtime `postpilot-secrets` Kubernetes Secret only for containers that need environment variables. Use `POSTPILOT_SESSION_SECRET` and `POSTPILOT_FRONTEND_ORIGINS` for new installations. The current Kubernetes secret mapping also accepts the historical `NEXTAUTH_SECRET`/`NEXTAUTH_URL` keys so an existing deployment can move to FastAPI without a secret-rotation outage.
 
 ~~~bash
 aws eks update-kubeconfig --region us-east-1 --name postpilot-eks
@@ -139,9 +139,9 @@ APP_SECRET_NAME=$(terraform output -raw application_secrets_manager_name)
 
 jq -n \
   --arg database_url "postgres://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_HOST}:5432/postpilot?sslmode=require" \
-  --arg nextauth_secret "$AUTH_SECRET" \
-  --arg nextauth_url 'http://localhost:3000' \
-  '{DATABASE_URL: $database_url, NEXTAUTH_SECRET: $nextauth_secret, NEXTAUTH_URL: $nextauth_url, POSTPILOT_DEBUG_DEMO: "true"}' \
+  --arg session_secret "$AUTH_SECRET" \
+  --arg frontend_origins 'http://localhost:3000' \
+  '{DATABASE_URL: $database_url, POSTPILOT_SESSION_SECRET: $session_secret, POSTPILOT_FRONTEND_ORIGINS: $frontend_origins, POSTPILOT_DEBUG_DEMO: "true"}' \
   | aws secretsmanager put-secret-value --secret-id "$APP_SECRET_NAME" --secret-string file:///dev/stdin
 ~~~
 
@@ -162,7 +162,7 @@ kubectl -n postpilot apply -f deploy/kubernetes/jobs/demo-seed.yaml
 kubectl -n postpilot logs -f job/postpilot-demo-seed
 ~~~
 
-The demo credentials are the seeded email addresses from `scripts/seed.ts` and the password `password`; `maya@postpilot.debug` is the multi-tenant administrator. To deliberately rerun the fixture seed, delete the completed Job first. This replaces only its five fixed demo organisations, but it still destroys changes inside those demo tenants.
+The demo credentials are defined by `backend/app/demo_seed.py` and use the password `password`; `maya@postpilot.debug` is the multi-tenant administrator. To deliberately rerun the fixture seed, delete the completed Job first. This replaces only its five fixed demo organisations, but it still destroys changes inside those demo tenants.
 
 ~~~bash
 kubectl -n postpilot delete job postpilot-demo-seed
@@ -182,8 +182,8 @@ kubectl -n postpilot get ingress postpilot
 ~~~
 
 Until a domain and ACM certificate are configured, use that hostname with
-`http://`. Update `NEXTAUTH_URL` in `postpilot/application` to exactly that
-origin and restart the deployment. Keep two terminals open if you also want
+`http://`. Update `POSTPILOT_FRONTEND_ORIGINS` in `postpilot/application` to
+exactly that origin and restart the deployment. Keep two terminals open if you also want
 local service access or private Argo CD access:
 
 ~~~bash
@@ -204,7 +204,7 @@ kubectl -n argocd get secret argocd-initial-admin-secret \
 
 Sign in to Argo CD as `admin`, then rotate or disable that initial account.
 Before a real facility deployment, add a domain and ACM certificate, change the
-Ingress to HTTPS-only, and update `NEXTAUTH_URL` in `postpilot/application` to
+Ingress to HTTPS-only, and update `POSTPILOT_FRONTEND_ORIGINS` in `postpilot/application` to
 the exact public HTTPS origin. Restart the PostPilot Deployment after changing
 an environment-variable secret. The CSI driver refreshes its Kubernetes Secret
 mirror from AWS Secrets Manager every two minutes; a restart is still required
@@ -246,7 +246,7 @@ The concise version below is retained as a reference for experienced operators. 
    terraform apply
    ~~~
 
-4. Configure kubectl using the Terraform output, then retrieve the RDS-managed credentials and create the application secret in AWS Secrets Manager. The CSI driver synchronises the necessary runtime values into Kubernetes; neither the database URL nor Auth.js secret is committed to Git:
+4. Configure kubectl using the Terraform output, then retrieve the RDS-managed credentials and create the application secret in AWS Secrets Manager. The CSI driver synchronises the necessary runtime values into Kubernetes; neither the database URL nor FastAPI session secret is committed to Git:
 
    ~~~bash
    aws eks update-kubeconfig --region us-east-1 --name postpilot-eks
@@ -258,9 +258,9 @@ The concise version below is retained as a reference for experienced operators. 
    APP_SECRET_NAME=$(terraform output -raw application_secrets_manager_name)
    jq -n \
      --arg database_url "postgres://${RDS_USERNAME}:${RDS_PASSWORD}@${RDS_HOST}:5432/postpilot?sslmode=require" \
-     --arg nextauth_secret "$(openssl rand -base64 48 | tr -d '\n')" \
-     --arg nextauth_url 'https://postpilot.example.com' \
-     '{DATABASE_URL: $database_url, NEXTAUTH_SECRET: $nextauth_secret, NEXTAUTH_URL: $nextauth_url, POSTPILOT_DEBUG_DEMO: "false"}' \
+     --arg session_secret "$(openssl rand -base64 48 | tr -d '\n')" \
+     --arg frontend_origins 'https://postpilot.example.com' \
+     '{DATABASE_URL: $database_url, POSTPILOT_SESSION_SECRET: $session_secret, POSTPILOT_FRONTEND_ORIGINS: $frontend_origins, POSTPILOT_DEBUG_DEMO: "false"}' \
      | aws secretsmanager put-secret-value --secret-id "$APP_SECRET_NAME" --secret-string file:///dev/stdin
    ~~~
 

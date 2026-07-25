@@ -1,15 +1,16 @@
 import { expect, test } from "@playwright/test";
 import postgres from "postgres";
-import { useDebugSession } from "../fixtures/debug-session";
+import { establishDebugSession } from "../fixtures/debug-session";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required for user-access UI tests.");
 const sql = postgres(databaseUrl, { prepare: false });
 const COPPERLINE_ORGANIZATION_ID = "10000000-0000-4000-8000-000000000005";
-const testEmail = "user-access-lab@postpilot.test";
+// `.test` is deliberately rejected by the production EmailStr validator.
+const testEmail = "user-access-lab@postpilot.example.com";
 
 test.beforeEach(async ({ context }) => {
-  await useDebugSession(context, "user_maya", COPPERLINE_ORGANIZATION_ID);
+  await establishDebugSession(context, "user_maya", COPPERLINE_ORGANIZATION_ID);
 });
 
 test.afterAll(async () => {

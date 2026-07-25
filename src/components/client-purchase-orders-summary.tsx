@@ -1,7 +1,28 @@
 import Link from "next/link";
 import { Landmark } from "lucide-react";
 
-import type { ClientPurchaseOrderCommercialLinks, ClientPurchaseOrderSummary } from "@/server/data/client-purchase-orders";
+export type ClientPurchaseOrderSummary = {
+  id: string;
+  clientCompanyId: string;
+  showId: string | null;
+  episodeId: string | null;
+  poNumber: string;
+  currency: string;
+  authorisedAmount: number;
+  committedToBillAmount: number;
+  invoicedAmount: number;
+  remainingAmount: number;
+  expiryDate: string | null;
+  status: string;
+  showTitle: string | null;
+  episodeNumber: number | null;
+  episodeTitle: string | null;
+};
+
+export type ClientPurchaseOrderCommercialLinks = {
+  billablesByPurchaseOrder: Record<string, Array<{ id: string; description: string | null; reference: string | null; amount: number; currency: string; status: string }>>;
+  invoicesByPurchaseOrder: Record<string, Array<{ id: string; invoiceNumber: string; invoiceDate: string; status: string; totalAmount: number; currency: string }>>;
+};
 
 type Props = {
   orders: ClientPurchaseOrderSummary[];

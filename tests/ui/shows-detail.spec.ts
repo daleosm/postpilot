@@ -1,12 +1,12 @@
 import { expect, test } from "@playwright/test";
 
-import { useDebugSession } from "../fixtures/debug-session";
+import { establishDebugSession } from "../fixtures/debug-session";
 
 const COPPERLINE_ORGANIZATION_ID = "10000000-0000-4000-8000-000000000005";
 const CROSSING_POINT_SHOW_ID = "25500000-0000-4000-8000-000000000001";
 
 test.beforeEach(async ({ context }) => {
-  await useDebugSession(context, "user_maya", COPPERLINE_ORGANIZATION_ID);
+  await establishDebugSession(context, "user_maya", COPPERLINE_ORGANIZATION_ID);
 });
 
 test.describe("Show detail UI", () => {
@@ -40,7 +40,7 @@ test.describe("Show detail UI", () => {
   });
 
   test("does not render the show workspace for an artist without Shows permission", async ({ context, page }) => {
-    await useDebugSession(context, "user_copper_editor", COPPERLINE_ORGANIZATION_ID);
+    await establishDebugSession(context, "user_copper_editor", COPPERLINE_ORGANIZATION_ID);
     await page.goto(`/shows/${CROSSING_POINT_SHOW_ID}`);
 
     await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();

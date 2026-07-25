@@ -8,6 +8,8 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 const roomTypes = [
   ["edit_bay", "Edit bay"],
   ["color_suite", "Colour suite"],
@@ -58,7 +60,7 @@ function RoomDialog({ room }: { room?: RoomSetupItem }) {
   async function submit(values: RoomValues) {
     setError("");
     const payload = { ...values, location: values.location || null, capacity: values.capacity || null, notes: values.notes || null };
-    const response = await fetch(room ? `/api/rooms/${room.id}` : "/api/rooms", { method: room ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const response = await postpilotUiFetch(room ? `/v1/settings/rooms/${room.id}` : "/v1/settings/rooms", { method: room ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const body = await response.json().catch(() => null);
     if (!response.ok) return setError(body?.error ?? "Could not save this room.");
     close();

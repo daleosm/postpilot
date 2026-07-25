@@ -1,4 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import { loadEnvConfig } from "@next/env";
+
+loadEnvConfig(process.cwd());
 
 const port = 5002;
 
@@ -19,13 +22,12 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {
-      // This suite runs after the main browser suite but uses a different
-      // NEXTAUTH_URL (port 5002). Keep its development build separate so it
-      // cannot reuse a client bundle initialised for the port 5001 server.
+      // Keep this non-debug credentials journey separate from the standard
+      // UI build so it cannot reuse a client bundle initialised for port 5001.
       NEXT_DIST_DIR: ".next-playwright-auth",
-      NEXTAUTH_URL: `http://localhost:${port}`,
-      NEXTAUTH_SECRET: "postpilot-auth-test-secret",
       POSTPILOT_DEBUG_DEMO: "false",
+      POSTPILOT_API_ORIGIN: process.env.POSTPILOT_API_ORIGIN ?? "http://127.0.0.1:8000",
+      POSTPILOT_API_INTERNAL_URL: process.env.POSTPILOT_API_INTERNAL_URL ?? "http://127.0.0.1:8000",
     },
   },
 });

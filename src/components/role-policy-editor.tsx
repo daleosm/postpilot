@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { Button } from "@heroui/react";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -49,7 +51,7 @@ export function RolePolicyEditor({ initialPolicies, permissions }: { initialPoli
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch("/api/settings/role-policies", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ policies }) });
+      const response = await postpilotUiFetch("/v1/settings/role-policies", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ policies }) });
       const body = await response.json().catch(() => null);
       if (!response.ok) return setMessage(body?.error ?? "Could not save role settings.");
       setMessage("Role settings saved for this post house.");

@@ -1,8 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 import postgres from "postgres";
 
-import { LOGIN_FAILURE_LIMIT } from "@/lib/auth-login-throttle";
-import { hashPassword } from "@/lib/password";
+import { hashTestPassword } from "../fixtures/password";
+
+const LOGIN_FAILURE_LIMIT = 5;
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required for credentials-auth tests.");
@@ -23,7 +24,7 @@ async function signIn(page: Page, email: string, password = "password") {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
 }
 
-test.describe("Auth.js credentials authentication", () => {
+test.describe("FastAPI credentials authentication", () => {
   test.describe.configure({ mode: "serial" });
 
   test.beforeAll(async () => {
@@ -32,10 +33,10 @@ test.describe("Auth.js credentials authentication", () => {
     await sql`delete from auth_login_attempts where email in (${memberEmail}, 'credentials-no-membership@postpilot.test', 'credentials-no-hash@postpilot.test', 'credentials-locked@postpilot.test', 'credentials-unknown@postpilot.test')`;
 
     await sql`insert into users (id, name, email, password_hash) values
-      (${memberUserId}, 'Credentials Member', ${memberEmail}, ${await hashPassword("password")}),
-      (${noMembershipUserId}, 'No Membership', 'credentials-no-membership@postpilot.test', ${await hashPassword("password")}),
+      (${memberUserId}, 'Credentials Member', ${memberEmail}, ${await hashTestPassword("password")}),
+      (${noMembershipUserId}, 'No Membership', 'credentials-no-membership@postpilot.test', ${await hashTestPassword("password")}),
       (${noHashUserId}, 'No Hash', 'credentials-no-hash@postpilot.test', null),
-      (${lockedUserId}, 'Locked User', 'credentials-locked@postpilot.test', ${await hashPassword("password")})`;
+      (${lockedUserId}, 'Locked User', 'credentials-locked@postpilot.test', ${await hashTestPassword("password")})`;
     await sql`insert into organizations (id, name, slug) values
       (${organizationAId}, 'Credentials Auth A', 'credentials-auth-a'),
       (${organizationBId}, 'Credentials Auth B', 'credentials-auth-b'),
@@ -60,15 +61,13 @@ test.describe("Auth.js credentials authentication", () => {
   test("protects tenant routes, restores the safe callback path, and resolves live membership", async ({ page }) => {
     await page.goto("/episodes");
     await expect(page).toHaveURL(/\/sign-in\?callbackUrl=%2Fepisodes/);
-    expect((await page.request.post("/api/debug/user", { data: {} })).status()).toBe(404);
     await expect(page.getByRole("button", { name: "Open demo workspace" })).toHaveCount(0);
 
-    const unauthenticatedApi = await page.request.post("/api/organizations/active", {
-      data: { organizationId: organizationAId, pathname: "/shows" },
+    const unauthenticatedApi = await page.request.post("/v1/organizations/active", {
+      data: { organization_id: organizationAId, pathname: "/shows" },
       maxRedirects: 0,
     });
-    expect(unauthenticatedApi.status()).toBe(307);
-    expect(unauthenticatedApi.headers().location).toContain("/sign-in");
+    expect(unauthenticatedApi.status()).toBe(401);
 
     await page.goto("/shows");
     await expect(page).toHaveURL(/\/sign-in\?callbackUrl=%2Fshows/);
@@ -77,18 +76,18 @@ test.describe("Auth.js credentials authentication", () => {
     await expect(page).toHaveURL(/\/shows$/);
     await expect(page.getByRole("heading", { name: "Shows in post" })).toBeVisible();
 
-    const sessionA = await page.request.get("/api/auth/session");
-    await expect(sessionA.json()).resolves.toMatchObject({ user: { id: memberUserId }, activeOrganizationId: organizationAId });
+    const sessionA = await page.request.get("/v1/auth/session");
+    await expect(sessionA.json()).resolves.toMatchObject({ user_id: memberUserId, active_organization_id: organizationAId });
 
-    expect((await page.request.post("/api/organizations/active", { data: { organizationId: organizationBId, pathname: "/shows" } })).status()).toBe(200);
-    const sessionB = await page.request.get("/api/auth/session");
-    await expect(sessionB.json()).resolves.toMatchObject({ activeOrganizationId: organizationBId });
+    expect((await page.request.post("/v1/organizations/active", { data: { organization_id: organizationBId, pathname: "/shows" } })).status()).toBe(200);
+    const sessionB = await page.request.get("/v1/auth/session");
+    await expect(sessionB.json()).resolves.toMatchObject({ active_organization_id: organizationBId });
 
-    expect((await page.request.post("/api/organizations/active", { data: { organizationId: foreignOrganizationId, pathname: "/shows" } })).status()).toBe(403);
+    expect((await page.request.post("/v1/organizations/active", { data: { organization_id: foreignOrganizationId, pathname: "/shows" } })).status()).toBe(403);
     await sql`delete from organization_members where organization_id = ${organizationBId} and user_id = ${memberUserId}`;
-    const revokedSession = await page.request.get("/api/auth/session");
-    await expect(revokedSession.json()).resolves.toMatchObject({ activeOrganizationId: organizationAId });
-    expect((await page.request.post("/api/organizations/active", { data: { organizationId: organizationBId, pathname: "/shows" } })).status()).toBe(403);
+    const revokedSession = await page.request.get("/v1/auth/session");
+    await expect(revokedSession.json()).resolves.toMatchObject({ active_organization_id: organizationAId });
+    expect((await page.request.post("/v1/organizations/active", { data: { organization_id: organizationBId, pathname: "/shows" } })).status()).toBe(403);
   });
 
   test("rejects unknown, unhashed, and malformed credential submissions with one message", async ({ page }) => {
@@ -132,9 +131,9 @@ test.describe("Auth.js credentials authentication", () => {
 
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/sign-in/);
-    const signedOutSession = await page.request.get("/api/auth/session");
-    expect(signedOutSession.status()).toBe(200);
-    await expect(signedOutSession.json()).resolves.toEqual({});
+    const signedOutSession = await page.request.get("/v1/auth/session");
+    expect(signedOutSession.status()).toBe(401);
+    await expect(signedOutSession.json()).resolves.toMatchObject({ detail: "Sign-in required." });
     await page.goto("/shows");
     await expect(page).toHaveURL(/\/sign-in\?callbackUrl=%2Fshows/);
 
@@ -142,6 +141,6 @@ test.describe("Auth.js credentials authentication", () => {
     await signIn(page, "credentials-no-membership@postpilot.test");
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByText("No post workspace selected", { exact: true })).toBeVisible();
-    expect((await page.request.post("/api/organizations/active", { data: { organizationId: organizationAId, pathname: "/shows" } })).status()).toBe(403);
+    expect((await page.request.post("/v1/organizations/active", { data: { organization_id: organizationAId, pathname: "/shows" } })).status()).toBe(403);
   });
 });

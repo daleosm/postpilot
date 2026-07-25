@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@heroui/react";
 import { ExternalLink, Send, ShieldCheck } from "lucide-react";
@@ -91,7 +93,7 @@ function ApplyProfileForm({ episodeId, profiles }: { episodeId: string; profiles
   const form = useForm<ApplyProfileValues>({ resolver: zodResolver(applyProfileSchema), defaultValues: { deliveryProfileId: profiles[0]?.id ?? "", reason: "" } });
   const submit = form.handleSubmit(async (values) => {
     setMessage("");
-    const response = await fetch(`/api/episodes/${episodeId}/delivery-manifest/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
+    const response = await postpilotUiFetch(`/v1/episodes/${episodeId}/delivery-manifest/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
     const body = await response.json().catch(() => null);
     if (!response.ok) return setMessage(body?.error ?? "Could not apply the delivery profile.");
     router.refresh();
@@ -116,7 +118,7 @@ function DeliveryTransitionForm({ episodeId, item, target }: { episodeId: string
   const form = useForm<TransitionValues>({ resolver: zodResolver(transitionSchema), defaultValues: { reason: "", externalReference: item.externalReference ?? "", externalUrl: item.externalUrl ?? "", submissionMethod: item.submissionMethod ?? "", receiptConfirmedBy: "" } });
   const submit = form.handleSubmit(async (values) => {
     setMessage("");
-    const response = await fetch(`/api/episodes/${episodeId}/delivery-items/${item.id}/transition`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: target, reason: values.reason, externalReference: values.externalReference || null, externalUrl: values.externalUrl || null, submissionMethod: values.submissionMethod || null, receiptConfirmedBy: values.receiptConfirmedBy || null }) });
+    const response = await postpilotUiFetch(`/v1/episodes/${episodeId}/delivery-items/${item.id}/transition`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: target, reason: values.reason, externalReference: values.externalReference || null, externalUrl: values.externalUrl || null, submissionMethod: values.submissionMethod || null, receiptConfirmedBy: values.receiptConfirmedBy || null }) });
     const body = await response.json().catch(() => null);
     if (!response.ok) return setMessage(body?.error ?? "Could not update this delivery item.");
     setMessage(target === "dispatched" ? "Item dispatched." : "Recipient receipt confirmed.");

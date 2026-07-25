@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { Button } from "@heroui/react";
 import { Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -16,7 +18,7 @@ export function EpisodeTeam({ episodeId, assignments, people, signOffSlots = [],
   const availablePeople = people.filter((person) => !assignments.some((assignment) => assignment.personId === person.id));
 
   async function add() {
-    const response = await fetch(`/api/episodes/${episodeId}/team`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personId }) });
+    const response = await postpilotUiFetch(`/v1/episodes/${episodeId}/team`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personId }) });
     if (!response.ok) return setError((await response.json()).error ?? "Could not assign person.");
     setPersonId("");
     await onChanged?.();
@@ -25,14 +27,14 @@ export function EpisodeTeam({ episodeId, assignments, people, signOffSlots = [],
 
   async function setSignOffPerson(approvalRuleId: string, personId: string) {
     setError("");
-    const response = await fetch(`/api/episodes/${episodeId}/team`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approvalRuleId, personId: personId || null }) });
+    const response = await postpilotUiFetch(`/v1/episodes/${episodeId}/team`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approvalRuleId, personId: personId || null }) });
     if (!response.ok) return setError((await response.json()).error ?? "Could not update the sign-off person.");
     await onChanged?.();
     router.refresh();
   }
 
   async function remove(id: string) {
-    const response = await fetch(`/api/episodes/${episodeId}/team?assignmentId=${id}`, { method: "DELETE" });
+    const response = await postpilotUiFetch(`/v1/episodes/${episodeId}/team/${id}`, { method: "DELETE" });
     if (!response.ok) return setError((await response.json()).error ?? "Could not remove person.");
     await onChanged?.();
     router.refresh();

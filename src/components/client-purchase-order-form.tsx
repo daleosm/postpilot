@@ -8,6 +8,8 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { postpilotApiFetch } from "@/lib/postpilot-api-client";
+
 const optionalSelectId = z.preprocess((value) => value === "" ? null : value, z.string().uuid().nullable().optional());
 const optionalDate = z.preprocess((value) => value === "" ? null : value, z.coerce.date().nullable().optional());
 const formSchema = z.object({
@@ -36,9 +38,27 @@ export function ClientPurchaseOrderForm({ currency, clients, shows, episodes, pu
   function close() { setOpen(false); setSubmitError(null); setSelectedShowId(purchaseOrder?.showId ?? ""); form.reset(defaults()); }
   async function submit(values: FormValues) {
     setSubmitError(null);
-    const response = await fetch(purchaseOrder ? `/api/client-purchase-orders/${purchaseOrder.id}` : "/api/client-purchase-orders", { method: purchaseOrder ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
-    if (!response.ok) { const body = await response.json().catch(() => null); setSubmitError(body?.error ?? "Unable to save this client purchase order."); return; }
-    const saved = await response.json(); close();
+    let saved: { id?: string };
+    try {
+      saved = await postpilotApiFetch<{ id: string }>(purchaseOrder ? `/client-purchase-orders/${purchaseOrder.id}` : "/client-purchase-orders", {
+          method: purchaseOrder ? "PATCH" : "POST",
+          body: {
+            client_company_id: values.clientCompanyId,
+            show_id: values.showId ?? null,
+            episode_id: values.episodeId ?? null,
+            po_number: values.poNumber,
+            approved_amount: values.approvedAmount,
+            issue_date: values.issueDate ?? null,
+            expiry_date: values.expiryDate ?? null,
+            notes: values.notes ?? null,
+            external_document_url: values.externalDocumentUrl ?? null,
+          },
+      });
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Unable to save this client purchase order.");
+      return;
+    }
+    close();
     if (!purchaseOrder && saved?.id) router.push(`/budget/client-purchase-orders/${saved.id}`); else router.refresh();
   }
   return <>

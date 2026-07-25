@@ -5,24 +5,22 @@
 ~~~text
 Browser / React client components
         │
-        ├── Server-rendered App Router pages
-        └── /api/* route handlers
+        └── Server-rendered App Router pages
                     │
                     ▼
-   Active organisation + membership context
-       authentication, capability, resource checks
+          FastAPI /v1 API
+  authentication, active tenant, capability and resource checks
                     │
                     ▼
-       Server data-access and domain helpers
-                    │
-                    ▼
-        Drizzle ORM → PostgreSQL
+     SQLAlchemy Core → PostgreSQL
                     │
                     ▼
       Activity/audit records and derived UI state
 ~~~
 
-React components should not be the source of database access or tenant authority. Pages call server-only data helpers; mutation routes validate input, resolve context, check capability, and validate each referenced resource before writing.
+React components should not be the source of database access or tenant authority.
+Next renders the UI; FastAPI validates input, resolves context, checks
+capabilities, and validates referenced resources before writing.
 
 ## Tenancy
 
@@ -30,13 +28,15 @@ React components should not be the source of database access or tenant authority
 
 The active organisation is derived only from valid memberships:
 
-1. Resolve the current Auth.js session, or the controlled debug identity.
+1. Resolve the opaque FastAPI session, or the controlled debug identity.
 2. Load valid memberships for that user.
 3. Read the active-organisation cookie only as a preference.
 4. Accept it only if it is one of those memberships; otherwise fall back to the first valid membership.
 5. Resolve the organisation-specific `people` record if one exists.
 
-The helper in `src/lib/organizations.ts` returns the user, active organisation, membership role, memberships, and current person record. Data access and mutation helpers must use this context rather than accepting an organisation ID from the browser.
+`backend/app/auth.py` resolves the user, active organisation, membership role,
+memberships, and current person record. API functions use this context rather
+than accepting an organisation ID from the browser.
 
 ## Permissions
 
@@ -56,16 +56,20 @@ Workflow sign-off requires both capability and a matching named episode-team sig
 
 ## Authentication
 
-Auth.js provides email/password credentials authentication. Internal users remain application records even when future SSO providers are configured; identity providers map to application users rather than replacing tenant membership, person, role, or episode access records.
+FastAPI provides opaque HTTP-only email/password sessions. Internal users remain
+application records even when future SSO providers are configured; identity
+providers map to application users rather than replacing tenant membership,
+person, role, or episode access records.
 
-Production requires `NEXTAUTH_SECRET`. Secure cookies are enabled for HTTPS canonical URLs. The explicit `http://localhost` development/port-forward URL uses non-secure cookies because browsers reject Secure cookies over HTTP.
+Production requires `POSTPILOT_SESSION_SECRET`. Secure cookies are enabled for
+HTTPS canonical URLs. The explicit `http://localhost` development/port-forward
+URL uses non-secure cookies because browsers reject Secure cookies over HTTP.
 
 ## Codebase map
 
 ~~~text
 src/
-├── app/                       # App Router pages and HTTP route handlers
-│   ├── api/                   # Tenant-scoped endpoints
+├── app/                       # App Router UI pages only
 │   ├── bookings/              # Facility calendar and booking operations
 │   ├── budget/                # Rates, costs, POs, client POs, invoices
 │   ├── crm/                   # Client, network, production-company, vendor accounts
@@ -77,19 +81,19 @@ src/
 │   └── sign-in/               # Credentials sign-in
 ├── components/                # UI, forms, dialogs, navigation, custom Gantt
 ├── lib/
-│   ├── db/                    # Drizzle client and PostgreSQL schema
-│   ├── validations/           # Zod validation schemas
-│   ├── auth.ts                # Auth.js options and session shape
-│   ├── organizations.ts       # Active-organisation context
-│   └── permissions*.ts        # Capability and role-policy checks
-├── server/
-│   ├── data/                  # Server-only reads for product screens
-│   └── *.ts                   # Server-only domain functions
-└── proxy.ts                   # Protected-route gate
+│   ├── validations/           # Zod schemas for browser forms
+│   └── postpilot-api-*.ts     # Typed FastAPI HTTP clients
+├── proxy.ts                   # FastAPI session gate for protected UI routes
 
-drizzle/                       # Ordered SQL migrations and migration journal
-scripts/seed.ts                # Idempotent multi-tenant demo data
-tests/                         # UI, integration, isolation, and unit tests
+backend/
+├── app/api/                   # Tenant-scoped FastAPI endpoints
+├── app/db/                    # SQLAlchemy Core table maps and session factory
+├── app/auth.py                # Session, tenant, and capability resolution
+├── app/demo_seed.py           # Idempotent multi-tenant fixture data
+└── alembic/                   # Python-owned schema migrations
+
+drizzle/                       # Immutable historical SQL bootstrap snapshot
+tests/                         # Playwright UI and credentials-auth journeys
 ~~~
 
 ## Database ownership model
@@ -115,10 +119,10 @@ Tenant-owned tables carry `organizationId` where it materially improves query sa
 
 Route handlers are intentionally thin. For each new endpoint:
 
-1. Parse input with a Zod schema.
+1. Validate browser forms with Zod and validate API input with Pydantic.
 2. Resolve active organisation context.
 3. Check the relevant capability.
 4. Query every referenced record with its ID **and** organisation boundary before using it.
-5. Call a server domain/data helper.
+5. Call a Python domain/data helper.
 6. Record activity where the domain requires it.
 7. Add focused permission and tenant-isolation coverage.

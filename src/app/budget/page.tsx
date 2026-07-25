@@ -2,16 +2,14 @@ import { AlertTriangle, ArrowRight, CircleDollarSign, ReceiptText, TrendingUp } 
 import Link from "next/link";
 
 import { BudgetLineForm } from "@/components/budget-line-form";
+import type { ClientPurchaseOrderSummary } from "@/components/client-purchase-orders-summary";
 import { EpisodeInvoicePanel } from "@/components/episode-invoice-panel";
 import { RateCardDialog } from "@/components/rate-card-dialog";
 import type { ServiceRate } from "@/components/service-rate-card";
 import { WorkOrderChargeQueue } from "@/components/work-order-charge-queue";
-import { getActiveOrganizationContext } from "@/lib/organizations";
-import { isDebugDemoMode } from "@/lib/runtime";
 import { can } from "@/lib/permissions";
-import { getBudgetData, getEpisodeInvoiceReadiness, listEpisodeBookingCosts, listEpisodes, listServiceRates } from "@/server/data";
-import type { PurchaseOrderSummary } from "@/server/data/purchase-orders";
-import { listClientPurchaseOrdersForOrganization, type ClientPurchaseOrderSummary } from "@/server/data/client-purchase-orders";
+import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
+import type { FrontendVendorPurchaseOrder as PurchaseOrderSummary } from "@/lib/postpilot-api-commercial";
 import { redirect } from "next/navigation";
 
 type Line = {
@@ -126,7 +124,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
     <ClientPoBudgetSafeguards orders={episodeClientPurchaseOrders} />
     <EpisodeInvoicePanel episodeId={selectedEpisodeId} readiness={invoiceReadiness} />
     <BookingCostBasis entries={bookingCosts} fallbackCurrency={currency} />
-    <WorkOrderChargeQueue charges={activeShow ? data.workOrderCharges.filter((charge) => charge.showTitle === activeShow) : data.workOrderCharges} clientPurchaseOrders={data.clientPurchaseOrders} />
+    <WorkOrderChargeQueue charges={activeShow ? data.workOrderCharges.filter((charge) => charge.showTitle === activeShow) : data.workOrderCharges} />
     <PurchaseOrderBudgetSummary title="Episode purchase orders" orders={episodePurchaseOrders} currency={currency} />
 
     <section className="panel p-5">
@@ -169,21 +167,20 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
 }
 
 async function loadServiceRates() {
-  if (isDebugDemoMode) return [];
-  const context = await getActiveOrganizationContext();
-  return context?.organization ? listServiceRates(context.organization.organizationId) : [];
+  const response = await postpilotApiServerFetch<{ service_rates: Array<{ id: string; name: string; category: string; unit: string; rate: string | number; currency: string; notes: string | null; is_active: boolean }> }>("/rate-cards/services");
+  return response.service_rates.map((rate) => ({ ...rate, isActive: rate.is_active }));
 }
 
 async function loadBookingCosts(episodeId: string): Promise<BookingCost[]> {
-  if (isDebugDemoMode) return [];
-  const context = await getActiveOrganizationContext();
-  return context?.organization ? listEpisodeBookingCosts(context.organization.organizationId, episodeId) : [];
+  // Booking actuals and cost calculation live in FastAPI. The detailed cost
+  // basis projection is being added alongside the time-submission ledger;
+  // it deliberately has no second Node database read.
+  void episodeId;
+  return [];
 }
 
 async function loadInvoiceReadiness(episodeId: string) {
-  if (isDebugDemoMode) return null;
-  const context = await getActiveOrganizationContext();
-  return context?.organization ? getEpisodeInvoiceReadiness(context.organization.organizationId, episodeId) : null;
+  return camelize(await postpilotApiServerFetch(`/billing/episodes/${episodeId}/readiness`)) as React.ComponentProps<typeof EpisodeInvoicePanel>["readiness"];
 }
 
 function Metric({ icon, label, value, detail, warning = false }: { icon: React.ReactNode; label: string; value: string; detail: string; warning?: boolean }) {
@@ -426,16 +423,37 @@ function BudgetHealth({ actual, estimate }: { actual: number; estimate: number }
 }
 
 async function load(): Promise<BudgetData> {
-  if (isDebugDemoMode) {
-    const episodes = [{ id: "demo-e1", label: "Signal North · E01 The Quiet Hour", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network" }, { id: "demo-e5", label: "Under Current · E01 The Undertow", showId: "demo-s2", showTitle: "Under Current", network: "Eastline" }];
-    return { episodes, workOrderCharges: [], purchaseOrders: [], clientPurchaseOrders: [], lines: [
-      { id: "b1", workOrderId: null, vendorInvoiceId: null, purchaseOrderId: null, purchaseOrderNumber: null, purchaseOrderAllocationId: null, externalCost: false, episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "Edit suite", description: "Avid bays", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 48000, actualAmount: 42150, currency: "GBP", costType: "internal" },
-      { id: "b2", workOrderId: null, vendorInvoiceId: null, purchaseOrderId: null, purchaseOrderNumber: null, purchaseOrderAllocationId: null, externalCost: false, episodeId: "demo-e1", episodeTitle: "The Quiet Hour", episodeNumber: 1, category: "VFX", description: "Cleanup and screens", showId: "demo-s1", showTitle: "Signal North", network: "Northstar Network", budgetedAmount: 78000, actualAmount: 82350, currency: "GBP", costType: "billable" },
-      { id: "b3", workOrderId: null, vendorInvoiceId: null, purchaseOrderId: null, purchaseOrderNumber: null, purchaseOrderAllocationId: null, externalCost: false, episodeId: "demo-e5", episodeTitle: "The Undertow", episodeNumber: 1, category: "Sound", description: "Mix and stems", showId: "demo-s2", showTitle: "Under Current", network: "Eastline", budgetedAmount: 52000, actualAmount: 47120, currency: "GBP", costType: "internal" },
-    ] };
-  }
-  const context = await getActiveOrganizationContext();
-  if (!context?.organization) return { lines: [], episodes: [], workOrderCharges: [], purchaseOrders: [], clientPurchaseOrders: [] };
-  const [budget, rows, clientPurchaseOrders] = await Promise.all([getBudgetData(context.organization.organizationId), listEpisodes(context.organization.organizationId), listClientPurchaseOrdersForOrganization(context.organization.organizationId)]);
-  return { lines: budget.lines, workOrderCharges: budget.workOrderCharges, purchaseOrders: budget.purchaseOrders, clientPurchaseOrders, episodes: rows.map((episode) => ({ id: episode.id, label: `${episode.showTitle} · E${String(episode.number).padStart(2, "0")} ${episode.title}`, showId: episode.showId, showTitle: episode.showTitle, network: episode.network ?? "Independent" })) };
+  const [budget, options, purchaseOrders, clientPurchaseOrders, workOrderCharges] = await Promise.all([
+      postpilotApiServerFetch<{ budget_lines: Array<Record<string, unknown>> }>("/budget/lines"),
+      postpilotApiServerFetch<{ shows: Array<{ id: string; title: string; network: string | null }>; episodes: Array<{ id: string; show_id: string; show_title: string; number: number; title: string }> }>("/budget/options"),
+      postpilotApiServerFetch<{ purchase_orders: Array<Record<string, unknown>> }>("/purchase-orders"),
+      postpilotApiServerFetch<{ client_purchase_orders: Array<Record<string, unknown>> }>("/client-purchase-orders"),
+      postpilotApiServerFetch<{ work_order_charges: Array<Record<string, unknown>> }>("/billing/work-order-charges"),
+    ]);
+    const episodeById = new Map(options.episodes.map((episode) => [episode.id, episode]));
+    const showById = new Map(options.shows.map((show) => [show.id, show]));
+  return {
+      episodes: options.episodes.map((episode) => ({ id: episode.id, label: `${episode.show_title} · E${String(episode.number).padStart(2, "0")} ${episode.title}`, showId: episode.show_id, showTitle: episode.show_title, network: showById.get(episode.show_id)?.network ?? "Independent" })),
+      lines: budget.budget_lines.map((line) => {
+        const episode = line.episode_id ? episodeById.get(String(line.episode_id)) : undefined;
+        const show = line.show_id ? showById.get(String(line.show_id)) : undefined;
+        const order = line.purchase_order as Record<string, unknown> | null;
+        return { id: String(line.id), workOrderId: (line.work_order as Record<string, unknown> | null)?.id ? String((line.work_order as Record<string, unknown>).id) : null, vendorInvoiceId: line.vendor_invoice_id ? String(line.vendor_invoice_id) : null, purchaseOrderId: order?.id ? String(order.id) : null, purchaseOrderNumber: order?.po_number ? String(order.po_number) : null, purchaseOrderAllocationId: null, externalCost: Boolean(line.external_cost), episodeId: line.episode_id ? String(line.episode_id) : null, episodeTitle: episode?.title ?? null, episodeNumber: episode?.number ?? null, category: String(line.category), description: line.description ? String(line.description) : null, showTitle: show?.title ?? null, network: show?.network ?? null, budgetedAmount: Number(line.estimated_amount ?? 0), actualAmount: Number(line.actual_amount ?? 0), currency: String(line.currency), costType: String(line.cost_type), showId: line.show_id ? String(line.show_id) : null };
+      }),
+      workOrderCharges: workOrderCharges.work_order_charges.map((charge) => ({
+        id: String(charge.id), title: String(charge.title), department: charge.department ? String(charge.department) : null,
+        status: String(charge.status), billingStatus: String(charge.billing_status), estimatedAmount: Number(charge.estimated_amount ?? 0),
+        currency: String(charge.currency), billingNotes: charge.billing_notes ? String(charge.billing_notes) : null,
+        episodeId: String(charge.episode_id), episodeTitle: String(charge.episode_title), episodeNumber: Number(charge.episode_number),
+        showId: String(charge.show_id), showTitle: String(charge.show_title), clientCompanyId: charge.client_company_id ? String(charge.client_company_id) : null,
+      })),
+      purchaseOrders: purchaseOrders.purchase_orders.map((order) => ({ id: String(order.id), vendorCompanyId: String(order.vendor_company_id), vendorName: order.vendor_name ? String(order.vendor_name) : null, showId: order.show_id ? String(order.show_id) : null, showTitle: order.show_title ? String(order.show_title) : null, episodeId: order.episode_id ? String(order.episode_id) : null, episodeNumber: order.episode_number ? Number(order.episode_number) : null, episodeTitle: order.episode_title ? String(order.episode_title) : null, poNumber: String(order.po_number), currency: String(order.currency), approvedAmount: Number(order.authorised_amount ?? 0), issueDate: order.issue_date ? String(order.issue_date) : null, expiryDate: order.expiry_date ? String(order.expiry_date) : null, status: String(order.status), notes: order.notes ? String(order.notes) : null, externalDocumentUrl: order.external_document_url ? String(order.external_document_url) : null, createdAt: order.created_at ? new Date(String(order.created_at)) : new Date(), updatedAt: order.updated_at ? new Date(String(order.updated_at)) : new Date(), authorisedAmount: Number(order.authorised_amount ?? 0), committedAmount: Number(order.committed_amount ?? 0), actualInvoicedAmount: Number(order.actual_invoiced_amount ?? 0), remainingAmount: Number(order.remaining_amount ?? 0), varianceAmount: Number(order.variance_amount ?? 0) })) as unknown as PurchaseOrderSummary[],
+      clientPurchaseOrders: clientPurchaseOrders.client_purchase_orders.map((order) => ({ id: String(order.id), clientCompanyId: String(order.client_company_id), clientName: order.client_name ? String(order.client_name) : null, showId: order.show_id ? String(order.show_id) : null, showTitle: order.show_title ? String(order.show_title) : null, episodeId: order.episode_id ? String(order.episode_id) : null, episodeNumber: order.episode_number ? Number(order.episode_number) : null, episodeTitle: order.episode_title ? String(order.episode_title) : null, poNumber: String(order.po_number), currency: String(order.currency), approvedAmount: Number(order.authorised_amount ?? 0), issueDate: order.issue_date ? String(order.issue_date) : null, expiryDate: order.expiry_date ? String(order.expiry_date) : null, status: String(order.status), notes: order.notes ? String(order.notes) : null, externalDocumentUrl: order.external_document_url ? String(order.external_document_url) : null, createdAt: order.created_at ? new Date(String(order.created_at)) : new Date(), updatedAt: order.updated_at ? new Date(String(order.updated_at)) : new Date(), authorisedAmount: Number(order.authorised_amount ?? 0), committedToBillAmount: Number(order.committed_to_bill_amount ?? 0), invoicedAmount: Number(order.invoiced_amount ?? 0), remainingAmount: Number(order.remaining_amount ?? 0), varianceAmount: Number(order.variance_amount ?? 0) })) as unknown as ClientPurchaseOrderSummary[],
+  };
+}
+
+function camelize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(camelize);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => [key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()), camelize(child)]));
 }

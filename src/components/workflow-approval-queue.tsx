@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { Button } from "@heroui/react";
 import { Check } from "lucide-react";
 import Link from "next/link";
@@ -46,7 +48,7 @@ function SignOffRow({ signOff: item }: { signOff: WorkflowSignOffItem }) {
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/episodes/${item.episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId: item.workflowStageId, approvalRuleId: item.approvalRuleId, action: "sign_off" }) });
+      const response = await postpilotUiFetch(`/v1/episodes/${item.episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId: item.workflowStageId, approvalRuleId: item.approvalRuleId, action: "sign_off" }) });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
         setMessage(body?.error ?? "Could not record your decision.");

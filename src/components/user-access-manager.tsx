@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@heroui/react";
 import { Pencil, ShieldCheck, Trash2, UserPlus, X } from "lucide-react";
@@ -34,7 +36,7 @@ export function UserAccessManager({ users, policies }: { users: UserAccess[]; po
 
   async function create(values: NewUser) {
     setMessage("");
-    const response = await fetch("/api/settings/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
+    const response = await postpilotUiFetch("/v1/settings/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
     const body = await response.json().catch(() => null);
     if (!response.ok) return setMessage(body?.error ?? "Could not add this user.");
     form.reset({ name: "", email: "", personRole: firstOperationalRole, membershipRole: "member" });
@@ -46,7 +48,7 @@ export function UserAccessManager({ users, policies }: { users: UserAccess[]; po
   async function saveAccess() {
     if (!editing?.personRole) return;
     setMessage("");
-    const response = await fetch(`/api/settings/users/${editing.userId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personRole: editing.personRole, membershipRole: editing.membershipRole }) });
+    const response = await postpilotUiFetch(`/v1/settings/users/${editing.userId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personRole: editing.personRole, membershipRole: editing.membershipRole }) });
     const body = await response.json().catch(() => null);
     if (!response.ok) return setMessage(body?.error ?? "Could not update access.");
     setEditing(null);
@@ -58,7 +60,7 @@ export function UserAccessManager({ users, policies }: { users: UserAccess[]; po
     if (!window.confirm(`Remove ${user.personName ?? user.userName ?? user.email} from this post house? Their global account and other post-house memberships are kept.`)) return;
     setRemoving(user.userId);
     setMessage("");
-    const response = await fetch(`/api/settings/users/${user.userId}`, { method: "DELETE" });
+    const response = await postpilotUiFetch(`/v1/settings/users/${user.userId}`, { method: "DELETE" });
     const body = await response.json().catch(() => null);
     setRemoving(null);
     if (!response.ok) return setMessage(body?.error ?? "Could not remove access.");

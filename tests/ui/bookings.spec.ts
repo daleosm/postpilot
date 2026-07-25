@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import postgres from "postgres";
-import { useDebugSession } from "../fixtures/debug-session";
+import { establishDebugSession } from "../fixtures/debug-session";
 
 const COPPERLINE_ORGANIZATION_ID = "10000000-0000-4000-8000-000000000005";
 const ACTUAL_EXTENSION_BOOKING_ID = "f5000000-0000-4000-8000-000000000001";
@@ -10,7 +10,7 @@ if (!databaseUrl) throw new Error("DATABASE_URL is required for booking calendar
 const sql = postgres(databaseUrl, { prepare: false });
 
 test.beforeEach(async ({ context }) => {
-  await useDebugSession(context, "user_maya", COPPERLINE_ORGANIZATION_ID);
+  await establishDebugSession(context, "user_maya", COPPERLINE_ORGANIZATION_ID);
 });
 
 test.afterEach(async () => {

@@ -1,5 +1,7 @@
 "use client";
 
+import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+
 import { Button } from "@heroui/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -112,7 +114,7 @@ function QcPanel({ episodeId, episodeStatus, workflowState, initialHistory, init
       checksum: null,
     };
     try {
-      const response = await fetch("/api/qc-reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const response = await postpilotUiFetch("/v1/qc-reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const body = await response.json().catch(() => null);
       if (!response.ok) return setMessage(body?.error ?? "Could not record the QC result.");
       const nextReport = { id: body.id, status: body.status ?? status, reportUrl: payload.reportUrl, summary: payload.summary, waiverReason: payload.waiverReason, completedAt: ["passed", "failed", "waived"].includes(status) ? new Date() : null, createdAt: new Date() };
@@ -159,7 +161,7 @@ function QcIssueTracker({ reports, initialIssues, workOrders, canManage, canVeri
     const timecode = String(form.get("timecodeSeconds") ?? "").trim();
     const payload = { qcReportId: reportId, severity, code: String(form.get("code") ?? "").trim() || null, description: String(form.get("description") ?? "").trim(), timecodeSeconds: timecode ? Number(timecode) : null };
     try {
-      const response = await fetch("/api/qc-issues", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const response = await postpilotUiFetch("/v1/qc-issues", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const body = await response.json().catch(() => null);
       if (!response.ok) return setMessage(body?.error ?? "Could not log the QC issue.");
       setIssues((items) => [{ ...body, createdAt: new Date() }, ...items]);
@@ -170,7 +172,7 @@ function QcIssueTracker({ reports, initialIssues, workOrders, canManage, canVeri
 
   async function update(issue: QcIssue, status: "open" | "resolved" | "waived", resolution: string | null) {
     setMessage("");
-    const response = await fetch(`/api/qc-issues/${issue.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, resolution }) });
+    const response = await postpilotUiFetch(`/v1/qc-issues/${issue.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, resolution }) });
     const body = await response.json().catch(() => null);
     if (!response.ok) return setMessage(body?.error ?? "Could not update the QC issue.");
     setIssues((items) => items.map((item) => item.id === issue.id ? { ...item, ...body } : item));
@@ -218,7 +220,7 @@ function SimpleWorkflowPanel({ episodeId, currentStageId, currentStatus, stages,
     if (!episodeId || !stageId) return;
     setSaving(true); setMessage("");
     try {
-      const response = await fetch(`/api/episodes/${episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId: stageId, action, approvalRuleId: action === "sign_off" ? nextRule?.id : undefined, comment: action === "sign_off" ? comment : undefined, reason: ["block", "resume", "start_early"].includes(action) ? reason : undefined }) });
+      const response = await postpilotUiFetch(`/v1/episodes/${episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId: stageId, action, approvalRuleId: action === "sign_off" ? nextRule?.id : undefined, comment: action === "sign_off" ? comment : undefined, reason: ["block", "resume", "start_early"].includes(action) ? reason : undefined }) });
       const body = await response.json().catch(() => null);
       if (!response.ok) return setMessage(body?.error ?? "Could not update this stage.");
       setComment(""); setReason("");
@@ -360,7 +362,7 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tr
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/episodes/${episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId, action, ...extra }) });
+      const response = await postpilotUiFetch(`/v1/episodes/${episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId, action, ...extra }) });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
         setMessage(body?.error ?? "Could not complete the workflow action.");
@@ -421,7 +423,7 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tr
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/episodes/${episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId, approvalRuleId: nextPendingRule?.id, action: "sign_off", comment }) });
+      const response = await postpilotUiFetch(`/v1/episodes/${episodeId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflowStageId, approvalRuleId: nextPendingRule?.id, action: "sign_off", comment }) });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
         setMessage(body?.error ?? "Could not record the sign-off.");
