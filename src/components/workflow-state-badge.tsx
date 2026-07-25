@@ -8,12 +8,12 @@ const labels: Record<CurrentEpisodeWorkflowStatus, string> = {
   complete: "Complete",
 };
 
-const tones: Record<CurrentEpisodeWorkflowStatus, string> = {
-  not_started: "pp-status--neutral",
-  in_progress: "pp-status--active",
-  awaiting_sign_off: "pp-status--warning",
-  blocked: "pp-status--danger",
-  complete: "pp-status--success",
+const tones: Record<CurrentEpisodeWorkflowStatus, "neutral" | "active" | "warning" | "danger" | "success"> = {
+  not_started: "neutral",
+  in_progress: "active",
+  awaiting_sign_off: "warning",
+  blocked: "danger",
+  complete: "success",
 };
 
 /** The one visual treatment for the server-derived episode workflow state. */
@@ -21,5 +21,6 @@ export function WorkflowStateBadge({ status, className = "" }: { status: Current
   const normalized = status as CurrentEpisodeWorkflowStatus;
   const label = labels[normalized] ?? status.replaceAll("_", " ");
   const tone = tones[normalized] ?? tones.not_started;
-  return <span className={`pp-status ${tone} ${className}`}>{label}</span>;
+  return <StatusChip label={label} tone={tone} className={className} />;
 }
+import { StatusChip } from "@/components/operations-ui";

@@ -50,11 +50,88 @@ body {
 
 button, a { -webkit-tap-highlight-color: transparent; }
 
-a, button, input, select, textarea { transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
+a, button, input, select, textarea { transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease, opacity 160ms ease; }
+
+/* Feedback is deliberately quick: it confirms intent without making the
+ * production interface feel animated for its own sake. */
+:where(button, [role="button"], .button):active:not(:disabled):not([aria-disabled="true"]) { transform: translateY(1px) scale(0.985); }
+:where(button, [role="button"], .button)[aria-busy="true"], :where(button, [role="button"], .button):disabled { cursor: wait; }
+.pp-status { transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease; }
+p[role="status"], p[role="alert"] { animation: pp-status-in 180ms ease-out both; }
+
+@keyframes pp-status-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Loading placeholders mirror the eventual header, register, calendar, and
+ * workspace geometry so operators can keep their place while data arrives. */
+.pp-skeleton {
+  display: block;
+  border-radius: 0.375rem;
+  background: linear-gradient(100deg, #e8ece8 18%, #f7f9f6 38%, #e8ece8 58%);
+  background-size: 230% 100%;
+  animation: pp-skeleton-shimmer 1.35s linear infinite;
+}
+@keyframes pp-skeleton-shimmer { from { background-position: 100% 0; } to { background-position: -130% 0; } }
 
 .app-shell { isolation: isolate; min-height: 100vh; }
 
 .pp-main { position: relative; }
+
+/* A shared 12-column page frame gives every operational module the same
+ * alignment, while each module can still compose its own dense inner grid. */
+.pp-page {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+.pp-page > * { grid-column: 1 / -1; min-width: 0; }
+
+.pp-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  padding-bottom: 1.125rem;
+  border-bottom: 1px solid rgb(211 217 211 / 0.8);
+}
+.pp-page-header__eyebrow {
+  color: var(--pp-ink-muted);
+  font-size: 0.625rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.pp-page-header h1 { margin-top: 0.35rem; font-size: clamp(1.5rem, 2.2vw, 1.875rem); }
+.pp-page-header__description { max-width: 46rem; margin-top: 0.35rem; color: var(--pp-ink-soft); font-size: 0.8125rem; line-height: 1.5; }
+.pp-page-header__aside { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.75rem; }
+
+/* Shared operational primitives. Feature modules may compose them, but should
+ * not need to invent a new header, register, empty state, or summary style. */
+.pp-summary-strip { display: grid; overflow: hidden; border: 1px solid var(--pp-border); border-radius: var(--pp-radius-control); background: var(--pp-surface); box-shadow: 0 1px 2px rgb(23 35 31 / 0.035); }
+.pp-summary-strip__item { min-width: 0; padding: 0.5rem 0.75rem; text-align: center; }
+.pp-summary-strip__item--divided { border-left: 1px solid #e8ece7; }
+.pp-summary-strip__item > span { display: block; overflow: hidden; color: var(--pp-ink-muted); font-size: 0.5625rem; font-weight: 750; letter-spacing: 0.08em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.pp-summary-strip__item > strong { display: block; margin-top: 0.125rem; color: #3c5148; font-size: 0.9375rem; font-weight: 700; }
+.pp-summary-strip__item > strong[data-tone="success"] { color: #477463; }
+.pp-summary-strip__item > strong[data-tone="warning"] { color: #92623b; }
+.pp-summary-strip__item > strong[data-tone="danger"] { color: #a35e41; }
+.pp-summary-strip--compact { display: flex; }
+.pp-summary-strip--compact .pp-summary-strip__item { min-width: 4.75rem; padding: 0.375rem 0.625rem; text-align: right; }
+.pp-summary-strip--compact .pp-summary-strip__item > strong { font-size: 0.875rem; }
+.pp-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; border-bottom: 1px solid #e7eae5; padding: 0.875rem 1.25rem; }
+.pp-panel-header h2 { font-size: 0.875rem; font-weight: 650; letter-spacing: -0.02em; }
+.pp-panel-header p { margin-top: 0.125rem; color: #7c8580; font-size: 0.75rem; }
+.pp-section-action { display: inline-flex; align-items: center; gap: 0.25rem; color: #42665a; font-size: 0.75rem; font-weight: 700; }
+a.pp-section-action:hover { color: #29483f; text-decoration: underline; text-underline-offset: 0.18em; }
+.pp-empty-state { padding: 3rem 1.25rem; text-align: center; }
+.pp-side-summary { overflow: hidden; }
+.pp-side-summary__body { padding: 1.25rem; }
+.pp-form-layout { display: grid; gap: 1rem; }
+.pp-form-layout[data-columns="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pp-form-layout[data-columns="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
 /* A compact, calm type system makes dense operational screens easier to scan. */
 main h1, main h2, main h3 { text-wrap: balance; }
@@ -126,7 +203,12 @@ main :where(label, legend) { color: #4d5a54; }
   backdrop-filter: blur(12px);
 }
 
-.panel:hover { border-color: rgb(199 208 201 / 0.95); }
+/* A passive data surface does not lift when the pointer passes over it. Apply
+ * this class/data attribute only to cards that are themselves clickable. */
+.panel.actionable-surface,
+.panel[data-actionable="true"] { transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
+.panel.actionable-surface:hover,
+.panel[data-actionable="true"]:hover { border-color: rgb(199 208 201 / 0.95); box-shadow: var(--pp-shadow-md); transform: translateY(-1px); }
 
 .control {
   width: 100%;
@@ -303,6 +385,215 @@ input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:f
 .work-orders-workspace > .divide-y > article:hover { background: #f7faf7; }
 .work-orders-workspace > .divide-y > article:hover::before { background: #709482; }
 
+/* The episode tabs share one operational grammar: header, summary, surface, queue. */
+.episode-tab-header { min-height: 0; }
+.episode-summary-strip { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.8); }
+.episode-workspace-surface {
+  background: var(--pp-surface);
+  box-shadow: var(--pp-shadow-sm);
+}
+.episode-queue-row { transition: background-color 160ms ease, box-shadow 160ms ease; }
+.episode-queue-row:hover {
+  background: #f7faf7;
+  box-shadow: inset 3px 0 0 #709482;
+}
+.episode-empty-state { color: var(--pp-ink-muted); }
+
+/* Tab content moves as a single compact panel; this avoids an abrupt replace
+ * when moving between workflow, QC, bookings, and commercial context. */
+.episode-tab-panel { animation: pp-tab-in 170ms cubic-bezier(.2,.7,.25,1) both; }
+nav[aria-label="Episode workspace sections"] .button[data-active="true"] { position: relative; }
+nav[aria-label="Episode workspace sections"] .button[data-active="true"]::after { position: absolute; right: 0.75rem; bottom: -2px; left: 0.75rem; height: 2px; border-radius: 999px; background: #567b72; content: ""; }
+@keyframes pp-tab-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Native disclosure is used for dense detail rows. Opening it reveals the
+ * detail as a short expansion rather than a hard layout jump. */
+details > :not(summary) { transform-origin: top; }
+details[open] > :not(summary) { animation: pp-expand-in 170ms ease-out both; }
+@keyframes pp-expand-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Operational registers keep dense production data scannable. Their header
+ * always begins at the panel edge; a page must opt in with a separate
+ * modifier if it genuinely needs a viewport offset. This avoids empty
+ * header bands whenever a register is reused in a different layout. */
+.operational-register { position: relative; background: var(--pp-surface); }
+.operational-register__header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgb(254 254 250 / 0.96) !important;
+  box-shadow: 0 1px 0 rgb(220 226 220 / 0.92), 0 8px 16px rgb(25 42 35 / 0.025);
+  backdrop-filter: blur(12px);
+}
+.operational-register__row {
+  position: relative;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+.operational-register__row::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: transparent;
+  content: "";
+}
+.operational-register__row:hover,
+.operational-register__row:focus-within { background: #f7faf7; box-shadow: inset 3px 0 0 #719483; }
+.operational-register__row--attention::before { background: #c08b43; }
+.operational-register__row--danger::before { background: #b65e4d; }
+.operational-register__row--attention:hover,
+.operational-register__row--attention:focus-within { background: #fffaf1; box-shadow: inset 3px 0 0 #c08b43; }
+.operational-register__row--danger:hover,
+.operational-register__row--danger:focus-within { background: #fff6f3; box-shadow: inset 3px 0 0 #b65e4d; }
+.operational-empty { background: linear-gradient(180deg, rgb(250 252 249 / 0.68), rgb(254 254 250 / 0)); }
+
+/* Dashboard is a command centre, not another stack of summary cards. */
+.dashboard-command-center {
+  position: relative;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid #e3e8e3;
+}
+.dashboard-command-center__aside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+.dashboard-command-center__signals { display: flex; gap: 0.375rem; }
+.command-signal {
+  display: grid;
+  min-width: 4.75rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #e0e6e0;
+  border-radius: 0.625rem;
+  background: rgb(255 255 253 / 0.72);
+}
+.command-signal > span { color: #758079; font-size: 0.5625rem; font-weight: 750; letter-spacing: 0.07em; text-transform: uppercase; }
+.command-signal > strong { margin-top: 0.125rem; color: #35413b; font-size: 1rem; line-height: 1; }
+.command-signal--attention { border-color: #ead4b4; background: #fff8ec; }
+.command-signal--attention > strong { color: #a46735; }
+.dashboard-signal-strip {
+  padding: 0.25rem 0;
+  border-top: 1px solid #edf0ec;
+  border-bottom: 1px solid #edf0ec;
+}
+.dashboard-signal {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-height: 4.25rem;
+  padding: 0.5rem 0.75rem;
+  border-right: 1px solid #e7ebe7;
+  color: inherit;
+  transition: background-color 150ms ease;
+}
+.dashboard-signal:hover { background: #f6f9f6; }
+.dashboard-signal:nth-child(2n) { border-right: 0; }
+.dashboard-signal__icon {
+  display: grid;
+  width: 1.9rem;
+  height: 1.9rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 0.5625rem;
+  background: #edf3ee;
+  color: #54766b;
+}
+.dashboard-signal__icon--attention { background: #fff0e6; color: #ae6745; }
+.dashboard-signal__label { display: block; overflow: hidden; color: #717c76; font-size: 0.625rem; font-weight: 750; letter-spacing: 0.065em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.dashboard-signal strong { color: #2e3934; font-size: 1.25rem; letter-spacing: -0.05em; line-height: 1; }
+.dashboard-signal small { overflow: hidden; color: #818a84; font-size: 0.625rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-timeline__list { padding-block: 0.25rem; }
+.dashboard-timeline__item {
+  position: relative;
+  display: flex;
+  gap: 0.875rem;
+  padding: 0.875rem 1.25rem;
+  border-left: 3px solid transparent;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.dashboard-timeline__item:hover { background: #f7faf7; border-left-color: #719483; }
+.dashboard-timeline__item--attention { border-left-color: #d2a258; background: linear-gradient(90deg, rgb(255 249 238 / 0.72), transparent 30%); }
+.dashboard-timeline__item--danger { border-left-color: #c56c59; background: linear-gradient(90deg, rgb(255 244 240 / 0.76), transparent 34%); }
+.dashboard-timeline__rail { position: relative; display: block; width: 1.9rem; flex: 0 0 1.9rem; }
+.dashboard-timeline__rail::after { position: absolute; top: 1.9rem; bottom: -1.25rem; left: 0.94rem; width: 1px; background: #e0e7e1; content: ""; }
+.dashboard-timeline__item:last-child .dashboard-timeline__rail::after { display: none; }
+.dashboard-timeline__icon { position: relative; z-index: 1; display: grid; width: 1.9rem; height: 1.9rem; place-items: center; border: 1px solid #d7e2d9; border-radius: 999px; background: #eef5f0; color: #4d7968; }
+.dashboard-timeline__item--attention .dashboard-timeline__icon { border-color: #efd8b6; background: #fff4df; color: #a36a30; }
+.dashboard-timeline__item--danger .dashboard-timeline__icon { border-color: #edcfc7; background: #fcebe6; color: #a75745; }
+
+/* Gantt calendar: time, room, state, and department can be read at a glance. */
+.booking-legend > span { display: inline-flex; align-items: center; gap: 0.375rem; }
+.booking-legend__swatch { display: inline-block; width: 1rem; height: 0.5rem; border: 1px solid; border-left-width: 3px; border-radius: 0.1875rem; }
+.booking-legend__swatch--confirmed { border-color: #5f7ee6; background: #eff3ff; }
+.booking-legend__swatch--hold { border-color: #b99143; border-style: dashed; background: #fff9e9; }
+.booking-legend__swatch--reservation { border-color: #4f9a79; background: #edf7f2; }
+.booking-legend__swatch--conflict { border-color: #b65e4d; background: #fff0ed; }
+.gantt-day-header { background: linear-gradient(180deg, #fbfcfa, #f7f9f6); }
+.gantt-hour-band { border-color: #edf0ec; color: #929994; }
+.gantt-hour-band--key { background: rgb(235 242 236 / 0.56); color: #65736c; font-weight: 700; }
+.gantt-room-label { background: linear-gradient(90deg, #fdfdfb, #fafbf8); }
+.gantt-booking { transition: transform 150ms ease, box-shadow 150ms ease, filter 150ms ease; }
+.gantt-booking:hover { transform: translateY(-1px); filter: saturate(1.06); }
+.gantt-booking--hold { opacity: 0.88; }
+.gantt-booking--reservation { box-shadow: 0 0 0 1px rgb(79 154 121 / 0.22), 0 2px 5px rgb(37 91 68 / 0.1); }
+.gantt-booking--conflict { border-color: #b65e4d !important; background: #fff0ed !important; box-shadow: 0 0 0 1px rgb(182 94 77 / 0.22); }
+.availability-badge { display: inline-flex; border-radius: 999px; padding: 0.125rem 0.375rem; font-size: 0.5625rem; font-weight: 750; letter-spacing: 0.03em; text-transform: uppercase; }
+.availability-badge--free { background: #e5f1e9; color: #37705a; }
+.availability-badge--booked { background: #e9eff4; color: #4d6d7e; }
+.availability-badge--overtime { background: #fff1da; color: #95622a; }
+.availability-badge--unavailable { background: #fbeae5; color: #9a5040; }
+.work-order-priority { border-radius: 999px; padding: 0.125rem 0.375rem; background: #edf0ed; color: #64716a; font-size: 0.625rem; font-weight: 750; text-transform: capitalize; }
+.work-order-priority--high { background: #fff1d9; color: #936129; }
+.work-order-priority--blocker { background: #fbe8e3; color: #a15240; }
+
+/* Premium workflow presentation: live status is always more prominent than
+ * decorative colour, and motion remains deliberately subtle. */
+.pp-main .workflow-production-path {
+  background: linear-gradient(145deg, rgb(255 255 252 / 0.98), rgb(247 250 247 / 0.82)) !important;
+  box-shadow: var(--pp-shadow-sm);
+}
+.workflow-stage-icon {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #d2ded6;
+  border-radius: 0.75rem;
+  background: #eef5f0;
+  color: #487364;
+}
+.workflow-stage-icon--current { border-color: #acc6b8; background: #e3f0e8; color: #315f52; box-shadow: 0 5px 14px rgb(49 95 82 / 0.1); }
+.workflow-progress-ring {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border-radius: 999px;
+  box-shadow: 0 2px 7px rgb(38 64 53 / 0.1);
+  transition: background 320ms ease;
+}
+.workflow-progress-ring > span {
+  display: grid;
+  width: 2.3rem;
+  height: 2.3rem;
+  place-items: center;
+  border-radius: inherit;
+  background: var(--pp-surface);
+  color: #426a5c;
+  font-size: 0.625rem;
+  font-weight: 750;
+}
+.workflow-path-node--current { animation: workflow-node-pulse 2.8s ease-in-out infinite; }
+.workflow-blocker { border: 1px solid; }
+.workflow-blocker--attention { border-color: #ecd9bd; background: #fff8e9; color: #885d2d; }
+.workflow-blocker--failure { border-color: #edcdc5; background: #fdf0ec; color: #914d3e; }
+@keyframes workflow-node-pulse {
+  0%, 100% { box-shadow: 0 0 0 6px #dbece3; }
+  50% { box-shadow: 0 0 0 9px rgb(219 236 227 / 0.48); }
+}
+
 /* Dense registers remain calm and legible when a facility has many rows. */
 table { border-collapse: separate; border-spacing: 0; }
 thead th {
@@ -328,9 +619,25 @@ select { min-height: 2.25rem; color: #4d5853; }
 @media (max-width: 767px) {
   body { background: var(--pp-canvas); }
   .panel { border-radius: 0.75rem; }
+  .pp-page { gap: 1rem; }
+  .pp-page-header { align-items: flex-start; padding-bottom: 1rem; }
+  .pp-page-header__aside { width: 100%; justify-content: space-between; }
+  .pp-summary-strip--compact .pp-summary-strip__item { min-width: 4.25rem; }
+  .pp-form-layout[data-columns="2"], .pp-form-layout[data-columns="3"] { grid-template-columns: 1fr; }
   .dashboard-hero::after { display: none; }
+  .dashboard-command-center__aside { align-items: flex-start; justify-content: flex-start; }
+  .dashboard-command-center__signals { width: 100%; }
+  .command-signal { flex: 1 1 0; min-width: 0; }
+  .dashboard-signal { border-right: 0; border-bottom: 1px solid #e7ebe7; }
+  .dashboard-signal:nth-last-child(-n + 2) { border-bottom: 0; }
+}
+
+@media (min-width: 1280px) {
+  .dashboard-signal:nth-child(n) { border-right: 1px solid #e7ebe7; }
+  .dashboard-signal:last-child { border-right: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+  .pp-skeleton, [class*="animate-pulse"] { animation: none !important; }
 }

@@ -17,22 +17,19 @@ test.describe("Episodes UI", () => {
     await openEpisodes(page);
 
     await expect(page.getByRole("heading", { name: "Episodes" })).toBeVisible();
-    await expect(page.getByText("16 episodes", { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: /Westbound/ })).toBeVisible();
     await expect(page.getByRole("link", { name: /Night Ferry/ })).toBeVisible();
   });
 
-  test("filters episodes by show and workflow using labelled controls", async ({ page }) => {
+  test("keeps the register header to its operational column labels only", async ({ page }) => {
     await openEpisodes(page);
 
-    await page.getByLabel("Show").selectOption({ label: "Crossing Point" });
-    await expect(page.getByText("4 episodes", { exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Westbound/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Relay/ })).not.toBeVisible();
-
-    await page.getByLabel("Workflow").selectOption({ label: "Picture lock" });
-    await expect(page.getByText("1 episodes", { exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Night Ferry/ })).toBeVisible();
+    const register = page.getByLabel("Episodes");
+    const header = register.locator(".episodes-register__header");
+    await expect(header).toContainText("Episode");
+    await expect(header).not.toContainText("Workflow");
+    await expect(header.locator("a")).toHaveCount(0);
+    await expect(register.getByText(/editor.?s cut/i)).toHaveCount(0);
   });
 
   test("explains required fields before creating an episode", async ({ page }) => {

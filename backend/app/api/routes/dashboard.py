@@ -3,14 +3,25 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 
 from app.api.dependencies import CurrentActor, DbSession
 from app.api.production import may_view_all_episodes
 from app.api.routes.episodes import _episode_response, _episode_rows
 from app.api.routes.shows import list_shows
 from app.auth import has_permission
-from app.db.tables import activity_log, bookings, budget_lines, people, rooms
+from app.db.tables import (
+    activity_log,
+    bookings,
+    budget_lines,
+    episodes,
+    people,
+    post_work_orders,
+    rooms,
+    seasons,
+    shows,
+    workflow_stages,
+)
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -80,6 +91,64 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
         )
     ).all()
 
+    blocking_conditions = [
+        post_work_orders.c.organization_id == actor.organization_id,
+        post_work_orders.c.is_blocking.is_(True),
+        post_work_orders.c.status.not_in(("complete", "cancelled")),
+    ]
+    if not all_operations:
+        if not actor.person_id or (actor.active_organization and actor.active_organization.role == "client"):
+            blocking_conditions.append(post_work_orders.c.id.is_(None))
+        else:
+            blocking_conditions.append(
+                or_(
+                    post_work_orders.c.assignee_person_id == actor.person_id,
+                    post_work_orders.c.assignee_role == actor.person_role,
+                )
+            )
+    blocking_work_orders = (
+        await session.execute(
+            select(
+                post_work_orders.c.id,
+                post_work_orders.c.title,
+                post_work_orders.c.priority,
+                post_work_orders.c.status,
+                post_work_orders.c.due_at,
+                episodes.c.id.label("episode_id"),
+                episodes.c.title.label("episode_title"),
+                episodes.c.number.label("episode_number"),
+                shows.c.title.label("show_title"),
+                workflow_stages.c.name.label("workflow_stage_name"),
+            )
+            .select_from(post_work_orders)
+            .join(
+                episodes,
+                and_(
+                    episodes.c.id == post_work_orders.c.episode_id,
+                    episodes.c.organization_id == actor.organization_id,
+                ),
+            )
+            .join(
+                seasons,
+                and_(seasons.c.id == episodes.c.season_id, seasons.c.organization_id == actor.organization_id),
+            )
+            .join(
+                shows,
+                and_(shows.c.id == seasons.c.show_id, shows.c.organization_id == actor.organization_id),
+            )
+            .outerjoin(
+                workflow_stages,
+                and_(
+                    workflow_stages.c.id == post_work_orders.c.workflow_stage_id,
+                    workflow_stages.c.organization_id == actor.organization_id,
+                ),
+            )
+            .where(and_(*blocking_conditions))
+            .order_by(post_work_orders.c.due_at.asc().nulls_last(), post_work_orders.c.created_at.desc())
+            .limit(6)
+        )
+    ).all()
+
     budget = None
     if await has_permission(session, actor, "manage_commercial"):
         budget_row = (
@@ -92,7 +161,7 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
         ).one()
         budget = {"budgeted": float(budget_row.budgeted), "actual": float(budget_row.actual)}
 
-    shows = await list_shows(actor, session)
+    show_data = await list_shows(actor, session)
     return {
         "metrics": {
             "active_episodes": sum(row.workflow_status not in {"complete", "not_started"} for row in episode_rows),
@@ -101,7 +170,7 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
             "upcoming_deliveries": sum(row.delivery_deadline is not None for row in episode_rows),
         },
         "episodes": [_episode_response(row) for row in episode_rows],
-        "shows": shows["shows"],
+        "shows": show_data["shows"],
         "schedule": [
             {
                 "id": booking.id,
@@ -114,6 +183,21 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
             for booking in schedule
         ],
         "team": [{"id": person.id, "name": person.name, "role": person.role} for person in team],
+        "blocking_work_orders": [
+            {
+                "id": item.id,
+                "title": item.title,
+                "priority": item.priority,
+                "status": item.status,
+                "due_at": item.due_at,
+                "episode_id": item.episode_id,
+                "episode_title": item.episode_title,
+                "episode_number": item.episode_number,
+                "show_title": item.show_title,
+                "workflow_stage_name": item.workflow_stage_name,
+            }
+            for item in blocking_work_orders
+        ],
         "budget": budget,
         "activity": [
             {

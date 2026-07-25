@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { WorkflowStateBadge } from "@/components/workflow-state-badge";
+import { OperationalRegister } from "@/components/operations-ui";
 
 export type WorkflowSignOffItem = {
   id: string;
@@ -28,15 +29,7 @@ export type WorkflowSignOffItem = {
 };
 
 export function WorkflowSignOffQueue({ signOffs }: { signOffs: WorkflowSignOffItem[] }) {
-  return (
-    <section className="panel overflow-hidden">
-      <div className="border-b border-[#ebeae6] px-5 py-4"><h2 className="text-sm font-semibold text-[#343b38]">Awaiting my sign-off</h2><p className="mt-1 text-xs text-[#858a87]">Current workflow stages where you are the named sign-off person.</p></div>
-      <div className="divide-y divide-[#efeeea]">
-        {signOffs.map((signOff) => <SignOffRow key={signOff.id} signOff={signOff} />)}
-        {!signOffs.length && <p className="px-5 py-10 text-center text-sm text-[#858a87]">No workflow stages are waiting for your sign-off.</p>}
-      </div>
-    </section>
-  );
+  return <OperationalRegister title="Awaiting my sign-off" description="Current workflow stages where you are the named sign-off person." empty={{ title: "No workflow stages are waiting for your sign-off.", description: "When an assigned episode reaches a required gate, it will appear here." }}>{signOffs.length ? signOffs.map((signOff) => <SignOffRow key={signOff.id} signOff={signOff} />) : null}</OperationalRegister>;
 }
 
 function SignOffRow({ signOff: item }: { signOff: WorkflowSignOffItem }) {
@@ -64,7 +57,7 @@ function SignOffRow({ signOff: item }: { signOff: WorkflowSignOffItem }) {
   }
 
   return (
-    <article className="px-5 py-4">
+    <article className="operational-register__row operational-register__row--attention px-5 py-4">
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
         <div className="min-w-0">
           <p className="text-xs font-medium text-[#617b75]">{item.showTitle} · E{String(item.episodeNumber).padStart(2, "0")} {item.episodeTitle}</p>

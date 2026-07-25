@@ -4,6 +4,7 @@ import Link from "next/link";
 import { BudgetLineForm } from "@/components/budget-line-form";
 import type { ClientPurchaseOrderSummary } from "@/components/client-purchase-orders-summary";
 import { EpisodeInvoicePanel } from "@/components/episode-invoice-panel";
+import { PageHeader } from "@/components/operations-ui";
 import { RateCardDialog } from "@/components/rate-card-dialog";
 import type { ServiceRate } from "@/components/service-rate-card";
 import { WorkOrderChargeQueue } from "@/components/work-order-charge-queue";
@@ -103,14 +104,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
   const episodeClientPurchaseOrders = clientPurchaseOrdersForEpisode(data.clientPurchaseOrders, selectedEpisode);
 
   return <div className="space-y-5">
-    <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-      <div>
-        <p className="text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">Episode cost control · {activeShow}</p>
-        <h1 className="mt-2 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Budget</h1>
-        <p className="mt-1 text-sm text-[#747977]">Episode-level costs with show roll-ups for post-production control.</p>
-      </div>
-      <div className="flex gap-2"><Link href={`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`} className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">All episodes</Link><BudgetLineForm episodes={episodes} currency={currency} purchaseOrders={episodePurchaseOrders} /></div>
-    </header>
+    <PageHeader eyebrow={`Episode cost control · ${activeShow}`} title="Budget" description="Episode-level costs with show roll-ups for post-production control." action={<div className="flex gap-2"><Link href={`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`} className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">All episodes</Link><BudgetLineForm episodes={episodes} currency={currency} purchaseOrders={episodePurchaseOrders} /></div>} />
 
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
       <Metric icon={<CircleDollarSign size={16} />} label="Estimated" value={money(totals.estimate, currency)} detail={`${lines.length} cost lines`} />

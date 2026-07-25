@@ -1,6 +1,7 @@
 "use client";
 
 import { postpilotUiFetch } from "@/lib/postpilot-api-client";
+import { EpisodeEmptyState, EpisodeTabHeader, EpisodeWorkspaceSurface } from "@/components/episode-workspace";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@heroui/react";
@@ -67,13 +68,14 @@ const transitionSchema = z.object({
 type TransitionValues = z.infer<typeof transitionSchema>;
 
 export function DeliveryManifestPanel({ episodeId, manifest, profiles, canManageManifest, canUpdate, canConfirmReceipt }: { episodeId: string; manifest: DeliveryManifest | null; profiles: Array<{ id: string; name: string }>; canManageManifest: boolean; canUpdate: boolean; canConfirmReceipt: boolean }) {
-  if (!manifest) return <div className="rounded-xl border border-dashed border-[#dfe3de] bg-[#fafbf9] px-5 py-12 text-center"><p className="text-sm font-semibold text-[#4e5853]">Set up the delivery checklist</p><p className="mx-auto mt-1 max-w-md text-sm leading-6 text-[#7b837e]">Choose the network or client delivery profile for this episode. It creates a fixed checklist; later profile edits will not change it.</p>{canManageManifest ? <ApplyProfileForm episodeId={episodeId} profiles={profiles} /> : <p className="mt-4 text-xs text-[#838b86]">An authorised user can apply the appropriate delivery profile.</p>}</div>;
+  if (!manifest) return <div className="space-y-5"><EpisodeTabHeader eyebrow="Episode delivery" title="Delivery manifest" description="Track every required master, version, receipt, and delivery reference for this episode." /><EpisodeWorkspaceSurface className="border-dashed"><EpisodeEmptyState><span className="block font-semibold text-[#4e5853]">Set up the delivery checklist</span><span className="mx-auto mt-1 block max-w-md leading-6 text-[#7b837e]">Choose the network or client delivery profile for this episode. It creates a fixed checklist; later profile edits will not change it.</span></EpisodeEmptyState>{canManageManifest ? <ApplyProfileForm episodeId={episodeId} profiles={profiles} /> : <p className="pb-8 text-center text-xs text-[#838b86]">An authorised user can apply the appropriate delivery profile.</p>}</EpisodeWorkspaceSurface></div>;
   const { readiness } = manifest;
   const blockers = manifest.items.filter((item) => item.required && ["qc_failed", "rejected"].includes(item.status));
   const optionalCount = manifest.items.length - readiness.requiredItemCount;
   return <div className="space-y-5">
+    <EpisodeTabHeader eyebrow="Episode delivery" title="Delivery manifest" description="Track every required master, version, receipt, and delivery reference for this episode." />
     <section className="rounded-xl border border-[#e4e7e3] bg-[#fafbf9] p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#77817d]">Delivery checklist</p><h2 className="mt-1 text-lg font-semibold text-[#303936]">{manifest.profileName}</h2><p className="mt-1 text-xs text-[#727b76]">{readiness.completedRequiredItemCount} of {readiness.requiredItemCount} required items complete{optionalCount ? ` · ${optionalCount} optional` : ""}</p></div><RiskBadge risk={readiness.deadlineRisk} /></div>
+      <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#77817d]">Active delivery profile</p><h3 className="mt-1 text-lg font-semibold text-[#303936]">{manifest.profileName}</h3><p className="mt-1 text-xs text-[#727b76]">{readiness.completedRequiredItemCount} of {readiness.requiredItemCount} required items complete{optionalCount ? ` · ${optionalCount} optional` : ""}</p></div><RiskBadge risk={readiness.deadlineRisk} /></div>
       <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#e6e9e5]"><div className="h-full rounded-full bg-[#5f8578]" style={{ width: `${readiness.progressPercent}%` }} /></div>
       <div className="mt-3 grid gap-2 sm:grid-cols-3"><Metric label="Checklist" value={`${readiness.progressPercent}% ready`} /><Metric label="Facility dispatch" value={readiness.facilityDispatched ? "Complete" : `${readiness.outstandingRequiredItemCount} to send`} tone={readiness.facilityDispatched ? "good" : undefined} /><Metric label="Client receipt" value={readiness.clientNetworkAccepted ? "Confirmed" : "Awaiting"} tone={readiness.clientNetworkAccepted ? "good" : undefined} /></div>
       {manifest.specificationUrl && <a href={manifest.specificationUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-[#47756a] hover:underline">Delivery specification <ExternalLink size={12} /></a>}
