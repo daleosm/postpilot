@@ -82,7 +82,7 @@ export function EpisodeWorkOrders({ episodeId, initialWorkOrders, people, stages
 
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-semibold text-[#414a46]">Episode work orders</p><p className="mt-1 text-xs text-[#818783]">Drafts must be approved before work starts. A completed client change can then be posted to the episode budget.</p></div>{canManage && <Button variant="primary" onPress={beginCreate} className="bg-[#263130] text-white"><Plus size={15}/> New work order</Button>}</div>
-    {open && <form onSubmit={form.handleSubmit(save)} className="rounded-lg border border-[#dfe4df] bg-[#fafafa] p-4"><div className="grid gap-3 sm:grid-cols-2">
+    {open && <form onSubmit={form.handleSubmit(save)} className="rounded-lg border border-[#dfe4df] bg-[#fefefa] p-4"><div className="grid gap-3 sm:grid-cols-2">
       <Field label="Title" error={form.formState.errors.title?.message}><input {...form.register("title")} placeholder="External caption correction"/></Field>
       <Field label="Workflow scope"><select {...form.register("workflowStageId", { onChange: (event) => form.setValue("isBlocking", Boolean(event.target.value)) })}><option value="">Episode-wide — not tied to a stage</option>{stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.position}. {stage.name}{stage.id === currentStageId ? " (current)" : ""}</option>)}</select></Field>
       <Field label="Department"><input {...form.register("department")} placeholder="Online / captions / VFX…"/></Field>
