@@ -6,7 +6,7 @@
   --pp-canvas-deep: #e9ebe6;
   --pp-surface: #fefefa;
   --pp-surface-strong: #ffffff;
-  --pp-surface-muted: #f7f8f5;
+  --pp-surface-muted: #fbfbfa;
   --pp-ink: #202827;
   --pp-ink-soft: #52605b;
   --pp-ink-muted: #77817d;
@@ -21,8 +21,12 @@
   --pp-danger: #aa5545;
   --pp-danger-soft: #fbedeb;
   --pp-focus: #759b8d;
+  --pp-radius-control: 0.625rem;
+  --pp-radius-panel: 0.875rem;
+  --pp-radius-overlay: 1rem;
   --pp-shadow-sm: 0 1px 2px rgb(23 35 31 / 0.04), 0 8px 24px rgb(23 35 31 / 0.025);
   --pp-shadow-md: 0 16px 38px rgb(23 35 31 / 0.08), 0 2px 6px rgb(23 35 31 / 0.04);
+  --pp-shadow-overlay: 0 28px 70px rgb(21 34 29 / 0.16), 0 4px 14px rgb(21 34 29 / 0.08);
 }
 
 * { box-sizing: border-box; }
@@ -52,6 +56,13 @@ a, button, input, select, textarea { transition: border-color 160ms ease, backgr
 
 .pp-main { position: relative; }
 
+/* A compact, calm type system makes dense operational screens easier to scan. */
+main h1, main h2, main h3 { text-wrap: balance; }
+main h1 { color: var(--pp-ink); font-weight: 680; letter-spacing: -0.052em; }
+main h2 { color: #2b3732; font-weight: 650; letter-spacing: -0.025em; }
+main h3 { color: #35413c; font-weight: 640; letter-spacing: -0.016em; }
+main :where(label, legend) { color: #4d5a54; }
+
 /* Shared action language. HeroUI continues to provide behaviour and ARIA
  * semantics; these rules establish the production-tool visual finish. */
 .button {
@@ -60,7 +71,7 @@ a, button, input, select, textarea { transition: border-color 160ms ease, backgr
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  border-radius: 0.625rem;
+  border-radius: var(--pp-radius-control);
   padding: 0 0.875rem;
   font-size: 0.8125rem;
   font-weight: 650;
@@ -109,7 +120,7 @@ a, button, input, select, textarea { transition: border-color 160ms ease, backgr
 
 .panel {
   border: 1px solid rgb(211 217 211 / 0.88);
-  border-radius: 0.875rem;
+  border-radius: var(--pp-radius-panel);
   background: var(--pp-surface);
   box-shadow: var(--pp-shadow-sm), inset 0 1px 0 rgb(255 255 255 / 0.75);
   backdrop-filter: blur(12px);
@@ -121,7 +132,7 @@ a, button, input, select, textarea { transition: border-color 160ms ease, backgr
   width: 100%;
   height: 2.5rem;
   border: 1px solid var(--pp-border);
-  border-radius: 0.625rem;
+  border-radius: var(--pp-radius-control);
   background: rgb(255 255 255 / 0.82);
   padding: 0 0.75rem;
   color: #293632;
@@ -135,6 +146,7 @@ a, button, input, select, textarea { transition: border-color 160ms ease, backgr
 input:not([type="checkbox"]):not([type="radio"]), select, textarea {
   border-color: var(--pp-border) !important;
   background-color: rgb(255 255 255 / 0.82) !important;
+  border-radius: var(--pp-radius-control) !important;
   box-shadow: inset 0 1px 1px rgb(24 41 34 / 0.025);
 }
 
@@ -203,6 +215,94 @@ input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:f
   background: linear-gradient(180deg, rgb(250 252 248 / 0.72), rgb(255 255 252 / 0));
 }
 
+/* Operational sections can stand directly on the page canvas (not only inside
+ * a .panel). Keep their hand-authored utility colours mapped to our surface
+ * tokens, rather than allowing a mixture of near-green and white boxes. */
+.pp-main :where([class~="bg-[#f8faf8]"], [class~="bg-[#fafbf9]"], [class~="bg-[#fbfcfa]"], [class~="bg-white/50"], [class~="bg-white/60"], [class~="bg-white/70"]) {
+  background-color: var(--pp-surface) !important;
+}
+.pp-main :where([class~="border-[#e5e7e3]"], [class~="border-[#e7e8e4]"], [class~="border-[#e2e8e3]"], [class~="border-[#e7e9e5]"], [class~="border-[#e6e8e4]"], [class~="border-[#dde4df]"], [class~="border-[#e8e8e4]"]) {
+  border-color: var(--pp-border) !important;
+  background: var(--pp-surface) !important;
+}
+
+/* Nested operational groups should remain quieter than their parent section. */
+.panel :where([class~="bg-white/50"], [class~="bg-white/60"]) {
+  background: var(--pp-surface-muted) !important;
+  border-color: #e3e7e2 !important;
+  box-shadow: none !important;
+}
+
+/* Shared semantic badges: status colour communicates the state, never decoration. */
+.pp-status {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.1875rem 0.5rem;
+  font-size: 0.65625rem;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  white-space: nowrap;
+}
+.pp-status--neutral { border-color: #e0e5e1; background: #f1f3f0; color: #64716a; }
+.pp-status--active { border-color: #cbe0d4; background: #e6f1e9; color: #326a56; }
+.pp-status--success { border-color: #c6dfd0; background: #e2efe7; color: #326b57; }
+.pp-status--warning { border-color: #eeddbd; background: #fff4df; color: #90622d; }
+.pp-status--danger { border-color: #edcec5; background: #fbeae5; color: #9c503e; }
+.pp-status--info { border-color: #cfe0e5; background: #e8f1f3; color: #3b6874; }
+
+/* List registers receive predictable hover, focus, and selected-row feedback. */
+.panel > .divide-y > :is(a, button, article) {
+  position: relative;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+.panel > .divide-y > :is(a, button, article):hover { background: #f7faf7; }
+.panel > .divide-y > :is(a, button, article):focus-within {
+  z-index: 1;
+  background: #f5f9f5;
+  box-shadow: inset 3px 0 0 #7c9c8f;
+}
+
+/* All existing hand-built dialogs share the same quiet overlay and elevation. */
+:where(.fixed.inset-0) { backdrop-filter: blur(3px); }
+:where(.fixed.inset-0) > :is(.rounded-xl, .rounded-t-2xl) {
+  border-color: var(--pp-border) !important;
+  background: var(--pp-surface) !important;
+  box-shadow: var(--pp-shadow-overlay) !important;
+}
+
+/* Ready for an opt-in high-density register mode without creating another UI. */
+.density-compact .panel > .divide-y > :is(a, button, article) { padding-block: 0.625rem !important; }
+.density-compact :where(table th, table td) { padding-block: 0.5rem !important; }
+
+/* Episode work orders are an operational queue, not a stack of small cards. */
+.work-orders-workspace > .divide-y {
+  overflow: hidden;
+  border-color: var(--pp-border) !important;
+  border-radius: var(--pp-radius-panel) !important;
+  background: var(--pp-surface) !important;
+  box-shadow: var(--pp-shadow-sm);
+}
+.work-orders-workspace > .divide-y > article {
+  position: relative;
+  padding: 1.125rem !important;
+  transition: background-color 160ms ease;
+}
+.work-orders-workspace > .divide-y > article::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: transparent;
+  content: "";
+  transition: background-color 160ms ease;
+}
+.work-orders-workspace > .divide-y > article:hover { background: #f7faf7; }
+.work-orders-workspace > .divide-y > article:hover::before { background: #709482; }
+
 /* Dense registers remain calm and legible when a facility has many rows. */
 table { border-collapse: separate; border-spacing: 0; }
 thead th {
@@ -212,9 +312,11 @@ thead th {
   font-weight: 700;
   letter-spacing: 0.075em;
   text-transform: uppercase;
+  border-bottom: 1px solid #e4e8e3;
 }
 tbody tr { transition: background-color 140ms ease; }
 tbody tr:hover { background: rgb(238 244 239 / 0.52); }
+tbody tr:focus-within { background: #f3f8f4; box-shadow: inset 3px 0 0 #7c9c8f; }
 
 /* Native selects are intentionally compact, while still feeling like controls. */
 select { min-height: 2.25rem; color: #4d5853; }

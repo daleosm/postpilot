@@ -28,15 +28,15 @@ export function EpisodeDetailTabs({ data, workflowOnly = false, canUpdateWorkflo
   const visibleTabs = workflowOnly ? ["Workflow"] as TabName[] : tabs.filter((item) => (item !== "Budget" || canManageCommercial) && (item !== "Delivery manifest" || canViewDelivery));
 
   return (
-    <section className="panel overflow-hidden">
-      <div className="flex overflow-x-auto border-b border-[#ebeae6] px-4">
+    <section className="min-w-0 space-y-4">
+      <nav aria-label="Episode workspace sections" className="flex overflow-x-auto border-b border-[#dfe5df]">
         {visibleTabs.map((item) => (
-          <Button key={item} variant="tertiary" onPress={() => setTab(item)} className={`h-auto min-w-max rounded-none border-b-2 px-3 py-3 text-xs font-semibold transition ${tab === item ? "border-[#567b72] text-[#385c54]" : "border-transparent text-[#838986] hover:text-[#515a56]"}`}>
+          <Button key={item} variant="tertiary" onPress={() => setTab(item)} className={`-mb-px h-auto min-w-max rounded-none border-b-2 px-3 py-3 text-xs font-semibold transition ${tab === item ? "border-[#567b72] text-[#385c54]" : "border-transparent text-[#838986] hover:text-[#515a56]"}`}>
             {item}
           </Button>
         ))}
-      </div>
-      <div className="p-5"><TabContent tab={tab} data={data} canUpdateWorkflowWork={canUpdateWorkflowWork} canSubmitWorkflowTracks={canSubmitWorkflowTracks} canSignOffWorkflowTracks={canSignOffWorkflowTracks} canAuthorizeWorkflowExceptions={canAuthorizeWorkflowExceptions} canManageWorkOrders={canManageWorkOrders} canApproveWorkOrders={canApproveWorkOrders} canUpdateWorkOrders={canUpdateWorkOrders} canManageCommercial={canManageCommercial} canManageQc={canManageQc} canVerifyQc={canVerifyQc} canWaiveQc={canWaiveQc} canManageDelivery={canManageDelivery} canUpdateDelivery={canUpdateDelivery} canConfirmDeliveryReceipt={canConfirmDeliveryReceipt} currentPersonId={currentPersonId} /></div>
+      </nav>
+      <div className="min-w-0"><TabContent tab={tab} data={data} canUpdateWorkflowWork={canUpdateWorkflowWork} canSubmitWorkflowTracks={canSubmitWorkflowTracks} canSignOffWorkflowTracks={canSignOffWorkflowTracks} canAuthorizeWorkflowExceptions={canAuthorizeWorkflowExceptions} canManageWorkOrders={canManageWorkOrders} canApproveWorkOrders={canApproveWorkOrders} canUpdateWorkOrders={canUpdateWorkOrders} canManageCommercial={canManageCommercial} canManageQc={canManageQc} canVerifyQc={canVerifyQc} canWaiveQc={canWaiveQc} canManageDelivery={canManageDelivery} canUpdateDelivery={canUpdateDelivery} canConfirmDeliveryReceipt={canConfirmDeliveryReceipt} currentPersonId={currentPersonId} /></div>
     </section>
   );
 }

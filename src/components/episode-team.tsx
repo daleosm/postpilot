@@ -49,14 +49,15 @@ export function EpisodeTeam({ episodeId, assignments, people, signOffSlots = [],
         </div>
         <span className="rounded-full bg-[#edf0ed] px-2 py-1 text-[11px] font-semibold text-[#63716b]">{assignments.length} assigned</span>
       </div>
-      {assignments.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {assignments.map((item) => <div key={item.id} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-[#e8ebe7] bg-white/60 px-3 py-2.5">
-          <div className="min-w-0">
-            <p className="truncate text-xs font-semibold text-[#46504b]">{item.name}</p>
-            <p className="mt-0.5 truncate text-[11px] capitalize text-[#7a837e]">{item.role.replaceAll("_", " ")}</p>
-          </div>
-        </div>)}
-      </div> : <p className="py-7 text-center text-sm text-[#858b87]">No people have been assigned to this episode yet.</p>}
+      {assignments.length ? <ul className="mt-4 grid gap-x-5 gap-y-3 sm:grid-cols-2">
+        {assignments.map((item) => <li key={item.id} className="flex min-w-0 items-center gap-2.5">
+          <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e8efea] text-[10px] font-bold tracking-[.04em] text-[#456b5e]">{item.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span>
+          <span className="min-w-0">
+            <span className="block truncate text-xs font-semibold text-[#46504b]">{item.name}</span>
+            <span className="mt-0.5 block truncate text-[11px] capitalize text-[#7a837e]">{item.role.replaceAll("_", " ")}</span>
+          </span>
+        </li>)}
+      </ul> : <p className="py-7 text-center text-sm text-[#858b87]">No people have been assigned to this episode yet.</p>}
     </section>;
   }
 

@@ -80,8 +80,24 @@ export function EpisodeWorkOrders({ episodeId, initialWorkOrders, people, stages
     router.refresh();
   }
 
-  return <div className="space-y-4">
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-semibold text-[#414a46]">Episode work orders</p><p className="mt-1 text-xs text-[#818783]">Drafts must be approved before work starts. A completed client change can then be posted to the episode budget.</p></div>{canManage && <Button variant="primary" onPress={beginCreate} className="bg-[#263130] text-white"><Plus size={15}/> New work order</Button>}</div>
+  const activeCount = workOrders.filter((item) => ["awaiting_approval", "in_progress"].includes(item.status)).length;
+  const attentionCount = workOrders.filter((item) => item.isBlocking || item.status === "rejected").length;
+  const completeCount = workOrders.filter((item) => item.status === "complete").length;
+
+  return <div className="work-orders-workspace space-y-5">
+    <header className="flex flex-wrap items-start justify-between gap-4">
+      <div className="min-w-0">
+        <p className="text-[10px] font-semibold uppercase tracking-[.12em] text-[#75817c]">Episode operations</p>
+        <h2 className="mt-1 text-lg font-semibold text-[#303936]">Work orders</h2>
+        <p className="mt-1 max-w-2xl text-xs leading-5 text-[#737d77]">Coordinate episode work, approvals, external suppliers, and client-billable changes in one queue.</p>
+      </div>
+      {canManage && <Button variant="primary" onPress={beginCreate} className="bg-[#263130] text-white"><Plus size={15}/> New work order</Button>}
+    </header>
+    <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-[#e4e8e3] bg-[#fefefa] text-center">
+      <div className="border-r border-[#e8ece7] px-3 py-2.5"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7b8580]">Active</p><p className="mt-0.5 text-base font-semibold text-[#3c5148]">{activeCount}</p></div>
+      <div className="border-r border-[#e8ece7] px-3 py-2.5"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7b8580]">Needs attention</p><p className="mt-0.5 text-base font-semibold text-[#92623b]">{attentionCount}</p></div>
+      <div className="px-3 py-2.5"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7b8580]">Complete</p><p className="mt-0.5 text-base font-semibold text-[#477463]">{completeCount}</p></div>
+    </div>
     {open && <form onSubmit={form.handleSubmit(save)} className="rounded-lg border border-[#dfe4df] bg-[#fefefa] p-4"><div className="grid gap-3 sm:grid-cols-2">
       <Field label="Title" error={form.formState.errors.title?.message}><input {...form.register("title")} placeholder="External caption correction"/></Field>
       <Field label="Workflow scope"><select {...form.register("workflowStageId", { onChange: (event) => form.setValue("isBlocking", Boolean(event.target.value)) })}><option value="">Episode-wide — not tied to a stage</option>{stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.position}. {stage.name}{stage.id === currentStageId ? " (current)" : ""}</option>)}</select></Field>
@@ -104,7 +120,7 @@ export function EpisodeWorkOrders({ episodeId, initialWorkOrders, people, stages
     {message && <p role="status" className={`text-xs ${message.includes("Could not") || message.includes("only") || message.includes("Invalid") || message.includes("PO") || message.includes("Budget approval") ? "text-[#a35e41]" : "text-[#4d8068]"}`}>{message}</p>}
   </div>;
 }
-function StatusBadge({ status }: { status: string }) { const label = status === "open" ? "Draft" : status === "awaiting_approval" ? "Awaiting approval" : status === "in_progress" ? "Approved" : status === "rejected" ? "Returned for changes" : status === "complete" ? "Complete" : status.replaceAll("_", " "); return <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${status === "complete" ? "bg-[#e4efe9] text-[#477665]" : status === "rejected" ? "bg-[#f8e8df] text-[#a15e42]" : status === "open" || status === "awaiting_approval" ? "bg-[#f1f0ec] text-[#777b76]" : "bg-[#edf0ed] text-[#65716c]"}`}>{label}</span>; }
+function StatusBadge({ status }: { status: string }) { const label = status === "open" ? "Draft" : status === "awaiting_approval" ? "Awaiting approval" : status === "in_progress" ? "Approved" : status === "rejected" ? "Returned for changes" : status === "complete" ? "Complete" : status.replaceAll("_", " "); const tone = status === "complete" ? "pp-status--success" : status === "rejected" ? "pp-status--danger" : status === "awaiting_approval" ? "pp-status--warning" : status === "open" ? "pp-status--neutral" : "pp-status--active"; return <span className={`pp-status ${tone}`}>{label}</span>; }
 function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) { return <label className="block text-xs font-medium text-[#535b57]">{label}<span className="mt-1.5 block [&_input]:h-9 [&_input]:w-full [&_input]:rounded-md [&_input]:border [&_input]:border-[#dedfda] [&_input]:px-2 [&_input]:text-xs [&_select]:h-9 [&_select]:w-full [&_select]:rounded-md [&_select]:border [&_select]:border-[#dedfda] [&_select]:px-2 [&_select]:text-xs [&_textarea]:w-full [&_textarea]:rounded-md [&_textarea]:border [&_textarea]:border-[#dedfda] [&_textarea]:p-2 [&_textarea]:text-xs">{children}</span>{error && <span className="mt-1 block text-[11px] font-normal text-[#a35e41]">{error}</span>}</label>; }
 function formatMoney(value: string | number | null, currency: string) { if (value === null) return "—"; return new Intl.NumberFormat("en-GB", { style: "currency", currency, maximumFractionDigits: 0 }).format(Number(value)); }
 function lineTotal(item: WorkOrderItem) { return Number(item.quantity) * Number(item.unitRate) * (1 - Number(item.discountPercent) / 100); }
