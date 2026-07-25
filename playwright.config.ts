@@ -17,15 +17,8 @@ export default defineConfig({
     baseURL: "http://localhost:5001",
     trace: "on-first-retry",
   },
-  projects: [
-    // Chromium owns the complete, fast UI regression suite.
-    { name: "chromium", use: { ...devices["Desktop Chrome"] }, testIgnore: "**/browser-smoke.spec.ts" },
-    // Keep non-Chromium coverage deliberately small: it catches browser CSS,
-    // hydration, and keyboard-navigation regressions without tripling CI time.
-    { name: "chromium-smoke", use: { ...devices["Desktop Chrome"] }, testMatch: "**/browser-smoke.spec.ts" },
-    { name: "firefox-smoke", use: { ...devices["Desktop Firefox"] }, testMatch: "**/browser-smoke.spec.ts" },
-    { name: "webkit-smoke", use: { ...devices["Desktop Safari"] }, testMatch: "**/browser-smoke.spec.ts" },
-  ],
+  // Chromium owns the complete browser suite, including the smoke journey.
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
     command: "./node_modules/.bin/next dev --port 5001",
     url: "http://localhost:5001",

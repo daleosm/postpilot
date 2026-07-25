@@ -4,7 +4,7 @@ import { establishDebugSession } from "../fixtures/debug-session";
 
 const COPPERLINE_ORGANIZATION_ID = "10000000-0000-4000-8000-000000000005";
 
-test("keeps the authenticated shell, keyboard navigation, and table layout portable", async ({ context, page }) => {
+test("keeps the authenticated shell, keyboard navigation, and table layout usable", async ({ context, page }) => {
   await establishDebugSession(context, "user_maya", COPPERLINE_ORGANIZATION_ID);
   await page.goto("/");
 
