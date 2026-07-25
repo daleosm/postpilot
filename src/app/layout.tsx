@@ -30,9 +30,9 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html lang="en">
       <body>
-        <div className="min-h-screen bg-[#f7f7f4] text-[#292d2d]">
+        <div className="app-shell min-h-screen text-[#292d2d]">
           <AppSidebar />
-          <div className="min-h-screen md:pl-[232px]">
+          <div className="pp-main min-h-screen md:pl-[232px]">
             <TopBar
               key={activeOrganizationId ?? "no-active-organization"}
               debugUser={debugUser}

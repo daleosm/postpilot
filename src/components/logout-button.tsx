@@ -11,5 +11,5 @@ export function LogoutButton() {
     window.location.assign("/sign-in");
   }
 
-  return <Button variant="tertiary" onPress={logout} className="mt-2 flex h-8 w-full justify-start gap-3 px-3 text-[12px] text-[#7b7f7d] hover:bg-[#f0f1ee] hover:text-[#353a39]"><LogOut size={15} /> Sign out</Button>;
+  return <Button variant="tertiary" onPress={logout} className="mt-2 flex h-8 w-full justify-start gap-3 rounded-lg px-3 text-[12px] text-white/65 hover:bg-white/10 hover:text-white"><LogOut size={15} /> Sign out</Button>;
 }

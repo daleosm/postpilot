@@ -1,154 +1,234 @@
 @import "tailwindcss";
 
+:root {
+  color-scheme: light;
+  --pp-canvas: #f2f3ef;
+  --pp-canvas-deep: #e9ebe6;
+  --pp-surface: rgb(255 255 252 / 0.88);
+  --pp-surface-strong: #ffffff;
+  --pp-surface-muted: #f7f8f5;
+  --pp-ink: #202827;
+  --pp-ink-soft: #52605b;
+  --pp-ink-muted: #77817d;
+  --pp-border: #dfe3de;
+  --pp-border-strong: #cdd4ce;
+  --pp-brand: #314e46;
+  --pp-brand-strong: #203a34;
+  --pp-brand-soft: #e7f0ea;
+  --pp-success: #39715d;
+  --pp-warning: #a96d28;
+  --pp-warning-soft: #fff2d9;
+  --pp-danger: #aa5545;
+  --pp-danger-soft: #fbedeb;
+  --pp-focus: #759b8d;
+  --pp-shadow-sm: 0 1px 2px rgb(23 35 31 / 0.04), 0 8px 24px rgb(23 35 31 / 0.025);
+  --pp-shadow-md: 0 16px 38px rgb(23 35 31 / 0.08), 0 2px 6px rgb(23 35 31 / 0.04);
+}
+
 * { box-sizing: border-box; }
 
-html { background: #f7f7f4; }
+html { min-height: 100%; background: var(--pp-canvas); }
 
 body {
+  min-height: 100%;
   margin: 0;
-  background: #f7f7f4;
-  font-family: Arial, Helvetica, sans-serif;
+  background:
+    radial-gradient(circle at 82% -14%, rgb(210 224 214 / 0.52), transparent 28rem),
+    radial-gradient(circle at 10% 100%, rgb(233 224 208 / 0.44), transparent 30rem),
+    var(--pp-canvas);
+  color: var(--pp-ink);
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  text-rendering: optimizeLegibility;
 }
+
+::selection { background: #cfe0d7; color: #19362e; }
 
 button, a { -webkit-tap-highlight-color: transparent; }
 
-/*
- * Shared action language. The dashboard establishes the visual baseline for
- * PostPilot: a quiet dark primary action, with compact, low-emphasis controls
- * around it. HeroUI supplies the behaviour and accessibility; these rules give
- * every instance the same production-tool finish.
- */
+a, button, input, select, textarea { transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
+
+.app-shell { isolation: isolate; min-height: 100vh; }
+
+.pp-main { position: relative; }
+
+/* Shared action language. HeroUI continues to provide behaviour and ARIA
+ * semantics; these rules establish the production-tool visual finish. */
 .button {
   display: inline-flex;
   min-height: 2.5rem;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
-  border-radius: 0.375rem;
-  padding: 0 0.75rem;
-  font-size: 0.875rem;
-  font-weight: 500;
+  border-radius: 0.625rem;
+  padding: 0 0.875rem;
+  font-size: 0.8125rem;
+  font-weight: 650;
   line-height: 1;
-  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+  letter-spacing: -0.01em;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
-.button:focus-visible {
-  outline: 2px solid #93aca3;
+.button:focus-visible,
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--pp-focus);
   outline-offset: 2px;
 }
 
-.button[aria-disabled="true"],
-.button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
+.button[aria-disabled="true"], .button:disabled { cursor: not-allowed; opacity: 0.48; }
 
 .button--primary {
-  border: 1px solid #263130;
-  background: #263130;
+  border: 1px solid var(--pp-brand-strong);
+  background: linear-gradient(135deg, #29483f, #203b34);
   color: #fff;
-  box-shadow: 0 1px 2px rgb(31 37 37 / 0.12);
-  justify-content: center;
+  box-shadow: 0 1px 2px rgb(16 39 32 / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.14);
 }
 
-.button--primary:hover:not(:disabled):not([aria-disabled="true"]) {
-  border-color: #394542;
-  background: #394542;
-}
+.button--primary:hover:not(:disabled):not([aria-disabled="true"]) { background: #19342d; box-shadow: 0 5px 14px rgb(25 52 45 / 0.22); transform: translateY(-1px); }
 
-.button.button--success {
-  border-color: #3f7563;
-  background: #3f7563;
-  color: #fff;
-}
+.button.button--success { border-color: #28614e; background: linear-gradient(135deg, #427b65, #316850); color: #fff; }
+.button.button--success:hover:not(:disabled):not([aria-disabled="true"]) { background: #2f6650; transform: translateY(-1px); }
 
-.button.button--success:hover:not(:disabled):not([aria-disabled="true"]) {
-  border-color: #4d866f;
-  background: #4d866f;
-}
-
-/* Tertiary actions stay intentionally quiet so menus, tabs and compact tools
- * do not compete with the page's primary action. Components can still add a
- * border or background when they need the dashboard's secondary treatment. */
-.button--tertiary {
-  border: 1px solid transparent;
-  background: transparent;
-  color: #4e5653;
-}
-
-.button--tertiary:hover:not(:disabled):not([aria-disabled="true"]) {
-  background: #f0f1ed;
-}
+.button--tertiary { border: 1px solid transparent; background: transparent; color: var(--pp-ink-soft); }
+.button--tertiary:hover:not(:disabled):not([aria-disabled="true"]) { background: #e9eeea; color: #24342f; }
 
 .button--outline {
-  border: 1px solid #e4e4df;
-  background: #fff;
-  color: #4e5653;
-  box-shadow: 0 1px 2px rgb(31 37 37 / 0.06);
-  justify-content: center;
+  border: 1px solid var(--pp-border);
+  background: rgb(255 255 255 / 0.82);
+  color: var(--pp-ink-soft);
+  box-shadow: 0 1px 2px rgb(31 37 37 / 0.04);
 }
+.button--outline:hover:not(:disabled):not([aria-disabled="true"]) { border-color: var(--pp-border-strong); background: #fff; }
 
-.button--outline:hover:not(:disabled):not([aria-disabled="true"]) {
-  background: #fafaf8;
-}
-
-.button--danger {
-  border: 1px solid #a35e41;
-  background: #a35e41;
-  color: #fff;
-}
-
-.button--sm {
-  min-height: 1.75rem;
-  padding: 0 0.5rem;
-  font-size: 0.75rem;
-}
-
-.button--lg {
-  min-height: 2.75rem;
-  padding: 0 1rem;
-}
-
-.button--icon-only {
-  width: 2.5rem;
-  padding: 0;
-}
-
-.button--icon-only.button--sm {
-  width: 1.75rem;
-}
-
-.button--full-width {
-  width: 100%;
-}
+.button--danger { border: 1px solid #9d4c3d; background: linear-gradient(135deg, #b45e4c, #984638); color: #fff; }
+.button--sm { min-height: 2rem; border-radius: 0.5rem; padding: 0 0.625rem; font-size: 0.75rem; }
+.button--lg { min-height: 2.875rem; padding: 0 1rem; }
+.button--icon-only { width: 2.5rem; padding: 0; }
+.button--icon-only.button--sm { width: 2rem; }
+.button--full-width { width: 100%; }
 
 .panel {
-  border: 1px solid #e7e6e2;
-  border-radius: 10px;
-  background: #fafbf9;
-  box-shadow: 0 1px 2px rgb(31 37 37 / 0.02);
+  border: 1px solid rgb(211 217 211 / 0.88);
+  border-radius: 0.875rem;
+  background: var(--pp-surface);
+  box-shadow: var(--pp-shadow-sm), inset 0 1px 0 rgb(255 255 255 / 0.75);
+  backdrop-filter: blur(12px);
 }
+
+.panel:hover { border-color: rgb(199 208 201 / 0.95); }
 
 .control {
   width: 100%;
   height: 2.5rem;
-  border: 1px solid #dfe1dc;
-  border-radius: 0.5rem;
-  background: #fafbf9;
+  border: 1px solid var(--pp-border);
+  border-radius: 0.625rem;
+  background: rgb(255 255 255 / 0.82);
   padding: 0 0.75rem;
-  color: #303936;
+  color: #293632;
   font: inherit;
+  box-shadow: inset 0 1px 1px rgb(24 41 34 / 0.025);
 }
 
-.control:focus {
-  outline: 2px solid #93aca3;
-  outline-offset: 1px;
-  border-color: #77948a;
+.control:hover { border-color: var(--pp-border-strong); }
+.control:focus { outline: 2px solid rgb(117 155 141 / 0.38); outline-offset: 1px; border-color: #739788; background: #fff; }
+
+input:not([type="checkbox"]):not([type="radio"]), select, textarea {
+  border-color: var(--pp-border) !important;
+  background-color: rgb(255 255 255 / 0.82) !important;
+  box-shadow: inset 0 1px 1px rgb(24 41 34 / 0.025);
 }
 
-/* Keep every editable surface on the same soft card tone, including controls
- * that are styled locally by a feature rather than with the shared .control. */
-input:not([type="checkbox"]):not([type="radio"]),
-select,
-textarea {
-  background-color: #fafbf9 !important;
+input:not([type="checkbox"]):not([type="radio"]):hover, select:hover, textarea:hover { border-color: var(--pp-border-strong) !important; }
+input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:focus { border-color: #739788 !important; box-shadow: 0 0 0 3px rgb(117 155 141 / 0.16) !important; outline: none; }
+
+.pp-sidebar {
+  background:
+    radial-gradient(circle at 18% 2%, rgb(91 119 106 / 0.32), transparent 18rem),
+    linear-gradient(180deg, #1d2926 0%, #18221f 100%);
+  border-color: rgb(255 255 255 / 0.08);
+  box-shadow: 16px 0 34px rgb(20 29 27 / 0.08);
+}
+
+.pp-sidebar a { color: rgb(235 240 236 / 0.72); }
+.pp-sidebar a:hover { background: rgb(230 242 235 / 0.1); color: #fff; }
+.pp-sidebar .pp-brand-mark { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 8px 18px rgb(0 0 0 / 0.2); }
+
+.pp-topbar {
+  border-color: rgb(211 217 211 / 0.76);
+  background: rgb(250 251 248 / 0.78);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.75);
+}
+
+.dashboard-hero {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid rgb(211 217 211 / 0.6);
+  padding-bottom: 1.25rem;
+}
+
+.dashboard-hero::after {
+  position: absolute;
+  right: 1.5rem;
+  top: 0.15rem;
+  width: 7rem;
+  height: 7rem;
+  border: 1px solid rgb(75 119 101 / 0.13);
+  border-radius: 999px;
+  box-shadow: 0 0 0 1.5rem rgb(75 119 101 / 0.035), 0 0 0 3rem rgb(75 119 101 / 0.025);
+  content: "";
+  pointer-events: none;
+}
+
+.metric-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.875rem;
+  background: linear-gradient(145deg, rgb(255 255 252 / 0.93), rgb(246 248 244 / 0.76));
+}
+
+.metric-card::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, #7c9c8f, transparent 70%);
+  content: "";
+  opacity: 0.65;
+}
+
+.metric-card[data-alert="true"]::before { background: linear-gradient(90deg, #c7894e, transparent 70%); }
+
+.panel-header {
+  background: linear-gradient(180deg, rgb(250 252 248 / 0.72), rgb(255 255 252 / 0));
+}
+
+/* Dense registers remain calm and legible when a facility has many rows. */
+table { border-collapse: separate; border-spacing: 0; }
+thead th {
+  background: rgb(247 249 246 / 0.78);
+  color: #69736e;
+  font-size: 0.65625rem;
+  font-weight: 700;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+tbody tr { transition: background-color 140ms ease; }
+tbody tr:hover { background: rgb(238 244 239 / 0.52); }
+
+/* Native selects are intentionally compact, while still feeling like controls. */
+select { min-height: 2.25rem; color: #4d5853; }
+
+@media (max-width: 1023px) {
+  .pp-main { padding-inline: 1rem; }
+}
+
+@media (max-width: 767px) {
+  body { background: var(--pp-canvas); }
+  .panel { border-radius: 0.75rem; }
+  .dashboard-hero::after { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }

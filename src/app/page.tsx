@@ -83,11 +83,11 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-5 pb-6">
-      <section className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+      <section className="dashboard-hero flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div>
           <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.12em] text-[#7c827f]"><span className={`h-1.5 w-1.5 rounded-full ${isDemo ? "bg-[#bd7c4d]" : "bg-[#5b887e]"}`} /> {isDemo ? "Demo data" : "Live operations"} · {organizationName}</div>
-          <h1 className="text-[27px] font-semibold tracking-[-0.045em] text-[#202524]">Post-production command center</h1>
-          <p className="mt-1 text-sm text-[#747977]">Production health, capacity, and risk across every active show.</p>
+          <h1 className="text-[28px] font-semibold tracking-[-0.052em] text-[#202524] sm:text-[31px]">Post-production command center</h1>
+          <p className="mt-1.5 text-sm text-[#68736e]">Production health, capacity, and risk across every active show.</p>
         </div>
         <div className="flex items-center gap-2"><Link href="/bookings" className="inline-flex h-10 items-center gap-2 rounded-md border border-[#e4e4df] bg-white px-3 text-sm font-medium text-[#4e5653] shadow-sm hover:bg-[#fafaf8]"><CalendarDays size={15} /> Next 7 days</Link><Link href="/bookings" className="inline-flex h-10 items-center gap-2 rounded-md bg-[#263130] px-3 text-sm font-medium text-white hover:bg-[#394542]"><Plus size={16} /> New work</Link></div>
       </section>
@@ -199,11 +199,11 @@ async function getCommandCenterData() {
 }
 
 function Metric({ href, label, value, detail, icon, alert = false }: { href: string; label: string; value: string; detail: string; icon: React.ReactNode; alert?: boolean }) {
-  return <Link href={href} className="panel min-w-0 p-3.5 transition hover:-translate-y-0.5 hover:border-[#d6d8d2] hover:shadow-sm"><div className="flex items-center justify-between gap-2"><p className="truncate text-[11px] font-medium text-[#777d7a]">{label}</p><span className={alert ? "text-[#b47049]" : "text-[#8d9490]"}>{icon}</span></div><div className="mt-2 flex items-end justify-between gap-2"><p className="text-[23px] font-semibold leading-none tracking-[-0.045em] text-[#303534]">{value}</p><p className={`truncate text-[10px] ${alert ? "font-medium text-[#a86843]" : "text-[#858a87]"}`}>{detail}</p></div></Link>;
+  return <Link href={href} data-alert={alert} className="metric-card panel min-w-0 p-4 transition hover:-translate-y-0.5 hover:border-[#bdcdc3] hover:shadow-md"><div className="flex items-center justify-between gap-2"><p className="truncate text-[11px] font-semibold uppercase tracking-[.075em] text-[#6d7772]">{label}</p><span className={`flex h-7 w-7 items-center justify-center rounded-lg ${alert ? "bg-[#fff0e8] text-[#af6948]" : "bg-[#eaf0ea] text-[#54766b]"}`}>{icon}</span></div><div className="mt-3 flex items-end justify-between gap-2"><p className="text-[25px] font-semibold leading-none tracking-[-0.055em] text-[#27312d]">{value}</p><p className={`truncate text-[10px] ${alert ? "font-medium text-[#a86843]" : "text-[#7b837f]"}`}>{detail}</p></div></Link>;
 }
 
 function SectionHeading({ title, detail, action, href }: { title: string; detail: string; action: string; href: string }) {
-  return <div className="flex items-center justify-between border-b border-[#ebeae6] px-5 py-3.5"><div><h2 className="text-sm font-semibold text-[#303534]">{title}</h2><p className="mt-0.5 text-xs text-[#838886]">{detail}</p></div><Link href={href} className="flex items-center gap-1 text-xs font-medium text-[#526d69] hover:text-[#314a45]">{action} <ChevronRight size={14} /></Link></div>;
+  return <div className="panel-header flex items-center justify-between border-b border-[#e7eae5] px-5 py-4"><div><h2 className="text-sm font-semibold tracking-[-0.02em] text-[#2f3935]">{title}</h2><p className="mt-0.5 text-xs text-[#7c8580]">{detail}</p></div><Link href={href} className="flex items-center gap-1 text-xs font-semibold text-[#42665a] hover:text-[#29483f]">{action} <ChevronRight size={14} /></Link></div>;
 }
 
 function EmptyRow({ label }: { label: string }) {
