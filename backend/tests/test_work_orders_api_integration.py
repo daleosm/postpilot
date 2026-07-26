@@ -230,9 +230,21 @@ def test_work_order_lifecycle_requires_a_separate_manager_to_approve(production_
     approved = production_lab.client.patch(
         f"/v1/work-orders/{work_order_id}", json={"status": "in_progress", "approval_note": "Scope confirmed."}
     )
+    premature_complete = production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "complete"})
+    reservation = production_lab.client.post(
+        f"/v1/work-orders/{work_order_id}/booking",
+        json={
+            "room_id": production_lab.data.room_id,
+            "starts_at": "2035-08-20T14:00:00Z",
+            "ends_at": "2035-08-20T16:00:00Z",
+        },
+    )
     complete = production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "complete"})
 
     assert approved.status_code == complete.status_code == 200
+    assert reservation.status_code == 201
+    assert premature_complete.status_code == 409
+    assert "Place a room booking" in premature_complete.json()["detail"]
     saved = production_lab.fetchrow(
         "SELECT status, approved_by_person_id::text, completed_by_person_id::text FROM post_work_orders WHERE id = $1",
         work_order_id,
@@ -703,6 +715,17 @@ def test_assigned_artist_sees_only_their_work_and_can_update_operational_progres
     production_lab.sign_out()
     production_lab.sign_in_as_viewer()
     visible = production_lab.client.get("/v1/work-orders")
+    premature_progress = production_lab.client.patch(
+        f"/v1/work-orders/{work_order_id}", json={"status": "ready_for_review"}
+    )
+    reservation = production_lab.client.post(
+        f"/v1/work-orders/{work_order_id}/booking",
+        json={
+            "room_id": production_lab.data.room_id,
+            "starts_at": "2035-08-21T14:00:00Z",
+            "ends_at": "2035-08-21T16:00:00Z",
+        },
+    )
     progress = production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "ready_for_review"})
     detail_change = production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"title": "Not permitted"})
     create = production_lab.client.post(
@@ -710,8 +733,43 @@ def test_assigned_artist_sees_only_their_work_and_can_update_operational_progres
     )
 
     assert visible.status_code == progress.status_code == 200
+    assert premature_progress.status_code == 409
+    assert reservation.status_code == 201
     assert {item["id"] for item in visible.json()["work_orders"]} == {work_order_id}
     assert detail_change.status_code == create.status_code == 403
+
+
+def test_booking_an_unbooked_ready_for_review_internal_work_order_resumes_it(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    created = production_lab.client.post(
+        "/v1/work-orders", json=_payload(production_lab, title="Legacy ready-for-review room work")
+    )
+    assert created.status_code == 201, created.text
+    work_order_id = created.json()["id"]
+    production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"})
+    approved = production_lab.client.patch(
+        f"/v1/work-orders/{work_order_id}", json={"status": "in_progress", "approval_note": "Approved."}
+    )
+    assert approved.status_code == 403  # Creators cannot approve their own work.
+
+    # Seed the historical state directly: it mirrors records created before
+    # the booking-first completion rule was introduced.
+    production_lab.execute(
+        "UPDATE post_work_orders SET status = 'ready_for_review' WHERE id = $1", work_order_id
+    )
+    reserved = production_lab.client.post(
+        f"/v1/work-orders/{work_order_id}/booking",
+        json={
+            "room_id": production_lab.data.room_id,
+            "starts_at": "2035-08-22T14:00:00Z",
+            "ends_at": "2035-08-22T16:00:00Z",
+        },
+    )
+
+    assert reserved.status_code == 201, reserved.text
+    assert production_lab.fetchval("SELECT status FROM post_work_orders WHERE id = $1", work_order_id) == "in_progress"
 
 
 def test_work_order_rejects_foreign_records_and_hides_records_from_clients(production_lab: ProductionApiLab) -> None:

@@ -46,6 +46,8 @@ async def approval_inbox(actor: CurrentActor, session: DbSession) -> dict[str, o
             select(
                 post_work_orders.c.id,
                 post_work_orders.c.episode_id,
+                post_work_orders.c.booking_id,
+                post_work_orders.c.work_type,
                 post_work_orders.c.kind,
                 post_work_orders.c.title,
                 post_work_orders.c.description,
@@ -200,6 +202,8 @@ async def approval_inbox(actor: CurrentActor, session: DbSession) -> dict[str, o
             {
                 "id": str(item.id),
                 "episode_id": str(item.episode_id),
+                "booking_id": str(item.booking_id) if item.booking_id else None,
+                "work_type": item.work_type,
                 "show_id": str(item.show_id),
                 "show_title": item.show_title,
                 "episode_title": item.episode_title,

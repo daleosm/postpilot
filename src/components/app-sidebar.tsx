@@ -20,7 +20,10 @@ import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 const navigation = [
   { label: "Dashboard", icon: House, href: "/" },
   { label: "Shows", icon: Clapperboard, href: "/shows", permissions: ["manage_shows", "view_all_operations"] },
-  { label: "Bookings", icon: CalendarRange, href: "/bookings", permissions: ["manage_bookings", "view_all_operations"] },
+  // Artists with assigned work need the calendar as well: it is where they
+  // reserve a room for an internal work order. The API still limits them to
+  // their own assignment, so this only controls navigation visibility.
+  { label: "Bookings", icon: CalendarRange, href: "/bookings", permissions: ["manage_bookings", "view_all_operations", "update_assigned_work"] },
   { label: "Catering", icon: Coffee, href: "/catering", permissions: ["request_catering"] },
   { label: "Runner desk", icon: Coffee, href: "/runner", permissions: ["manage_catering"] },
   { label: "Budget", icon: DollarSign, href: "/budget", permissions: ["manage_budget"] },

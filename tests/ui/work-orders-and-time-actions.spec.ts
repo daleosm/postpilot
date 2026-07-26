@@ -113,7 +113,7 @@ test.describe("Work-order reservation and time confirmation UI", () => {
         is_blocking, status, billing_scope, billing_status, currency, assignee_person_id
       ) values (
         ${TEST_WORK_ORDER_ID}, ${COPPERLINE_ORGANIZATION_ID}, ${EPISODE_ID}, 'internal', 'work_order',
-        ${TEST_WORK_ORDER_TITLE}, 'normal', false, 'in_progress', 'included', 'not_billable', 'USD', ${editor.id}
+        ${TEST_WORK_ORDER_TITLE}, 'normal', false, 'ready_for_review', 'included', 'not_billable', 'USD', ${editor.id}
       )
     `;
     await page.goto("/bookings");
@@ -125,6 +125,33 @@ test.describe("Work-order reservation and time confirmation UI", () => {
     await page.getByRole("button", { name: "Reserve room" }).click();
 
     await expect.poll(requestBody).toMatchObject({ room_id: expect.any(String) });
+  });
+
+  test("requires an assigned worker to place a booking before completion", async ({ page }) => {
+    const [editor] = await sql<{ id: string }[]>`
+      select id from people where organization_id = ${COPPERLINE_ORGANIZATION_ID} and user_id = 'user_copper_editor' limit 1
+    `;
+    if (!editor) throw new Error("Copperline editor fixture is missing.");
+    await sql`
+      insert into post_work_orders (
+        id, organization_id, episode_id, work_type, kind, title, priority,
+        is_blocking, status, billing_scope, billing_status, currency, assignee_person_id
+      ) values (
+        ${TEST_WORK_ORDER_ID}, ${COPPERLINE_ORGANIZATION_ID}, ${EPISODE_ID}, 'internal', 'work_order',
+        ${TEST_WORK_ORDER_TITLE}, 'normal', false, 'ready_for_review', 'included', 'not_billable', 'USD', ${editor.id}
+      )
+    `;
+
+    await page.goto("/review");
+    const row = page.getByRole("article").filter({ hasText: TEST_WORK_ORDER_TITLE });
+    await expect(row.getByRole("button", { name: "Schedule on board" })).toBeVisible();
+    await expect(row.getByRole("button", { name: "Mark complete" })).toHaveCount(0);
+
+    await row.getByRole("button", { name: "Schedule on board" }).click();
+    await expect(page).toHaveURL(new RegExp(`/bookings\\?workOrder=${TEST_WORK_ORDER_ID}`));
+    await expect(page.getByRole("button", { name: `Reserve work order ${TEST_WORK_ORDER_TITLE}` })).toBeVisible();
+    await expect(page.getByText("Selected from My work · drag to a room")).toBeVisible();
+    await expect(page.getByRole("heading", { name: TEST_WORK_ORDER_TITLE })).toHaveCount(0);
   });
 
   test("submits actual time and overtime from an artist's personal workspace", async ({ page }) => {

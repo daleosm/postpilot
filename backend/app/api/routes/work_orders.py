@@ -954,6 +954,27 @@ async def update_work_order(
         if work_order.kind == "qc_exception" and payload.status == "complete":
             await require_permission(session, actor, "verify_qc")
 
+        # Internal assigned work consumes post-house time. It must first be
+        # placed on the facility calendar, rather than being completed as an
+        # off-calendar task. External vendor work remains intentionally free
+        # of this gate because it does not reserve a post-house room.
+        if payload.status in {"ready_for_review", "complete"} and work_order.work_type == "internal":
+            if not work_order.booking_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Place a room booking for this internal work order before completing it.",
+                )
+            linked_booking = await _tenant_record(
+                session, bookings, actor, str(work_order.booking_id), "Linked booking"
+            )
+            if linked_booking and linked_booking.status == "cancelled":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "The linked room booking was cancelled. Place a new booking before completing this work order."
+                    ),
+                )
+
     existing_commitments = await _existing_po_commitments(session, actor, work_order_id)
     existing_client_commitments = await _existing_client_po_commitments(session, actor, work_order_id)
     commercial_changed = bool(commercial_fields.intersection(fields))
@@ -1235,9 +1256,9 @@ async def reserve_work_order_room(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only internal work orders can reserve post-house rooms.",
         )
-    if work_order.status != "in_progress":
+    if work_order.status not in {"in_progress", "ready_for_review"}:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Release this work order before reserving time."
+            status_code=status.HTTP_409_CONFLICT, detail="Start this work order before reserving time."
         )
     if work_order.booking_id:
         linked = await _tenant_record(session, bookings, actor, str(work_order.booking_id), "Linked booking")
@@ -1331,10 +1352,16 @@ async def reserve_work_order_room(
         link_conditions.append(post_work_orders.c.booking_id == work_order.booking_id)
     else:
         link_conditions.append(post_work_orders.c.booking_id.is_(None))
+    link_values: dict[str, object] = {"booking_id": booking_id, "updated_at": now}
+    # A legacy/reopened work order may have been marked ready for review before
+    # it was placed on the calendar. Reserving facility time resumes it so the
+    # artist can complete the operational sequence normally.
+    if work_order.status == "ready_for_review":
+        link_values["status"] = "in_progress"
     linked = await session.execute(
         update(post_work_orders)
         .where(and_(*link_conditions))
-        .values(booking_id=booking_id, updated_at=now)
+        .values(**link_values)
         .returning(post_work_orders.c.id)
     )
     if not linked.first():
@@ -1348,7 +1375,11 @@ async def reserve_work_order_room(
         action="work_order.booking_scheduled",
         work_order_id=work_order_id,
         episode_id=str(work_order.episode_id),
-        metadata={"bookingId": booking_id, "roomId": str(room.id)},
+        metadata={
+            "bookingId": booking_id,
+            "roomId": str(room.id),
+            "resumedFromReview": work_order.status == "ready_for_review",
+        },
     )
     await session.execute(
         insert(activity_log).values(
