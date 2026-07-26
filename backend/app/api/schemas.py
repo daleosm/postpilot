@@ -32,6 +32,13 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=1024)
 
 
+class PasswordChangeRequest(BaseModel):
+    """An authenticated user changes their own password without an email-code flow."""
+
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=8, max_length=1024)
+
+
 class PersonResponse(BaseModel):
     id: str
     name: str

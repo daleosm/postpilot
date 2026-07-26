@@ -16,6 +16,8 @@ def test_api_exposes_core_tenant_scoped_routes(monkeypatch) -> None:
     paths = create_app().openapi()["paths"]
 
     assert "/v1/auth/sign-in" in paths
+    assert "/v1/auth/change-password" in paths
+    assert not any("otp" in path.lower() or "magic" in path.lower() for path in paths)
     assert "/v1/organizations/active" in paths
     assert "/v1/organizations/active-show" in paths
     assert "/v1/dashboard" in paths

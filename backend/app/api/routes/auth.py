@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, HTTPException, Response, status
 
 from app.api.dependencies import CurrentActor, DbSession
-from app.api.schemas import LoginRequest, SessionResponse
+from app.api.schemas import LoginRequest, PasswordChangeRequest, SessionResponse
 from app.auth import Actor, authenticate_password, can_switch_debug_user, create_session, get_actor_for_token
 from app.config import get_settings
-from app.db.tables import api_sessions
+from app.db.tables import activity_log, api_sessions, users
+from app.security import hash_node_scrypt_password, verify_node_scrypt_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -71,6 +72,62 @@ async def sign_out(response: Response, session: DbSession, actor: CurrentActor) 
     # real HTTP 204 rather than an invalid response without a status code.
     response.status_code = status.HTTP_204_NO_CONTENT
     response.delete_cookie(get_settings().cookie_name, path="/")
+    return response
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    payload: PasswordChangeRequest, response: Response, actor: CurrentActor, session: DbSession
+) -> Response:
+    """Change the authenticated account's password and revoke its other sessions.
+
+    This intentionally uses the authenticated account, rather than a debug
+    impersonation target. Debug tooling must never be able to alter another
+    person's credentials.
+    """
+    from sqlalchemy import and_, delete, insert, select, update
+
+    account = (
+        await session.execute(
+            select(users.c.password_hash)
+            .where(users.c.id == actor.authenticated_user_id)
+            .limit(1)
+        )
+    ).first()
+    if not account or not verify_node_scrypt_password(payload.current_password, account.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect.")
+    if payload.current_password == payload.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Choose a new password that is different from your current password.",
+        )
+
+    await session.execute(
+        update(users)
+        .where(users.c.id == actor.authenticated_user_id)
+        .values(password_hash=hash_node_scrypt_password(payload.new_password))
+    )
+    await session.execute(
+        delete(api_sessions).where(
+            and_(
+                api_sessions.c.user_id == actor.authenticated_user_id,
+                api_sessions.c.token_hash != actor.session_token_hash,
+            )
+        )
+    )
+    if actor.user_id == actor.authenticated_user_id and actor.active_organization:
+        await session.execute(
+            insert(activity_log).values(
+                organization_id=actor.organization_id,
+                actor_user_id=actor.authenticated_user_id,
+                action="auth.password_changed",
+                entity_type="user",
+                entity_id=actor.authenticated_user_id,
+                metadata={"other_sessions_revoked": True},
+            )
+        )
+    await session.commit()
+    response.status_code = status.HTTP_204_NO_CONTENT
     return response
 
 

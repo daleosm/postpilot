@@ -127,4 +127,32 @@ test.describe("Booking creation and conflict UX", () => {
     await expect(page.getByRole("dialog", { name: "Create guest account" })).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Search guest accounts" })).toHaveValue("UI Guest Reviewer");
   });
+
+  test("keeps guest details but clears passwords after a rejected account request", async ({ page }) => {
+    await openBookingDialog(page);
+    await page.getByLabel("Episode").selectOption({ index: 1 });
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+    await page.getByLabel("Name").fill("Rejected Guest");
+    await page.getByLabel("Email").fill("rejected.guest@example.test");
+    await page.locator('input[name="password"]').fill("guest-password-one");
+    await page.locator('input[name="confirmPassword"]').fill("guest-password-two");
+    let requests = 0;
+    await page.route("**/v1/bookings/guest-accounts", async (route) => {
+      requests += 1;
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: "This person already has access to this post house." }) });
+    });
+
+    await page.getByRole("button", { name: "Create guest" }).click();
+    await expect(page.getByText("Passwords do not match.")).toBeVisible();
+    expect(requests).toBe(0);
+    await page.locator('input[name="password"]').fill("guest-safe-password");
+    await page.locator('input[name="confirmPassword"]').fill("guest-safe-password");
+    await page.getByRole("button", { name: "Create guest" }).click();
+    await expect(page.getByText("This person already has access to this post house.", { exact: true })).toBeVisible();
+    expect(requests).toBe(1);
+    await expect(page.getByLabel("Name")).toHaveValue("Rejected Guest");
+    await expect(page.getByLabel("Email")).toHaveValue("rejected.guest@example.test");
+    await expect(page.locator('input[name="password"]')).toHaveValue("");
+    await expect(page.locator('input[name="confirmPassword"]')).toHaveValue("");
+  });
 });

@@ -40,7 +40,13 @@ export function UserAccessManager({ users, policies }: { users: UserAccess[]; po
     setMessage("");
     const response = await postpilotUiFetch("/v1/settings/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: values.name, email: values.email, password: values.password, personRole: values.personRole, membershipRole: values.membershipRole }) });
     const body = await response.json().catch(() => null);
-    if (!response.ok) return setMessage(body?.error ?? "Could not add this user.");
+    if (!response.ok) {
+      // Keep safe non-secret fields so an administrator can correct the error,
+      // but never leave a password in a visible retry form after a failure.
+      form.setValue("password", "");
+      form.setValue("confirmPassword", "");
+      return setMessage(body?.error ?? "Could not add this user.");
+    }
     form.reset({ name: "", email: "", password: "", confirmPassword: "", personRole: firstOperationalRole, membershipRole: "member" });
     setOpen(false);
     setMessage("User access created. They can now sign in with their email and password.");

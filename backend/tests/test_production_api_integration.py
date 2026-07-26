@@ -531,12 +531,255 @@ def test_new_user_uses_the_password_selected_by_the_tenant_administrator(product
     assert response.status_code == 201, response.text
     user_id = response.json()["id"]
     production_lab.sign_out()
-    assert production_lab.client.post("/v1/auth/sign-in", json={"email": email, "password": password}).status_code == 200
+    assert production_lab.client.post(
+        "/v1/auth/sign-in", json={"email": email, "password": password}
+    ).status_code == 200
     production_lab.sign_out()
-    assert production_lab.client.post("/v1/auth/sign-in", json={"email": email, "password": "password"}).status_code == 401
+    assert production_lab.client.post(
+        "/v1/auth/sign-in", json={"email": email, "password": "password"}
+    ).status_code == 401
 
     production_lab.execute("DELETE FROM auth_login_attempts WHERE email = $1", email)
     production_lab.execute("DELETE FROM users WHERE id = $1", user_id)
+
+
+def test_user_creation_validates_passwords_and_never_audits_the_secret(production_lab: ProductionApiLab) -> None:
+    production_lab.sign_in_as_manager()
+    before = production_lab.fetchval(
+        "SELECT count(*) FROM organization_members WHERE organization_id = $1", production_lab.data.organization_id
+    )
+    base = {
+        "name": "Password Validation",
+        "email": f"password-validation-{uuid4().hex[:12]}@postpilot.test",
+        "person_role": "production_viewer",
+        "membership_role": "member",
+    }
+
+    assert production_lab.client.post("/v1/settings/users", json=base).status_code == 422
+    assert production_lab.client.post("/v1/settings/users", json={**base, "password": "short"}).status_code == 422
+    assert production_lab.fetchval(
+        "SELECT count(*) FROM organization_members WHERE organization_id = $1", production_lab.data.organization_id
+    ) == before
+
+    password = "never-store-this-password"
+    created = production_lab.client.post("/v1/settings/users", json={**base, "password": password})
+    assert created.status_code == 201, created.text
+    user_id = created.json()["id"]
+    assert "password" not in created.json()
+    saved_hash = production_lab.fetchval("SELECT password_hash FROM users WHERE id = $1", user_id)
+    assert saved_hash and saved_hash != password
+    activity = production_lab.fetchval(
+        "SELECT metadata::text FROM activity_log WHERE organization_id = $1 "
+        "AND entity_id = $2 ORDER BY created_at DESC LIMIT 1",
+        production_lab.data.organization_id,
+        user_id,
+    )
+    assert password not in str(activity)
+
+    production_lab.execute("DELETE FROM users WHERE id = $1", user_id)
+
+
+def test_user_access_creation_is_permissioned_duplicate_safe_and_preserves_global_credentials(
+    production_lab: ProductionApiLab,
+) -> None:
+    email = f"shared-account-{uuid4().hex[:12]}@postpilot.test"
+    user_id = f"shared-account-{uuid4().hex[:12]}"
+    original_password = "shared-account-password"
+    production_lab.execute(
+        "INSERT INTO users (id, name, email, password_hash) VALUES ($1, $2, $3, $4)",
+        user_id,
+        "Shared Account",
+        email,
+        hash_node_scrypt_password(original_password),
+    )
+    production_lab.execute(
+        "INSERT INTO organization_members (organization_id, user_id, role) VALUES ($1, $2, 'member')",
+        production_lab.data.foreign_organization_id,
+        user_id,
+    )
+    production_lab.sign_in_as_viewer()
+    forbidden = production_lab.client.post(
+        "/v1/settings/users",
+        json={
+            "name": "Shared Account", "email": email, "password": "attempted-overwrite",
+            "person_role": "production_viewer", "membership_role": "member",
+        },
+    )
+    assert forbidden.status_code == 403
+
+    production_lab.sign_in_as_manager()
+    created = production_lab.client.post(
+        "/v1/settings/users",
+        json={
+            "name": "Shared Account", "email": email, "password": "attempted-overwrite",
+            "person_role": "production_viewer", "membership_role": "member",
+        },
+    )
+    assert created.status_code == 201, created.text
+    duplicate = production_lab.client.post(
+        "/v1/settings/users",
+        json={
+            "name": "Changed Name", "email": email, "password": "another-attempt",
+            "person_role": "production_viewer", "membership_role": "member",
+        },
+    )
+    assert duplicate.status_code == 409
+    assert production_lab.fetchval(
+        "SELECT count(*) FROM organization_members WHERE user_id = $1", user_id
+    ) == 2
+
+    production_lab.sign_out()
+    assert production_lab.client.post(
+        "/v1/auth/sign-in", json={"email": email, "password": original_password}
+    ).status_code == 200
+    production_lab.sign_out()
+    assert production_lab.client.post(
+        "/v1/auth/sign-in", json={"email": email, "password": "attempted-overwrite"}
+    ).status_code == 401
+    production_lab.execute("DELETE FROM auth_login_attempts WHERE email = $1", email)
+    production_lab.execute("DELETE FROM users WHERE id = $1", user_id)
+
+
+def test_booking_client_accounts_are_tenant_safe_permissioned_and_can_sign_in(production_lab: ProductionApiLab) -> None:
+    episode_id = str(
+        production_lab.fetchval(
+            "SELECT id::text FROM episodes WHERE organization_id = $1 ORDER BY created_at LIMIT 1",
+            production_lab.data.organization_id,
+        )
+    )
+    email = f"booking-client-{uuid4().hex[:12]}@postpilot.test"
+    password = "booking-client-password"
+    payload = {"episode_id": episode_id, "name": "Booking Client", "email": email, "password": password}
+
+    production_lab.sign_in_as_viewer()
+    assert production_lab.client.post("/v1/bookings/guest-accounts", json=payload).status_code == 403
+    production_lab.sign_in_as_manager()
+    foreign = production_lab.client.post(
+        "/v1/bookings/guest-accounts", json={**payload, "episode_id": production_lab.data.foreign_episode_id}
+    )
+    assert foreign.status_code == 404
+    created = production_lab.client.post("/v1/bookings/guest-accounts", json=payload)
+    assert created.status_code == 201, created.text
+    user_id = production_lab.fetchval("SELECT id FROM users WHERE email = $1", email)
+    assert user_id
+    assert production_lab.fetchval(
+        "SELECT count(*) FROM episode_team_assignments eta JOIN people p ON p.id = eta.person_id "
+        "WHERE eta.organization_id = $1 AND eta.episode_id = $2 AND p.user_id = $3",
+        production_lab.data.organization_id,
+        episode_id,
+        user_id,
+    ) == 1
+
+    production_lab.sign_out()
+    assert production_lab.client.post(
+        "/v1/auth/sign-in", json={"email": email, "password": password}
+    ).status_code == 200
+    listed = production_lab.client.get("/v1/episodes")
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()["episodes"]] == [episode_id]
+    assert production_lab.client.get(
+        f"/v1/episodes/{production_lab.data.foreign_episode_id}/workspace"
+    ).status_code == 404
+    production_lab.sign_out()
+    assert production_lab.client.post(
+        "/v1/auth/sign-in", json={"email": email, "password": "password"}
+    ).status_code == 401
+    production_lab.execute("DELETE FROM auth_login_attempts WHERE email = $1", email)
+    production_lab.execute("DELETE FROM users WHERE id = $1", user_id)
+
+
+def test_adding_an_existing_global_account_as_a_client_preserves_its_password(production_lab: ProductionApiLab) -> None:
+    episode_id = str(
+        production_lab.fetchval(
+            "SELECT id::text FROM episodes WHERE organization_id = $1 ORDER BY created_at LIMIT 1",
+            production_lab.data.organization_id,
+        )
+    )
+    email = f"shared-client-{uuid4().hex[:12]}@postpilot.test"
+    user_id = f"shared-client-{uuid4().hex[:12]}"
+    original_password = "shared-client-password"
+    production_lab.execute(
+        "INSERT INTO users (id, name, email, password_hash) VALUES ($1, $2, $3, $4)",
+        user_id,
+        "Shared Client",
+        email,
+        hash_node_scrypt_password(original_password),
+    )
+    production_lab.execute(
+        "INSERT INTO organization_members (organization_id, user_id, role) VALUES ($1, $2, 'member')",
+        production_lab.data.foreign_organization_id,
+        user_id,
+    )
+    production_lab.sign_in_as_manager()
+    created = production_lab.client.post(
+        "/v1/bookings/guest-accounts",
+        json={
+            "episode_id": episode_id,
+            "name": "Shared Client",
+            "email": email,
+            "password": "attempted-client-overwrite",
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert production_lab.fetchval(
+        "SELECT count(*) FROM organization_members WHERE user_id = $1", user_id
+    ) == 2
+    production_lab.sign_out()
+    assert production_lab.client.post(
+        "/v1/auth/sign-in", json={"email": email, "password": original_password}
+    ).status_code == 200
+    production_lab.sign_out()
+    assert production_lab.client.post(
+        "/v1/auth/sign-in", json={"email": email, "password": "attempted-client-overwrite"}
+    ).status_code == 401
+    production_lab.execute("DELETE FROM auth_login_attempts WHERE email = $1", email)
+    production_lab.execute("DELETE FROM users WHERE id = $1", user_id)
+
+
+def test_password_change_requires_current_password_and_revokes_other_sessions(production_lab: ProductionApiLab) -> None:
+    production_lab.sign_in_as_manager()
+    # A second opaque session represents another browser/device. Insert it
+    # directly so this test does not create a second TestClient event loop.
+    other_token_hash = "a" * 64
+    production_lab.execute(
+        "INSERT INTO api_sessions (token_hash, user_id, expires_at, created_at, last_seen_at) "
+        "VALUES ($1, $2, now() + interval '1 day', now(), now())",
+        other_token_hash,
+        production_lab.data.manager_user_id,
+    )
+    assert production_lab.client.post(
+        "/v1/auth/change-password",
+        json={"current_password": "incorrect", "new_password": "changed-password"},
+    ).status_code == 401
+    assert production_lab.client.post(
+        "/v1/auth/change-password",
+        json={"current_password": "password", "new_password": "password"},
+    ).status_code == 400
+    changed = production_lab.client.post(
+        "/v1/auth/change-password",
+        json={"current_password": "password", "new_password": "changed-password"},
+    )
+    assert changed.status_code == 204, changed.text
+    assert production_lab.client.get("/v1/auth/session").status_code == 200
+    assert production_lab.fetchval(
+        "SELECT count(*) FROM api_sessions WHERE token_hash = $1", other_token_hash
+    ) == 0
+    activity_metadata = production_lab.fetchval(
+        "SELECT metadata::text FROM activity_log WHERE organization_id = $1 "
+        "AND entity_id = $2 AND action = 'auth.password_changed' ORDER BY created_at DESC LIMIT 1",
+        production_lab.data.organization_id,
+        production_lab.data.manager_user_id,
+    )
+    assert json.loads(str(activity_metadata)) == {"other_sessions_revoked": True}
+
+    production_lab.sign_out()
+    assert production_lab.client.post(
+        "/v1/auth/sign-in", json={"email": production_lab.data.manager_email, "password": "password"}
+    ).status_code == 401
+    assert production_lab.client.post(
+        "/v1/auth/sign-in", json={"email": production_lab.data.manager_email, "password": "changed-password"}
+    ).status_code == 200
+    production_lab.execute("DELETE FROM auth_login_attempts WHERE email = $1", production_lab.data.manager_email)
 
 
 def test_rejects_invalid_show_payload_before_writing(production_lab: ProductionApiLab) -> None:

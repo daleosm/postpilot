@@ -75,6 +75,62 @@ test.describe("Settings and CRM form feedback", () => {
     await expect.poll(requestBody).toMatchObject({ name: "UI Access Test", email: "ui-access@example.test", password: "ui-access-password" });
     await expect(page.getByRole("status")).toContainText("User access created");
   });
+
+  test("keeps safe user details but clears passwords after validation and API errors", async ({ page }) => {
+    await page.goto("/settings/users");
+    await page.getByRole("button", { name: "Add user" }).click();
+    await page.getByLabel("Name").fill("Safe Retry User");
+    await page.getByLabel("Work email").fill("safe-retry@example.test");
+    await page.locator('input[name="password"]').fill("password-one");
+    await page.locator('input[name="confirmPassword"]').fill("password-two");
+    let requests = 0;
+    await page.route("**/v1/settings/users", async (route) => {
+      requests += 1;
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: "This person already has access to this post house." }) });
+    });
+
+    await page.getByRole("button", { name: "Create user", exact: true }).click();
+    await expect(page.getByText("Passwords do not match.")).toBeVisible();
+    expect(requests).toBe(0);
+
+    await page.locator('input[name="password"]').fill("short");
+    await page.locator('input[name="confirmPassword"]').fill("short");
+    await page.getByRole("button", { name: "Create user", exact: true }).click();
+    await expect(page.getByText("Use at least 8 characters.", { exact: true })).toBeVisible();
+    expect(requests).toBe(0);
+
+    await page.locator('input[name="password"]').fill("safe-retry-password");
+    await page.locator('input[name="confirmPassword"]').fill("safe-retry-password");
+    await page.getByRole("button", { name: "Create user", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("already has access");
+    expect(requests).toBe(1);
+    await expect(page.getByLabel("Name")).toHaveValue("Safe Retry User");
+    await expect(page.getByLabel("Work email")).toHaveValue("safe-retry@example.test");
+    await expect(page.locator('input[name="password"]')).toHaveValue("");
+    await expect(page.locator('input[name="confirmPassword"]')).toHaveValue("");
+  });
+
+  test("validates and submits the authenticated password-change dialog without any email-code flow", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Password", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Change password" })).toBeVisible();
+    await page.getByLabel("Current password", { exact: true }).fill("current-password");
+    await page.getByLabel("New password", { exact: true }).fill("short");
+    await page.getByLabel("Confirm new password", { exact: true }).fill("short");
+    await page.getByRole("button", { name: "Update password" }).click();
+    await expect(page.getByText("Use at least 8 characters for your new password.")).toBeVisible();
+
+    let requests = 0;
+    await page.route("**/v1/auth/change-password", async (route) => {
+      requests += 1;
+      await route.fulfill({ status: 204 });
+    });
+    await page.getByLabel("New password", { exact: true }).fill("changed-password");
+    await page.getByLabel("Confirm new password", { exact: true }).fill("changed-password");
+    await page.getByRole("button", { name: "Update password" }).click();
+    await expect(page.getByText("Password updated. Other sessions have been signed out.")).toBeVisible();
+    expect(requests).toBe(1);
+  });
 });
 
 test.describe("Debug context, error and responsive safeguards", () => {
