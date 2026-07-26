@@ -9,6 +9,7 @@ tests.
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -149,8 +150,38 @@ def test_show_episode_dashboard_and_form_reads_are_all_active_tenant_scoped(clie
     assert shows.status_code == episodes.status_code == dashboard.status_code == form_options.status_code == 200
     assert shows.json()["shows"]
     assert all(episode["show_id"] for episode in episodes.json()["episodes"])
-    assert {"metrics", "episodes", "shows", "schedule", "team", "budget", "activity"} <= dashboard.json().keys()
+    assert {
+        "metrics",
+        "episodes",
+        "shows",
+        "schedule",
+        "team",
+        "work_order_attention",
+        "budget",
+        "activity",
+    } <= dashboard.json().keys()
     assert {"companies", "people", "seasons"} <= form_options.json().keys()
+
+
+def test_dashboard_work_order_attention_is_an_exception_queue(client: TestClient) -> None:
+    sign_in_as_maya(client)
+
+    response = client.get("/v1/dashboard")
+
+    assert response.status_code == 200
+    cutoff = datetime.now(UTC) + timedelta(hours=48)
+    for item in response.json()["work_order_attention"]:
+        due_soon_or_overdue = bool(
+            item["due_at"] and datetime.fromisoformat(item["due_at"].replace("Z", "+00:00")) <= cutoff
+        )
+        unassigned = not item["assignee_person_id"] and not item["assignee_role"]
+        blocks_pending_sign_off = (
+            item["is_blocking"]
+            and item["episode_workflow_status"] == "awaiting_sign_off"
+            and item["work_order_stage_id"]
+            and item["work_order_stage_id"] == item["episode_workflow_stage_id"]
+        )
+        assert due_soon_or_overdue or unassigned or blocks_pending_sign_off
 
 
 def test_show_workspace_contains_only_the_authorized_show_read_model(client: TestClient) -> None:

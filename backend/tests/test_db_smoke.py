@@ -56,7 +56,16 @@ def test_fastapi_session_and_tenant_boundary_against_seeded_postgres(monkeypatch
 
         dashboard = client.get("/v1/dashboard")
         assert dashboard.status_code == 200
-        assert {"metrics", "episodes", "shows", "schedule", "team", "budget", "activity"} <= dashboard.json().keys()
+        assert {
+            "metrics",
+            "episodes",
+            "shows",
+            "schedule",
+            "team",
+            "work_order_attention",
+            "budget",
+            "activity",
+        } <= dashboard.json().keys()
 
         tenant_b = next(
             membership

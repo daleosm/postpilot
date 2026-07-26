@@ -44,25 +44,33 @@ type CommandEpisode = {
 };
 
 type DashboardBooking = { id: string; title: string; startsAt: Date; endsAt: Date; roomName: string | null; personName: string | null };
-type BlockingWorkOrder = { id: string; title: string; priority: string; status: string; dueAt: Date | null; episodeId: string; episodeTitle: string; episodeNumber: number; showTitle: string; workflowStageName: string | null };
+type WorkOrderAttention = { id: string; title: string; priority: string; status: string; dueAt: Date | null; isBlocking: boolean; assigneePersonId: string | null; assigneeRole: string | null; workflowStageId: string | null; episodeId: string; episodeTitle: string; episodeNumber: number; episodeWorkflowStageId: string | null; episodeWorkflowStatus: string; showTitle: string; workflowStageName: string | null };
 type OperationalTimelineItem = { id: string; title: string; context: string; href: string; at: Date | null; tone: "danger" | "attention" | "calm"; icon: React.ReactNode; label: string };
 
 function formatToday(value: Date) {
   return new Intl.DateTimeFormat("en-GB", { weekday: "long", month: "long", day: "numeric" }).format(value);
 }
 
-function buildOperationalTimeline({ lockedCuts, qcFailures, dueThisWeek, schedule, blockingWorkOrders, now }: { lockedCuts: CommandEpisode[]; qcFailures: CommandEpisode[]; dueThisWeek: CommandEpisode[]; schedule: DashboardBooking[]; blockingWorkOrders: BlockingWorkOrder[]; now: Date }): OperationalTimelineItem[] {
-  const items: OperationalTimelineItem[] = [
-    ...blockingWorkOrders.map((workOrder) => ({
+function buildOperationalTimeline({ lockedCuts, qcFailures, dueThisWeek, schedule, workOrderAttention, now }: { lockedCuts: CommandEpisode[]; qcFailures: CommandEpisode[]; dueThisWeek: CommandEpisode[]; schedule: DashboardBooking[]; workOrderAttention: WorkOrderAttention[]; now: Date }): OperationalTimelineItem[] {
+  const attentionWork = workOrderAttention.map((workOrder) => {
+    const stageBlockedForSignOff = workOrder.isBlocking && workOrder.episodeWorkflowStatus === "awaiting_sign_off" && workOrder.workflowStageId === workOrder.episodeWorkflowStageId;
+    const unassigned = !workOrder.assigneePersonId && !workOrder.assigneeRole;
+    const overdue = Boolean(workOrder.dueAt && workOrder.dueAt < now);
+    const label = stageBlockedForSignOff ? "Sign-off blocked" : unassigned ? "Unassigned work" : overdue ? "Overdue work" : "Due next 48h";
+    const tone: OperationalTimelineItem["tone"] = stageBlockedForSignOff || unassigned || overdue ? "danger" : "attention";
+    return {
       id: `work-order-${workOrder.id}`,
-      title: `Blocking work · ${workOrder.title}`,
+      title: `${label} · ${workOrder.title}`,
       context: `${workOrder.showTitle} · E${String(workOrder.episodeNumber).padStart(2, "0")} · ${workOrder.workflowStageName ?? "Unassigned stage"}`,
       href: `/episodes/${workOrder.episodeId}`,
       at: workOrder.dueAt,
-      tone: "danger" as const,
+      tone,
       icon: <Wrench size={15} />,
-      label: workOrder.priority === "blocker" ? "Blocker" : "Blocking work",
-    })),
+      label,
+    };
+  });
+  const items: OperationalTimelineItem[] = [
+    ...attentionWork,
     ...qcFailures.map((episode) => ({
       id: `qc-${episode.id}`,
       title: `QC failure · ${episode.title}`,
@@ -143,7 +151,7 @@ export default async function DashboardPage() {
   const weekStart = new Date(now);
   weekStart.setHours(0, 0, 0, 0);
 
-  const { dashboard, showRows, schedule, budget, team, blockingWorkOrders, organizationName, isDemo } = screen;
+  const { dashboard, showRows, schedule, budget, team, workOrderAttention, organizationName, isDemo } = screen;
   const currency = organizationContext?.organization?.currency ?? "GBP";
 
   const activeShows = showRows.filter((show) => show.seasons.some((season) => season.activeEpisodeCount > 0));
@@ -159,8 +167,8 @@ export default async function DashboardPage() {
   }, {});
   const suites = Object.entries(suiteHours).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const workload = team.map((member) => ({ ...member, hours: schedule.filter((booking) => booking.personName === member.name).reduce((sum, booking) => sum + (booking.endsAt.getTime() - booking.startsAt.getTime()) / 3_600_000, 0) })).sort((a, b) => b.hours - a.hours).slice(0, 5);
-  const attentionCount = lockedCuts.length + qcFailures.length + blockingWorkOrders.length;
-  const operationalTimeline = buildOperationalTimeline({ lockedCuts, qcFailures, dueThisWeek, schedule, blockingWorkOrders, now });
+  const attentionCount = lockedCuts.length + qcFailures.length + workOrderAttention.length;
+  const operationalTimeline = buildOperationalTimeline({ lockedCuts, qcFailures, dueThisWeek, schedule, workOrderAttention, now });
 
   return (
     <div className="space-y-5 pb-6">
@@ -225,7 +233,7 @@ async function getCommandCenterData() {
       shows: Array<{ id: string; title: string; code: string; seasons: Array<{ id: string; number: number }>; season_count: number; episode_count: number; active_episode_count: number }>;
       schedule: Array<{ id: string; title: string; starts_at: string; ends_at: string; room_name: string | null; person_name: string | null }>;
       team: Array<{ id: string; name: string; role: string }>;
-      blocking_work_orders: Array<{ id: string; title: string; priority: string; status: string; due_at: string | null; episode_id: string; episode_title: string; episode_number: number; show_title: string; workflow_stage_name: string | null }>;
+      work_order_attention: Array<{ id: string; title: string; priority: string; status: string; due_at: string | null; is_blocking: boolean; assignee_person_id: string | null; assignee_role: string | null; work_order_stage_id: string | null; episode_id: string; episode_title: string; episode_number: number; episode_workflow_stage_id: string | null; episode_workflow_status: string; show_title: string; workflow_stage_name: string | null }>;
       budget: { budgeted: number; actual: number } | null;
       activity: Array<{ id: string; action: string; entity_type: string; entity_id: string; metadata: unknown; created_at: string }>;
     }>("/dashboard");
@@ -252,7 +260,7 @@ async function getCommandCenterData() {
         }),
       })),
       schedule: response.schedule.map((booking) => ({ ...booking, startsAt: new Date(booking.starts_at), endsAt: new Date(booking.ends_at), roomName: booking.room_name, personName: booking.person_name })),
-      blockingWorkOrders: response.blocking_work_orders.map((workOrder) => ({ id: workOrder.id, title: workOrder.title, priority: workOrder.priority, status: workOrder.status, dueAt: workOrder.due_at ? new Date(workOrder.due_at) : null, episodeId: workOrder.episode_id, episodeTitle: workOrder.episode_title, episodeNumber: workOrder.episode_number, showTitle: workOrder.show_title, workflowStageName: workOrder.workflow_stage_name })),
+      workOrderAttention: response.work_order_attention.map((workOrder) => ({ id: workOrder.id, title: workOrder.title, priority: workOrder.priority, status: workOrder.status, dueAt: workOrder.due_at ? new Date(workOrder.due_at) : null, isBlocking: workOrder.is_blocking, assigneePersonId: workOrder.assignee_person_id, assigneeRole: workOrder.assignee_role, workflowStageId: workOrder.work_order_stage_id, episodeId: workOrder.episode_id, episodeTitle: workOrder.episode_title, episodeNumber: workOrder.episode_number, episodeWorkflowStageId: workOrder.episode_workflow_stage_id, episodeWorkflowStatus: workOrder.episode_workflow_status, showTitle: workOrder.show_title, workflowStageName: workOrder.workflow_stage_name })),
       budget: response.budget ? { totals: { budgeted: response.budget.budgeted, actual: response.budget.actual } } : null,
       team: response.team,
       isDemo: false,

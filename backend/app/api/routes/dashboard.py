@@ -91,22 +91,40 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
         )
     ).all()
 
-    blocking_conditions = [
+    # The command centre is an exception queue, not another work-order list.
+    # Surface only work that needs a coordinator's attention: overdue or near
+    # due work, work without an owner, and blockers holding a stage that is
+    # otherwise waiting for sign-off.
+    work_order_attention_conditions = [
         post_work_orders.c.organization_id == actor.organization_id,
-        post_work_orders.c.is_blocking.is_(True),
         post_work_orders.c.status.not_in(("complete", "cancelled")),
     ]
     if not all_operations:
         if not actor.person_id or (actor.active_organization and actor.active_organization.role == "client"):
-            blocking_conditions.append(post_work_orders.c.id.is_(None))
+            work_order_attention_conditions.append(post_work_orders.c.id.is_(None))
         else:
-            blocking_conditions.append(
+            work_order_attention_conditions.append(
                 or_(
                     post_work_orders.c.assignee_person_id == actor.person_id,
                     post_work_orders.c.assignee_role == actor.person_role,
                 )
             )
-    blocking_work_orders = (
+    work_order_attention_conditions.append(
+        or_(
+            post_work_orders.c.due_at <= now + timedelta(hours=48),
+            and_(
+                post_work_orders.c.assignee_person_id.is_(None),
+                post_work_orders.c.assignee_role.is_(None),
+            ),
+            and_(
+                post_work_orders.c.is_blocking.is_(True),
+                episodes.c.workflow_status == "awaiting_sign_off",
+                post_work_orders.c.workflow_stage_id.is_not(None),
+                post_work_orders.c.workflow_stage_id == episodes.c.workflow_stage_id,
+            ),
+        )
+    )
+    work_order_attention = (
         await session.execute(
             select(
                 post_work_orders.c.id,
@@ -114,9 +132,15 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
                 post_work_orders.c.priority,
                 post_work_orders.c.status,
                 post_work_orders.c.due_at,
+                post_work_orders.c.is_blocking,
+                post_work_orders.c.assignee_person_id,
+                post_work_orders.c.assignee_role,
+                post_work_orders.c.workflow_stage_id.label("work_order_stage_id"),
                 episodes.c.id.label("episode_id"),
                 episodes.c.title.label("episode_title"),
                 episodes.c.number.label("episode_number"),
+                episodes.c.workflow_stage_id.label("episode_workflow_stage_id"),
+                episodes.c.workflow_status.label("episode_workflow_status"),
                 shows.c.title.label("show_title"),
                 workflow_stages.c.name.label("workflow_stage_name"),
             )
@@ -143,9 +167,9 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
                     workflow_stages.c.organization_id == actor.organization_id,
                 ),
             )
-            .where(and_(*blocking_conditions))
+            .where(and_(*work_order_attention_conditions))
             .order_by(post_work_orders.c.due_at.asc().nulls_last(), post_work_orders.c.created_at.desc())
-            .limit(6)
+            .limit(25)
         )
     ).all()
 
@@ -183,20 +207,26 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
             for booking in schedule
         ],
         "team": [{"id": person.id, "name": person.name, "role": person.role} for person in team],
-        "blocking_work_orders": [
+        "work_order_attention": [
             {
                 "id": item.id,
                 "title": item.title,
                 "priority": item.priority,
                 "status": item.status,
                 "due_at": item.due_at,
+                "is_blocking": item.is_blocking,
+                "assignee_person_id": item.assignee_person_id,
+                "assignee_role": item.assignee_role,
+                "work_order_stage_id": item.work_order_stage_id,
                 "episode_id": item.episode_id,
                 "episode_title": item.episode_title,
                 "episode_number": item.episode_number,
+                "episode_workflow_stage_id": item.episode_workflow_stage_id,
+                "episode_workflow_status": item.episode_workflow_status,
                 "show_title": item.show_title,
                 "workflow_stage_name": item.workflow_stage_name,
             }
-            for item in blocking_work_orders
+            for item in work_order_attention
         ],
         "budget": budget,
         "activity": [
