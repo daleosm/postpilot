@@ -1078,9 +1078,11 @@ class EpisodeTeamAddRequest(BaseModel):
     person_id: str
 
 
-class EpisodeWorkflowSignerRequest(BaseModel):
-    approval_rule_id: str
-    person_id: str | None = None
+class EpisodeTeamSignerRequest(BaseModel):
+    """Toggle the episode-team member nominated to sign off their own role."""
+
+    assignment_id: str
+    is_signer: bool
 
 
 class WorkflowActionRequest(BaseModel):

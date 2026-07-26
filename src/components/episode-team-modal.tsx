@@ -9,7 +9,7 @@ import { EpisodeTeam } from "@/components/episode-team";
 type TeamData = {
   assignments: Array<{ id: string; personId: string; name: string; role: string; isLead: boolean }>;
   people: Array<{ id: string; name: string; role: string }>;
-  signOffSlots: Array<{ approvalRuleId: string; stageName: string; label: string; isRequired: boolean; personId: string | null }>;
+  eligibleSignerRoles: string[];
 };
 
 export function EpisodeTeamModal({ episodeId }: { episodeId: string }) {
@@ -32,5 +32,5 @@ export function EpisodeTeamModal({ episodeId }: { episodeId: string }) {
   if (error) return <p className="mt-5 text-xs text-[#a35e41]">{error}</p>;
   if (!data) return <p className="mt-5 text-xs text-[#858a87]">Loading episode team…</p>;
 
-  return <div className="mt-5"><EpisodeTeam episodeId={episodeId} assignments={data.assignments} people={data.people} signOffSlots={data.signOffSlots} canManage onChanged={() => { void load().catch((cause: Error) => setError(cause.message)); }} /></div>;
+  return <div className="mt-5"><EpisodeTeam episodeId={episodeId} assignments={data.assignments} people={data.people} eligibleSignerRoles={data.eligibleSignerRoles} canManage onChanged={() => { void load().catch((cause: Error) => setError(cause.message)); }} /></div>;
 }

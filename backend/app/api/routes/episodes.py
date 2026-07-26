@@ -19,7 +19,7 @@ from app.api.schemas import (
     EpisodeCreateRequest,
     EpisodeTeamAddRequest,
     EpisodeUpdateRequest,
-    EpisodeWorkflowSignerRequest,
+    EpisodeTeamSignerRequest,
     WorkflowActionRequest,
 )
 from app.auth import has_permission, require_permission
@@ -37,7 +37,6 @@ from app.db.tables import (
     episode_team_assignments,
     episode_workflow_approvals,
     episode_workflow_exceptions,
-    episode_workflow_signers,
     episodes,
     people,
     post_work_order_items,
@@ -649,24 +648,6 @@ async def get_episode_workspace(episode_id: str, actor: CurrentActor, session: D
             .order_by(people.c.name, people.c.id)
         )
     ).all()
-    signer_rows = (
-        await session.execute(
-            select(
-                episode_workflow_signers.c.workflow_stage_approval_rule_id,
-                people.c.id.label("person_id"),
-                people.c.name,
-                people.c.role,
-            )
-            .join(people, people.c.id == episode_workflow_signers.c.person_id)
-            .where(
-                and_(
-                    episode_workflow_signers.c.organization_id == actor.organization_id,
-                    episode_workflow_signers.c.episode_id == episode_id,
-                    people.c.organization_id == actor.organization_id,
-                )
-            )
-        )
-    ).all()
     exception_rows = (
         await session.execute(
             select(episode_workflow_exceptions)
@@ -952,14 +933,20 @@ async def get_episode_workspace(episode_id: str, actor: CurrentActor, session: D
             else []
         ),
         "workflow_approvers": [{"id": str(item.id), "name": item.name, "role": item.role} for item in people_rows],
+        # A signer is nominated once per episode-team role.  The stage rule
+        # determines which role is eligible; the checked team member supplies
+        # the named person for every matching rule.
         "workflow_signers": [
             {
-                "approval_rule_id": str(item.workflow_stage_approval_rule_id),
-                "person_id": str(item.person_id),
-                "name": item.name,
-                "role": item.role,
+                "approval_rule_id": str(rule.id),
+                "person_id": str(member.person_id),
+                "name": member.name,
+                "role": member.role,
             }
-            for item in signer_rows
+            for rule in rules
+            if rule.approver_role
+            for member in team_rows
+            if member.is_lead and member.role == rule.approver_role
         ],
         "episode_team": [
             {
@@ -1095,7 +1082,7 @@ async def update_episode(
 
 @router.get("/{episode_id}/team")
 async def get_episode_team(episode_id: str, actor: CurrentActor, session: DbSession) -> dict[str, object]:
-    """Return the editable episode team plus its selected sign-off people."""
+    """Return the editable team and workflow roles eligible for signer nomination."""
     await require_permission(session, actor, "manage_production")
     await require_episode_access(session, actor, episode_id)
     assignments = (
@@ -1125,34 +1112,24 @@ async def get_episode_team(episode_id: str, actor: CurrentActor, session: DbSess
             .order_by(people.c.name, people.c.id)
         )
     ).all()
-    slots = (
+    eligible_roles = (
         await session.execute(
             select(
-                workflow_stage_approval_rules.c.id.label("approval_rule_id"),
-                workflow_stages.c.name.label("stage_name"),
-                workflow_stage_approval_rules.c.label,
-                workflow_stage_approval_rules.c.is_required,
-                episode_workflow_signers.c.person_id,
+                workflow_stage_approval_rules.c.approver_role,
             )
             .join(workflow_stages, workflow_stages.c.id == workflow_stage_approval_rules.c.workflow_stage_id)
             .join(post_workflows, post_workflows.c.id == workflow_stages.c.workflow_id)
-            .outerjoin(
-                episode_workflow_signers,
-                and_(
-                    episode_workflow_signers.c.organization_id == actor.organization_id,
-                    episode_workflow_signers.c.episode_id == episode_id,
-                    episode_workflow_signers.c.workflow_stage_approval_rule_id == workflow_stage_approval_rules.c.id,
-                ),
-            )
             .where(
                 and_(
                     workflow_stage_approval_rules.c.organization_id == actor.organization_id,
                     workflow_stages.c.organization_id == actor.organization_id,
                     post_workflows.c.organization_id == actor.organization_id,
                     post_workflows.c.is_default.is_(True),
+                    workflow_stage_approval_rules.c.approver_role.is_not(None),
                 )
             )
-            .order_by(workflow_stages.c.position, workflow_stage_approval_rules.c.approval_order)
+            .distinct()
+            .order_by(workflow_stage_approval_rules.c.approver_role)
         )
     ).all()
     return {
@@ -1167,16 +1144,7 @@ async def get_episode_team(episode_id: str, actor: CurrentActor, session: DbSess
             for item in assignments
         ],
         "people": [{"id": str(item.id), "name": item.name, "role": item.role} for item in tenant_people],
-        "sign_off_slots": [
-            {
-                "approval_rule_id": str(item.approval_rule_id),
-                "stage_name": item.stage_name,
-                "label": item.label,
-                "is_required": item.is_required,
-                "person_id": str(item.person_id) if item.person_id else None,
-            }
-            for item in slots
-        ],
+        "eligible_signer_roles": [item.approver_role for item in eligible_roles if item.approver_role],
     }
 
 
@@ -1205,21 +1173,39 @@ async def add_episode_team_member(
 
 
 @router.patch("/{episode_id}/team")
-async def set_episode_workflow_signer(
-    episode_id: str, payload: EpisodeWorkflowSignerRequest, actor: CurrentActor, session: DbSession
+async def set_episode_team_signer(
+    episode_id: str, payload: EpisodeTeamSignerRequest, actor: CurrentActor, session: DbSession
 ) -> dict[str, object]:
-    """Assign a named episode-team person to one configured sign-off slot."""
+    """Nominate one matching-role episode-team member as the workflow signer."""
     await require_permission(session, actor, "manage_production")
     await require_episode_access(session, actor, episode_id)
-    rule = (
+    assignment = (
+        await session.execute(
+            select(episode_team_assignments.c.id, episode_team_assignments.c.person_id, people.c.role)
+            .join(people, people.c.id == episode_team_assignments.c.person_id)
+            .where(
+                and_(
+                    episode_team_assignments.c.id == payload.assignment_id,
+                    episode_team_assignments.c.organization_id == actor.organization_id,
+                    episode_team_assignments.c.episode_id == episode_id,
+                    people.c.organization_id == actor.organization_id,
+                )
+            )
+            .limit(1)
+        )
+    ).first()
+    if not assignment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode-team assignment not found.")
+    eligible = (
         await session.execute(
             select(workflow_stage_approval_rules.c.id)
             .join(workflow_stages, workflow_stages.c.id == workflow_stage_approval_rules.c.workflow_stage_id)
             .join(post_workflows, post_workflows.c.id == workflow_stages.c.workflow_id)
             .where(
                 and_(
-                    workflow_stage_approval_rules.c.id == payload.approval_rule_id,
                     workflow_stage_approval_rules.c.organization_id == actor.organization_id,
+                    workflow_stage_approval_rules.c.approver_role == assignment.role,
+                    workflow_stages.c.organization_id == actor.organization_id,
                     post_workflows.c.organization_id == actor.organization_id,
                     post_workflows.c.is_default.is_(True),
                 )
@@ -1227,78 +1213,81 @@ async def set_episode_workflow_signer(
             .limit(1)
         )
     ).first()
-    if not rule:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow sign-off slot not found.")
-    if payload.person_id is None:
-        await session.execute(
-            delete(episode_workflow_signers).where(
-                and_(
-                    episode_workflow_signers.c.organization_id == actor.organization_id,
-                    episode_workflow_signers.c.episode_id == episode_id,
-                    episode_workflow_signers.c.workflow_stage_approval_rule_id == payload.approval_rule_id,
-                )
-            )
+    if not eligible:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This person’s role is not configured for workflow sign-off.",
         )
+    # One checked workflow signer per occupational role.  The same person can
+    # sign stages of that role throughout this episode, while all other people
+    # remain ordinary episode-team members.
+    if payload.is_signer:
         await session.execute(
-            update(episode_workflow_approvals)
-            .where(
-                and_(
-                    episode_workflow_approvals.c.organization_id == actor.organization_id,
-                    episode_workflow_approvals.c.episode_id == episode_id,
-                    episode_workflow_approvals.c.approval_rule_id == payload.approval_rule_id,
-                    episode_workflow_approvals.c.status == "pending",
-                )
-            )
-            .values(required_person_id=None, updated_at=datetime.now(UTC))
-        )
-        await session.commit()
-        return {"ok": True}
-    assigned = (
-        await session.execute(
-            select(episode_team_assignments.c.id)
-            .join(people, people.c.id == episode_team_assignments.c.person_id)
+            update(episode_team_assignments)
             .where(
                 and_(
                     episode_team_assignments.c.organization_id == actor.organization_id,
                     episode_team_assignments.c.episode_id == episode_id,
-                    episode_team_assignments.c.person_id == payload.person_id,
-                    people.c.organization_id == actor.organization_id,
+                    episode_team_assignments.c.person_id.in_(
+                        select(people.c.id).where(
+                            and_(people.c.organization_id == actor.organization_id, people.c.role == assignment.role)
+                        )
+                    ),
                 )
             )
-            .limit(1)
-        )
-    ).first()
-    if not assigned:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Choose an episode-team member as the workflow signer."
+            .values(is_lead=False)
         )
     await session.execute(
-        pg_insert(episode_workflow_signers)
-        .values(
-            organization_id=actor.organization_id,
-            episode_id=episode_id,
-            workflow_stage_approval_rule_id=payload.approval_rule_id,
-            person_id=payload.person_id,
-        )
-        .on_conflict_do_update(
-            index_elements=["episode_id", "workflow_stage_approval_rule_id"],
-            set_={"person_id": payload.person_id, "updated_at": datetime.now(UTC)},
-        )
-    )
-    await session.execute(
-        update(episode_workflow_approvals)
+        update(episode_team_assignments)
         .where(
             and_(
-                episode_workflow_approvals.c.organization_id == actor.organization_id,
-                episode_workflow_approvals.c.episode_id == episode_id,
-                episode_workflow_approvals.c.approval_rule_id == payload.approval_rule_id,
-                episode_workflow_approvals.c.status == "pending",
+                episode_team_assignments.c.id == payload.assignment_id,
+                episode_team_assignments.c.organization_id == actor.organization_id,
+                episode_team_assignments.c.episode_id == episode_id,
             )
         )
-        .values(required_person_id=payload.person_id, updated_at=datetime.now(UTC))
+        .values(is_lead=payload.is_signer)
     )
+    # Pending approvals are reassigned only within this role.  Completed
+    # approvals retain their historical named signer.
+    role_rule_ids = (
+        select(workflow_stage_approval_rules.c.id)
+        .join(workflow_stages, workflow_stages.c.id == workflow_stage_approval_rules.c.workflow_stage_id)
+        .join(post_workflows, post_workflows.c.id == workflow_stages.c.workflow_id)
+        .where(
+            and_(
+                workflow_stage_approval_rules.c.organization_id == actor.organization_id,
+                workflow_stage_approval_rules.c.approver_role == assignment.role,
+                workflow_stages.c.organization_id == actor.organization_id,
+                post_workflows.c.organization_id == actor.organization_id,
+                post_workflows.c.is_default.is_(True),
+            )
+        )
+    )
+    pending = and_(
+        episode_workflow_approvals.c.organization_id == actor.organization_id,
+        episode_workflow_approvals.c.episode_id == episode_id,
+        episode_workflow_approvals.c.approval_rule_id.in_(role_rule_ids),
+        episode_workflow_approvals.c.status == "pending",
+    )
+    if payload.is_signer:
+        await session.execute(
+            update(episode_workflow_approvals)
+            .where(pending)
+            .values(
+                approver_role=assignment.role,
+                required_person_id=assignment.person_id,
+                updated_at=datetime.now(UTC),
+            )
+        )
+    else:
+        await session.execute(
+            update(episode_workflow_approvals)
+            .where(and_(pending, episode_workflow_approvals.c.required_person_id == assignment.person_id))
+            .values(required_person_id=None, updated_at=datetime.now(UTC))
+        )
     await session.commit()
-    return {"ok": True}
+    return {"ok": True, "is_signer": payload.is_signer}
 
 
 @router.delete("/{episode_id}/team/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1322,7 +1311,7 @@ async def remove_episode_team_member(
     ).first()
     if not assignment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode-team assignment not found.")
-    pending_or_configured_signer = (
+    pending_signer = (
         await session.execute(
             select(episode_workflow_approvals.c.id)
             .where(
@@ -1335,20 +1324,8 @@ async def remove_episode_team_member(
             )
             .limit(1)
         )
-    ).first() or (
-        await session.execute(
-            select(episode_workflow_signers.c.id)
-            .where(
-                and_(
-                    episode_workflow_signers.c.organization_id == actor.organization_id,
-                    episode_workflow_signers.c.episode_id == episode_id,
-                    episode_workflow_signers.c.person_id == assignment.person_id,
-                )
-            )
-            .limit(1)
-        )
     ).first()
-    if pending_or_configured_signer:
+    if pending_signer:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Choose a replacement sign-off person before removing this episode-team member.",
@@ -1590,8 +1567,8 @@ async def transition_episode_workflow(
 ) -> dict[str, object]:
     """Perform the single-current-stage workflow lifecycle.
 
-    It deliberately contains no role names: configured sign-off slots select
-    named people and policy capabilities govern every action.
+    It deliberately contains no role names: tenant-configured sign-off roles,
+    nominated episode-team people, and policy capabilities govern every action.
     """
     await require_episode_access(session, actor, episode_id)
     episode, stages, rules, approvals = await _workflow_context(session, actor, episode_id)
@@ -1721,33 +1698,31 @@ async def transition_episode_workflow(
         else:
             signers = (
                 await session.execute(
-                    select(
-                        episode_workflow_signers.c.workflow_stage_approval_rule_id, episode_workflow_signers.c.person_id
-                    )
-                    .join(
-                        episode_team_assignments,
-                        and_(
-                            episode_team_assignments.c.episode_id == episode_workflow_signers.c.episode_id,
-                            episode_team_assignments.c.person_id == episode_workflow_signers.c.person_id,
-                        ),
-                    )
+                    select(people.c.role, people.c.id.label("person_id"))
+                    .select_from(episode_team_assignments)
+                    .join(people, people.c.id == episode_team_assignments.c.person_id)
                     .where(
                         and_(
-                            episode_workflow_signers.c.organization_id == actor.organization_id,
-                            episode_workflow_signers.c.episode_id == episode_id,
-                            episode_workflow_signers.c.workflow_stage_approval_rule_id.in_(
-                                [rule.id for rule in stage_rules]
-                            ),
                             episode_team_assignments.c.organization_id == actor.organization_id,
+                            episode_team_assignments.c.episode_id == episode_id,
+                            episode_team_assignments.c.is_lead.is_(True),
+                            people.c.organization_id == actor.organization_id,
                         )
                     )
                 )
             ).all()
-            signer_by_rule = {item.workflow_stage_approval_rule_id: item.person_id for item in signers}
-            if any(rule.id not in signer_by_rule for rule in stage_rules):
+            signer_by_role = {item.role: item.person_id for item in signers}
+            missing = [rule for rule in stage_rules if not rule.approver_role or rule.approver_role not in signer_by_role]
+            if missing:
+                missing_roles = ", ".join(
+                    sorted({(rule.approver_role or "unconfigured role").replace("_", " ") for rule in missing})
+                )
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="Choose each episode workflow signer before this stage can be submitted.",
+                    detail=(
+                        "Mark an episode-team workflow signer for: "
+                        f"{missing_roles}. The selected person must have the role configured on this stage."
+                    ),
                 )
             for rule in stage_rules:
                 await session.execute(
@@ -1757,7 +1732,8 @@ async def transition_episode_workflow(
                         episode_id=episode_id,
                         workflow_stage_id=stage.id,
                         approval_rule_id=rule.id,
-                        required_person_id=signer_by_rule[rule.id],
+                        approver_role=rule.approver_role,
+                        required_person_id=signer_by_role[rule.approver_role],
                         status="pending",
                     )
                     .on_conflict_do_nothing(index_elements=["episode_id", "approval_rule_id"])

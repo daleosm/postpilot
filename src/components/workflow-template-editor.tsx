@@ -11,11 +11,18 @@ type Stage = { id: string; name: string; key: string; position: number; color: s
 type Rule = { id: string; workflowStageId: string; approverRole: string | null; label: string; approvalOrder: number; isRequired: boolean };
 type WorkOrderTemplate = { id: string; workflowStageId: string; title: string; description: string | null; department: string | null; assigneeRole: string | null; priority: "blocker" | "high" | "normal" | "low"; isBlocking: boolean; position: number };
 type Workflow = { id: string; name: string; description: string | null; stages: Stage[]; rules: Rule[]; workOrderTemplates: WorkOrderTemplate[] };
+type RoleOption = { role: string; label: string };
 
-export function WorkflowTemplateEditor({ workflow }: { workflow: Workflow }) {
+export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow; roles: RoleOption[] }) {
   const router = useRouter();
   const [stages, setStages] = useState(workflow.stages);
-  const [rules, setRules] = useState(workflow.rules);
+  // Older saves kept the human label but accidentally cleared the role.  A
+  // label that exactly matches a current tenant role is safe to recover in
+  // the editor; the server remains the authority when it is saved.
+  const [rules, setRules] = useState(() => workflow.rules.map((rule) => ({
+    ...rule,
+    approverRole: rule.approverRole ?? roles.find((role) => `${role.label} sign-off`.toLocaleLowerCase() === rule.label.toLocaleLowerCase())?.role ?? null,
+  })));
   const [workOrderTemplates, setWorkOrderTemplates] = useState(workflow.workOrderTemplates);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
@@ -31,9 +38,14 @@ export function WorkflowTemplateEditor({ workflow }: { workflow: Workflow }) {
   }
 
   function addApprovalRule(workflowStageId: string) {
+    const defaultRole = roles[0];
+    if (!defaultRole) {
+      setMessage("Create a tenant role before adding a workflow sign-off.");
+      return;
+    }
     const stageRules = rules.filter((rule) => rule.workflowStageId === workflowStageId);
     const approvalOrder = Math.max(0, ...stageRules.map((rule) => rule.approvalOrder)) + 1;
-    setRules((items) => [...items, { id: crypto.randomUUID(), workflowStageId, approverRole: null, label: `Sign-off slot ${approvalOrder}`, approvalOrder, isRequired: true }]);
+    setRules((items) => [...items, { id: crypto.randomUUID(), workflowStageId, approverRole: defaultRole.role, label: `${defaultRole.label} sign-off`, approvalOrder, isRequired: true }]);
   }
 
   function removeApprovalRule(id: string, workflowStageId: string) {
@@ -108,7 +120,7 @@ export function WorkflowTemplateEditor({ workflow }: { workflow: Workflow }) {
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) return setMessage(body?.error ?? "Could not save the workflow.");
-      setMessage("Workflow saved. Assign named people to the sign-off slots in each episode team.");
+      setMessage("Workflow saved. Mark the matching episode-team member as workflow signer when assigning the episode team.");
       router.refresh();
     } catch {
       setMessage("Could not save the workflow.");
@@ -124,8 +136,8 @@ export function WorkflowTemplateEditor({ workflow }: { workflow: Workflow }) {
       <section className="panel overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#ebeae6] px-5 py-4">
           <div>
-            <h2 className="text-sm font-semibold text-[#353b39]">Workflow stages and sign-off slots</h2>
-            <p className="mt-1 text-xs text-[#858a87]">Drag stages to set the order. Add the named-person sign-off slots each stage needs.</p>
+            <h2 className="text-sm font-semibold text-[#353b39]">Workflow stages and sign-off roles</h2>
+            <p className="mt-1 text-xs text-[#858a87]">Drag stages to set the order. Each sign-off uses a tenant role; choose the named signer later in the episode team.</p>
           </div>
           <Button size="sm" variant="tertiary" onPress={addStage} className="border border-[#dfe5e1] bg-white text-[#45685e]"><Plus size={14} /> Add stage</Button>
         </div>
@@ -142,17 +154,17 @@ export function WorkflowTemplateEditor({ workflow }: { workflow: Workflow }) {
                 </div>
                 {(stage.canStartEarly || stage.requiresQcPass || stage.deliveryGate !== "none") && <p className="mt-2 text-xs leading-5 text-[#68716d]">{stage.canStartEarly ? "This stage may start before its normal turn when an authorised early start is recorded. " : ""}{stage.requiresQcPass ? "A passed or authorised-waived QC report is required before this stage can progress. " : ""}{stage.deliveryGate === "facility_dispatch" ? "Every required manifest item must pass required QC and be dispatched before sign-off." : ""}{stage.deliveryGate === "client_acceptance" ? "Every required item needs recipient receipt confirmation, unless a capability-authorised local exception is recorded." : ""}</p>}
                 <div className="mt-4 rounded-lg bg-[#fafaf8] p-3">
-                  <div className="flex items-center justify-between gap-3"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7d837f]">Sign-off slots</p><Button size="sm" variant="tertiary" onClick={() => addApprovalRule(stage.id)} className="h-7 border border-[#dfe5e1] bg-white px-2 text-xs text-[#45685e]"><Plus size={13} /> Add sign-off</Button></div>
-                  <p className="mt-1 text-xs text-[#858a87]">Assign a named episode-team person to each slot in Edit episode. Required slots hold the next stage; optional slots do not.</p>
+                  <div className="flex items-center justify-between gap-3"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7d837f]">Sign-off roles</p><Button size="sm" variant="tertiary" onClick={() => addApprovalRule(stage.id)} isDisabled={!roles.length} className="h-7 border border-[#dfe5e1] bg-white px-2 text-xs text-[#45685e]"><Plus size={13} /> Add sign-off</Button></div>
+                  <p className="mt-1 text-xs text-[#858a87]">Choose the role that signs off this stage. In Edit episode, tick one assigned person with that role as workflow signer. Required sign-offs hold the next stage.</p>
                   {stageRules.map((rule, index) => (
                     <div key={rule.id} className="mt-2 grid gap-2 sm:grid-cols-[28px_minmax(170px,1fr)_100px_28px] sm:items-center">
                       <span className="text-center text-xs font-semibold text-[#7c837f]">{index + 1}</span>
-                      <input aria-label={`Sign-off slot ${index + 1}`} value={rule.label} onChange={(event) => updateRule(rule.id, { label: event.target.value })} placeholder="e.g. Creative approval" className="h-8 rounded-md border border-[#dedfda] bg-white px-2 text-xs" />
+                      <select aria-label={`Sign-off role ${index + 1}`} value={rule.approverRole ?? ""} onChange={(event) => { const selected = roles.find((role) => role.role === event.target.value); updateRule(rule.id, { approverRole: event.target.value || null, label: selected ? `${selected.label} sign-off` : "" }); }} className="h-8 rounded-md border border-[#dedfda] bg-white px-2 text-xs"><option value="">Choose role</option>{roles.map((role) => <option key={role.role} value={role.role}>{role.label}</option>)}</select>
                       <label className="flex h-8 items-center gap-2 whitespace-nowrap text-xs font-medium text-[#59615e]"><input type="checkbox" aria-label={`Require sign-off ${index + 1}`} checked={rule.isRequired} onChange={(event) => updateRule(rule.id, { isRequired: event.target.checked })} /> Required</label>
                       <button type="button" onClick={() => removeApprovalRule(rule.id, stage.id)} className="rounded p-1 text-[#8b918e] hover:bg-[#f3e9e4] hover:text-[#a35e41]" aria-label={`Remove sign-off ${index + 1}`}><Trash2 size={14} /></button>
                     </div>
                   ))}
-                  {!stageRules.length && <p className="mt-2 text-xs text-[#858a87]">No sign-off slots configured for this stage.</p>}
+                  {!stageRules.length && <p className="mt-2 text-xs text-[#858a87]">No sign-off roles configured for this stage.</p>}
                 </div>
               </div>
             );

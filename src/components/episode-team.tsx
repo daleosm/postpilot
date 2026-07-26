@@ -9,9 +9,8 @@ import { useState } from "react";
 
 type Assignment = { id: string; personId: string; name: string; role: string; isLead: boolean };
 type Person = { id: string; name: string; role: string };
-type SignOffSlot = { approvalRuleId: string; stageName: string; label: string; isRequired: boolean; personId: string | null };
 
-export function EpisodeTeam({ episodeId, assignments, people, signOffSlots = [], canManage, onChanged }: { episodeId: string; assignments: Assignment[]; people: Person[]; signOffSlots?: SignOffSlot[]; canManage: boolean; onChanged?: () => void | Promise<void> }) {
+export function EpisodeTeam({ episodeId, assignments, people, eligibleSignerRoles = [], canManage, onChanged }: { episodeId: string; assignments: Assignment[]; people: Person[]; eligibleSignerRoles?: string[]; canManage: boolean; onChanged?: () => void | Promise<void> }) {
   const router = useRouter();
   const [personId, setPersonId] = useState("");
   const [error, setError] = useState("");
@@ -25,10 +24,10 @@ export function EpisodeTeam({ episodeId, assignments, people, signOffSlots = [],
     router.refresh();
   }
 
-  async function setSignOffPerson(approvalRuleId: string, personId: string) {
+  async function setSigner(assignmentId: string, isSigner: boolean) {
     setError("");
-    const response = await postpilotUiFetch(`/v1/episodes/${episodeId}/team`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approvalRuleId, personId: personId || null }) });
-    if (!response.ok) return setError((await response.json()).error ?? "Could not update the sign-off person.");
+    const response = await postpilotUiFetch(`/v1/episodes/${episodeId}/team`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assignmentId, isSigner }) });
+    if (!response.ok) return setError((await response.json()).error ?? "Could not update the workflow signer.");
     await onChanged?.();
     router.refresh();
   }
@@ -61,26 +60,32 @@ export function EpisodeTeam({ episodeId, assignments, people, signOffSlots = [],
     </section>;
   }
 
+  const signerRoles = new Set(eligibleSignerRoles);
+
   return <div className="min-w-0 rounded-lg border border-[#ecebe7] p-3">
     <div className="flex items-center justify-between gap-2">
       <p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7d837f]">Episode team</p>
       <span className="text-[10px] text-[#858a87]">{assignments.length} assigned</span>
     </div>
-    <p className="mt-1 text-[11px] leading-4 text-[#858a87]">Assign people to the episode first, then choose the named person for each workflow sign-off slot.</p>
+    <p className="mt-1 text-[11px] leading-4 text-[#858a87]">Anyone can be assigned. Tick one person per configured sign-off role to nominate the person who can sign off that role’s workflow stages.</p>
     <div className="mt-2 overflow-hidden rounded border border-[#ecebe7]">
-      <div className="grid grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-2 border-b border-[#ecebe7] bg-[#f4f5f2] px-2 py-1.5 text-[9px] font-semibold uppercase tracking-[.06em] text-[#7d837f]">
-        <span>Team member</span><span />
+      <div className="grid grid-cols-[minmax(0,1fr)_5.75rem_1.75rem] items-center gap-2 border-b border-[#ecebe7] bg-[#f4f5f2] px-2 py-1.5 text-[9px] font-semibold uppercase tracking-[.06em] text-[#7d837f]">
+        <span>Team member</span><span>Signer</span><span />
       </div>
-      {assignments.map((item) => <div key={item.id} className="grid grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-2 border-b border-[#f0f0ed] bg-[#fafaf8] px-2 py-1.5 text-xs last:border-b-0">
+      {assignments.map((item) => {
+        const canSign = signerRoles.has(item.role);
+        return <div key={item.id} className="grid grid-cols-[minmax(0,1fr)_5.75rem_1.75rem] items-center gap-2 border-b border-[#f0f0ed] bg-[#fafaf8] px-2 py-1.5 text-xs last:border-b-0">
         <span className="min-w-0 truncate font-medium text-[#46504b]">{item.name} · {item.role.replaceAll("_", " ")}</span>
+        <label className={`flex items-center gap-1.5 text-[10px] font-medium ${canSign ? "cursor-pointer text-[#52635c]" : "cursor-not-allowed text-[#a2a8a4]"}`} title={canSign ? "Nominates this person to sign off workflow stages configured for their role." : "No workflow sign-off stage is configured for this role."}>
+          <input type="checkbox" checked={item.isLead} disabled={!canSign} onChange={(event) => setSigner(item.id, event.target.checked)} aria-label={`Workflow signer: ${item.name}`} />
+          <span>Signer</span>
+        </label>
         <Button type="button" isIconOnly size="sm" variant="tertiary" onPress={() => remove(item.id)} aria-label={`Remove ${item.name}`} className="min-w-0 text-[#9b5c42]"><X size={13} /></Button>
-      </div>)}
+      </div>;
+      })}
       {!assignments.length && <p className="px-2 py-3 text-xs text-[#858a87]">No people assigned to this episode.</p>}
     </div>
-    <div className="mt-3 rounded border border-[#ecebe7] bg-[#fafaf8] p-2.5">
-      <p className="text-[10px] font-semibold uppercase tracking-[.06em] text-[#7d837f]">Workflow sign-off slots</p>
-      {signOffSlots.length ? <div className="mt-2 space-y-2">{signOffSlots.map((slot) => <label key={slot.approvalRuleId} className="grid gap-1 text-xs text-[#59635e] sm:grid-cols-[minmax(0,1fr)_11rem] sm:items-center sm:gap-3"><span className="min-w-0"><b className="font-semibold text-[#46504b]">{slot.label}</b><span className="text-[#858a87]"> · {slot.stageName}{slot.isRequired ? " · required" : " · optional"}</span></span><select value={slot.personId ?? ""} onChange={(event) => setSignOffPerson(slot.approvalRuleId, event.target.value)} disabled={!assignments.length} aria-label={`Sign-off person for ${slot.label}`} className="min-w-0"><option value="">Choose person</option>{assignments.map((person) => <option key={person.personId} value={person.personId}>{person.name}</option>)}</select></label>)}</div> : <p className="mt-2 text-xs text-[#858a87]">No sign-off slots are configured in Post workflow.</p>}
-    </div>
+    {!eligibleSignerRoles.length && <p className="mt-2 text-xs text-[#a35e41]">No workflow sign-off roles are configured. Choose a role for each sign-off in Post workflow.</p>}
     <div className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2">
       <select value={personId} onChange={(event) => setPersonId(event.target.value)} disabled={!availablePeople.length} className="min-w-0 max-w-full">
         <option value="">{availablePeople.length ? "Choose person" : "All people are assigned"}</option>

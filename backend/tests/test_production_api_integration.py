@@ -219,7 +219,7 @@ async def _seed_lab(database_url: str, lab: ProductionLab) -> None:
             """,
             str(uuid4()),
             lab.organization_id,
-            json.dumps(["manage_production", "view_all_operations", "manage_qc_delivery", "manage_commercial"]),
+            json.dumps(["manage_settings", "manage_production", "do_assigned_work", "sign_off_work", "view_all_operations", "manage_qc_delivery", "manage_commercial"]),
             str(uuid4()),
             json.dumps(["do_assigned_work"]),
         )
@@ -292,7 +292,7 @@ async def _seed_lab(database_url: str, lab: ProductionLab) -> None:
               position, color, is_terminal, can_start_early
             )
             VALUES
-              ($1, $2, $3, 'Editorial preparation', 'editorial_preparation', 1, '#506f68', false, false),
+              ($1, $2, $3, 'Editorial preparation', 'editorial_preparation', 1, '#506f68', true, false),
               ($4, $5, $6, 'Foreign preparation', 'foreign_preparation', 1, '#506f68', false, false)
             """,
             lab.workflow_stage_id,
@@ -739,6 +739,543 @@ def test_creates_an_episode_with_the_selected_tenant_team(production_lab: Produc
         "SELECT count(*) FROM episode_team_assignments WHERE episode_id = $1", episode_id
     )
     assert team_count == 2
+
+
+def test_episode_team_signer_is_role_matched_and_used_for_workflow_submission(
+    production_lab: ProductionApiLab,
+) -> None:
+    """Only the checked team member with the configured tenant role is assigned a gate."""
+    production_lab.sign_in_as_manager()
+    episode = production_lab.fetchrow(
+        "SELECT id::text FROM episodes WHERE organization_id = $1 AND title = 'Prior Python episode'",
+        production_lab.data.organization_id,
+    )
+    assert episode
+    second_editor_id = str(uuid4())
+    second_assignment_id = str(uuid4())
+    approval_rule_id = str(uuid4())
+    production_lab.execute(
+        """
+        INSERT INTO people (id, organization_id, name, role)
+        VALUES ($1, $2, 'Python Second Editor', 'editor')
+        """,
+        second_editor_id,
+        production_lab.data.organization_id,
+    )
+    production_lab.execute(
+        """
+        INSERT INTO episode_team_assignments (id, organization_id, episode_id, person_id, is_lead)
+        VALUES ($1, $2, $3, $4, false)
+        """,
+        second_assignment_id,
+        production_lab.data.organization_id,
+        episode["id"],
+        second_editor_id,
+    )
+    # The manager submits the work in this exercise, so make their otherwise
+    # unrelated production role an ordinary episode-team assignment too.
+    production_lab.execute(
+        """
+        INSERT INTO episode_team_assignments (id, organization_id, episode_id, person_id, is_lead)
+        VALUES ($1, $2, $3, $4, false)
+        """,
+        str(uuid4()),
+        production_lab.data.organization_id,
+        episode["id"],
+        production_lab.data.manager_person_id,
+    )
+    production_lab.execute(
+        """
+        INSERT INTO workflow_stage_approval_rules (
+          id, organization_id, workflow_stage_id, approver_role, label, approval_order, is_required
+        ) VALUES ($1, $2, $3, 'editor', 'Editor sign-off', 1, true)
+        """,
+        approval_rule_id,
+        production_lab.data.organization_id,
+        production_lab.data.workflow_stage_id,
+    )
+    first_assignment = production_lab.fetchrow(
+        """
+        SELECT id::text FROM episode_team_assignments
+        WHERE organization_id = $1 AND episode_id = $2 AND person_id = $3
+        """,
+        production_lab.data.organization_id,
+        episode["id"],
+        production_lab.data.editor_person_id,
+    )
+    assert first_assignment
+
+    team = production_lab.client.get(f"/v1/episodes/{episode['id']}/team")
+    assert team.status_code == 200, team.text
+    assert "editor" in team.json()["eligible_signer_roles"]
+    assert production_lab.client.patch(
+        f"/v1/episodes/{episode['id']}/team",
+        json={"assignment_id": first_assignment["id"], "is_signer": True},
+    ).status_code == 200
+    # This mirrors an approval created by the short-lived arbitrary-slot
+    # implementation: it has a rule but no recorded role snapshot yet.
+    production_lab.execute(
+        """
+        INSERT INTO episode_workflow_approvals (
+          id, organization_id, episode_id, workflow_stage_id, approval_rule_id,
+          required_person_id, status, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'pending', now(), now())
+        """,
+        str(uuid4()),
+        production_lab.data.organization_id,
+        episode["id"],
+        production_lab.data.workflow_stage_id,
+        approval_rule_id,
+        production_lab.data.editor_person_id,
+    )
+    # Selecting another editor transfers the single role-level signer tick.
+    assert production_lab.client.patch(
+        f"/v1/episodes/{episode['id']}/team",
+        json={"assignment_id": second_assignment_id, "is_signer": True},
+    ).status_code == 200
+    signer_flags = production_lab.fetchrow(
+        """
+        SELECT
+          bool_or(person_id = $1 AND is_lead) AS first_editor_is_signer,
+          bool_or(person_id = $2 AND is_lead) AS second_editor_is_signer
+        FROM episode_team_assignments
+        WHERE organization_id = $3 AND episode_id = $4
+        """,
+        production_lab.data.editor_person_id,
+        second_editor_id,
+        production_lab.data.organization_id,
+        episode["id"],
+    )
+    assert signer_flags and not signer_flags["first_editor_is_signer"] and signer_flags["second_editor_is_signer"]
+
+    # A person may still be on the team, but cannot be nominated if their role
+    # is not configured on any workflow sign-off rule.
+    colourist_assignment = production_lab.fetchrow(
+        """
+        SELECT id::text FROM episode_team_assignments
+        WHERE organization_id = $1 AND episode_id = $2 AND person_id = $3
+        """,
+        production_lab.data.organization_id,
+        episode["id"],
+        production_lab.data.colorist_person_id,
+    )
+    assert colourist_assignment
+    wrong_role = production_lab.client.patch(
+        f"/v1/episodes/{episode['id']}/team",
+        json={"assignment_id": colourist_assignment["id"], "is_signer": True},
+    )
+    assert wrong_role.status_code == 409
+
+    assert production_lab.client.post(
+        f"/v1/episodes/{episode['id']}",
+        json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "start"},
+    ).status_code == 200
+    submit = production_lab.client.post(
+        f"/v1/episodes/{episode['id']}",
+        json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "submit"},
+    )
+    assert submit.status_code == 200, submit.text
+    approval = production_lab.fetchrow(
+        """
+        SELECT required_person_id::text, approver_role
+        FROM episode_workflow_approvals
+        WHERE organization_id = $1 AND episode_id = $2 AND approval_rule_id = $3
+        """,
+        production_lab.data.organization_id,
+        episode["id"],
+        approval_rule_id,
+    )
+    assert approval and dict(approval) == {"required_person_id": second_editor_id, "approver_role": "editor"}
+
+
+def test_signer_lifecycle_requires_the_checked_matching_people_and_advances_the_stage(
+    production_lab: ProductionApiLab,
+) -> None:
+    """Required gates use checked people, not generic role membership or capabilities."""
+    production_lab.sign_in_as_manager()
+    episode = production_lab.fetchrow(
+        "SELECT id::text FROM episodes WHERE organization_id = $1 AND title = 'Prior Python episode'",
+        production_lab.data.organization_id,
+    )
+    assert episode
+    supervisor_user_id, supervisor_person_id = str(uuid4()), str(uuid4())
+    alternate_user_id, alternate_person_id = str(uuid4()), str(uuid4())
+    token = uuid4().hex[:10]
+    supervisor_email = f"workflow-supervisor-{token}@postpilot.test"
+    alternate_email = f"workflow-alternate-{token}@postpilot.test"
+    password_hash = hash_node_scrypt_password("password")
+    production_lab.execute(
+        """
+        INSERT INTO organization_role_policies (id, organization_id, role, label, permissions)
+        VALUES ($1, $2, 'production_supervisor', 'Production supervisor', '["do_assigned_work", "sign_off_work"]'::jsonb)
+        """,
+        str(uuid4()),
+        production_lab.data.organization_id,
+    )
+    production_lab.execute(
+        """
+        INSERT INTO users (id, name, email, password_hash)
+        VALUES ($1, 'Python Supervisor', $2, $3), ($4, 'Python Alternate', $5, $3)
+        """,
+        supervisor_user_id,
+        supervisor_email,
+        password_hash,
+        alternate_user_id,
+        alternate_email,
+    )
+    production_lab.execute(
+        """
+        INSERT INTO organization_members (organization_id, user_id, role)
+        VALUES ($1, $2, 'member'), ($1, $3, 'member')
+        """,
+        production_lab.data.organization_id,
+        supervisor_user_id,
+        alternate_user_id,
+    )
+    production_lab.execute(
+        """
+        INSERT INTO people (id, organization_id, user_id, name, email, role)
+        VALUES
+          ($1, $2, $3, 'Python Supervisor', $4, 'production_supervisor'),
+          ($5, $2, $6, 'Python Alternate', $7, 'production_manager')
+        """,
+        supervisor_person_id,
+        production_lab.data.organization_id,
+        supervisor_user_id,
+        supervisor_email,
+        alternate_person_id,
+        alternate_user_id,
+        alternate_email,
+    )
+    manager_assignment, supervisor_assignment, alternate_assignment = str(uuid4()), str(uuid4()), str(uuid4())
+    production_lab.execute(
+        """
+        INSERT INTO episode_team_assignments (id, organization_id, episode_id, person_id, is_lead)
+        VALUES
+          ($1, $2, $3, $4, false), ($5, $2, $3, $6, false), ($7, $2, $3, $8, false)
+        """,
+        manager_assignment,
+        production_lab.data.organization_id,
+        episode["id"],
+        production_lab.data.manager_person_id,
+        supervisor_assignment,
+        supervisor_person_id,
+        alternate_assignment,
+        alternate_person_id,
+    )
+    manager_rule, supervisor_rule = str(uuid4()), str(uuid4())
+    production_lab.execute(
+        """
+        INSERT INTO workflow_stage_approval_rules (
+          id, organization_id, workflow_stage_id, approver_role, label, approval_order, is_required
+        ) VALUES
+          ($1, $2, $3, 'production_manager', 'Production manager sign-off', 1, true),
+          ($4, $2, $3, 'production_supervisor', 'Production supervisor sign-off', 2, true)
+        """,
+        manager_rule,
+        production_lab.data.organization_id,
+        production_lab.data.workflow_stage_id,
+        supervisor_rule,
+    )
+
+    # One checked role is insufficient: the second required role blocks submit.
+    assert production_lab.client.patch(
+        f"/v1/episodes/{episode['id']}/team", json={"assignment_id": manager_assignment, "is_signer": True}
+    ).status_code == 200
+    assert production_lab.client.post(
+        f"/v1/episodes/{episode['id']}",
+        json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "start"},
+    ).status_code == 200
+    missing = production_lab.client.post(
+        f"/v1/episodes/{episode['id']}",
+        json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "submit"},
+    )
+    assert missing.status_code == 409 and "production supervisor" in missing.json()["detail"]
+    assert production_lab.fetchval("SELECT workflow_status FROM episodes WHERE id = $1", episode["id"]) == "in_progress"
+
+    assert production_lab.client.patch(
+        f"/v1/episodes/{episode['id']}/team", json={"assignment_id": supervisor_assignment, "is_signer": True}
+    ).status_code == 200
+    assert production_lab.client.post(
+        f"/v1/episodes/{episode['id']}",
+        json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "submit"},
+    ).status_code == 200
+
+    # Removing a signer removes their live approval assignment. Selecting an
+    # alternate of the same role transfers only that role's pending gate.
+    assert production_lab.client.patch(
+        f"/v1/episodes/{episode['id']}/team", json={"assignment_id": manager_assignment, "is_signer": False}
+    ).status_code == 200
+    assert production_lab.fetchval(
+        "SELECT required_person_id::text FROM episode_workflow_approvals WHERE episode_id = $1 AND approval_rule_id = $2",
+        episode["id"],
+        manager_rule,
+    ) is None
+    assert production_lab.client.patch(
+        f"/v1/episodes/{episode['id']}/team", json={"assignment_id": alternate_assignment, "is_signer": True}
+    ).status_code == 200
+
+    production_lab.sign_in(alternate_email)
+    alternate_inbox = production_lab.client.get("/v1/approvals")
+    assert alternate_inbox.status_code == 200
+    assert {item["approval_rule_id"] for item in alternate_inbox.json()["sign_offs"]} == {manager_rule}
+
+    # An equally capable but unchecked manager cannot sign the alternate's gate.
+    production_lab.sign_in_as_manager()
+    wrong_signer = production_lab.client.post(
+        f"/v1/episodes/{episode['id']}",
+        json={
+            "workflow_stage_id": production_lab.data.workflow_stage_id,
+            "approval_rule_id": manager_rule,
+            "action": "sign_off",
+        },
+    )
+    assert wrong_signer.status_code == 403
+
+    production_lab.sign_in(alternate_email)
+    assert production_lab.client.post(
+        f"/v1/episodes/{episode['id']}",
+        json={
+            "workflow_stage_id": production_lab.data.workflow_stage_id,
+            "approval_rule_id": manager_rule,
+            "action": "sign_off",
+        },
+    ).status_code == 200
+    production_lab.sign_in(supervisor_email)
+    completed = production_lab.client.post(
+        f"/v1/episodes/{episode['id']}",
+        json={
+            "workflow_stage_id": production_lab.data.workflow_stage_id,
+            "approval_rule_id": supervisor_rule,
+            "action": "sign_off",
+        },
+    )
+    assert completed.status_code == 200
+    assert production_lab.fetchval("SELECT workflow_status FROM episodes WHERE id = $1", episode["id"]) == "complete"
+
+    # Signer controls reject an assignment from another episode and users
+    # without production-management capability.
+    production_lab.sign_in_as_manager()
+    other_episode = production_lab.client.post(
+        "/v1/episodes", json={"season_id": production_lab.data.season_id, "number": 9, "title": "Other team episode"}
+    ).json()["id"]
+    cross_episode = production_lab.client.patch(
+        f"/v1/episodes/{other_episode}/team", json={"assignment_id": alternate_assignment, "is_signer": True}
+    )
+    assert cross_episode.status_code == 404
+    foreign_assignment = str(uuid4())
+    production_lab.execute(
+        """
+        INSERT INTO episode_team_assignments (id, organization_id, episode_id, person_id, is_lead)
+        VALUES ($1, $2, $3, $4, false)
+        """,
+        foreign_assignment,
+        production_lab.data.foreign_organization_id,
+        production_lab.data.foreign_episode_id,
+        production_lab.data.foreign_person_id,
+    )
+    foreign_assignment_attempt = production_lab.client.patch(
+        f"/v1/episodes/{episode['id']}/team", json={"assignment_id": foreign_assignment, "is_signer": True}
+    )
+    assert foreign_assignment_attempt.status_code == 404
+    viewer_person = production_lab.fetchrow(
+        "SELECT id::text FROM people WHERE organization_id = $1 AND user_id = $2",
+        production_lab.data.organization_id,
+        production_lab.data.viewer_user_id,
+    )
+    assert viewer_person
+    production_lab.execute(
+        """
+        INSERT INTO episode_team_assignments (id, organization_id, episode_id, person_id, is_lead)
+        VALUES ($1, $2, $3, $4, false)
+        """,
+        str(uuid4()),
+        production_lab.data.organization_id,
+        episode["id"],
+        viewer_person["id"],
+    )
+    production_lab.sign_in_as_viewer()
+    forbidden = production_lab.client.patch(
+        f"/v1/episodes/{episode['id']}/team", json={"assignment_id": alternate_assignment, "is_signer": True}
+    )
+    assert forbidden.status_code == 403
+
+
+def test_optional_sign_off_does_not_block_workflow_submission(production_lab: ProductionApiLab) -> None:
+    production_lab.sign_in_as_manager()
+    episode = production_lab.fetchrow(
+        "SELECT id::text FROM episodes WHERE organization_id = $1 AND title = 'Prior Python episode'",
+        production_lab.data.organization_id,
+    )
+    assert episode
+    production_lab.execute(
+        """
+        INSERT INTO episode_team_assignments (id, organization_id, episode_id, person_id, is_lead)
+        VALUES ($1, $2, $3, $4, false)
+        """,
+        str(uuid4()),
+        production_lab.data.organization_id,
+        episode["id"],
+        production_lab.data.manager_person_id,
+    )
+    production_lab.execute(
+        """
+        INSERT INTO workflow_stage_approval_rules (
+          id, organization_id, workflow_stage_id, approver_role, label, approval_order, is_required
+        ) VALUES ($1, $2, $3, 'production_manager', 'Optional manager sign-off', 1, false)
+        """,
+        str(uuid4()),
+        production_lab.data.organization_id,
+        production_lab.data.workflow_stage_id,
+    )
+    assert production_lab.client.post(
+        f"/v1/episodes/{episode['id']}",
+        json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "start"},
+    ).status_code == 200
+    submitted = production_lab.client.post(
+        f"/v1/episodes/{episode['id']}",
+        json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "submit"},
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert production_lab.fetchval("SELECT workflow_status FROM episodes WHERE id = $1", episode["id"]) == "complete"
+
+
+def test_workflow_settings_api_validates_roles_persists_the_order_and_protects_tenant_boundaries(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    bootstrap = production_lab.client.get("/v1/settings/bootstrap")
+    assert bootstrap.status_code == 200, bootstrap.text
+    workflow = bootstrap.json()["workflow"]
+    assert workflow
+    stage = workflow["stages"][0]
+    rule_id, added_stage_id = str(uuid4()), str(uuid4())
+    stages = [
+        {**stage, "name": "Editorial intake", "position": 2},
+        {
+            "id": added_stage_id,
+            "name": "QC decision",
+            "key": "qc_decision",
+            "position": 1,
+            "color": "#4b7063",
+            "is_terminal": False,
+            "can_start_early": False,
+            "requires_qc_pass": True,
+            "delivery_gate": "none",
+        },
+    ]
+    payload = {
+        "stages": stages,
+        "rules": [
+            {
+                "id": rule_id,
+                "workflow_stage_id": stage["id"],
+                "approver_role": "production_manager",
+                "label": "Browser supplied label must be ignored",
+                "approval_order": 1,
+                "is_required": True,
+            }
+        ],
+        "work_order_templates": [],
+    }
+    saved = production_lab.client.patch(f"/v1/workflows/{workflow['id']}", json=payload)
+    assert saved.status_code == 200, saved.text
+    rule = production_lab.fetchrow(
+        "SELECT approver_role, label FROM workflow_stage_approval_rules WHERE id = $1", rule_id
+    )
+    assert rule and dict(rule) == {"approver_role": "production_manager", "label": "Production manager sign-off"}
+    positions = production_lab.fetchrow(
+        "SELECT min(position) AS first_position, max(position) AS last_position FROM workflow_stages WHERE workflow_id = $1",
+        workflow["id"],
+    )
+    assert positions and dict(positions) == {"first_position": 1, "last_position": 2}
+
+    for invalid_role in (None, "foreign_role"):
+        invalid = production_lab.client.patch(
+            f"/v1/workflows/{workflow['id']}",
+            json={**payload, "rules": [{**payload["rules"][0], "approver_role": invalid_role}]},
+        )
+        assert invalid.status_code == 400
+    invalid_stage_ref = production_lab.client.patch(
+        f"/v1/workflows/{workflow['id']}",
+        json={**payload, "rules": [{**payload["rules"][0], "workflow_stage_id": str(uuid4())}]},
+    )
+    assert invalid_stage_ref.status_code == 400
+    invalid_template_ref = production_lab.client.patch(
+        f"/v1/workflows/{workflow['id']}",
+        json={**payload, "work_order_templates": [{"workflow_stage_id": str(uuid4()), "title": "Invalid"}]},
+    )
+    assert invalid_template_ref.status_code == 400
+    invalid_delivery_gate = production_lab.client.patch(
+        f"/v1/workflows/{workflow['id']}",
+        json={**payload, "stages": [{**stages[0], "delivery_gate": "not_a_delivery_gate"}, stages[1]]},
+    )
+    assert invalid_delivery_gate.status_code == 400
+    missing_terminal = production_lab.client.patch(
+        f"/v1/workflows/{workflow['id']}",
+        json={**payload, "stages": [{**item, "is_terminal": False} for item in stages]},
+    )
+    assert missing_terminal.status_code == 400
+    multiple_terminals = production_lab.client.patch(
+        f"/v1/workflows/{workflow['id']}",
+        json={**payload, "stages": [{**item, "is_terminal": True} for item in stages]},
+    )
+    assert multiple_terminals.status_code == 400
+    no_qc = production_lab.client.patch(
+        f"/v1/workflows/{workflow['id']}", json={**payload, "stages": [{**item, "requires_qc_pass": False} for item in stages]}
+    )
+    assert no_qc.status_code == 409
+    delete_referenced = production_lab.client.patch(
+        f"/v1/workflows/{workflow['id']}", json={**payload, "stages": [stages[1]]}
+    )
+    # The submitted rule would point to a stage that is no longer present, so
+    # this is rejected before any destructive stage update is attempted.
+    assert delete_referenced.status_code == 400
+    foreign_workflow = production_lab.client.patch(f"/v1/workflows/{uuid4()}", json=payload)
+    assert foreign_workflow.status_code == 404
+
+    client_rule = production_lab.client.patch(
+        f"/v1/workflows/{workflow['id']}",
+        json={**payload, "rules": [{**payload["rules"][0], "approver_role": "client"}]},
+    )
+    assert client_rule.status_code == 200
+    assert production_lab.fetchval("SELECT label FROM workflow_stage_approval_rules WHERE id = $1", rule_id) == "Client sign-off"
+
+    production_lab.sign_in_as_viewer()
+    assert production_lab.client.patch(f"/v1/workflows/{workflow['id']}", json=payload).status_code == 403
+
+
+def test_role_settings_cannot_remove_a_workflow_role_and_renaming_updates_its_label(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    rule_id = str(uuid4())
+    production_lab.execute(
+        """
+        INSERT INTO workflow_stage_approval_rules (
+          id, organization_id, workflow_stage_id, approver_role, label, approval_order, is_required
+        ) VALUES ($1, $2, $3, 'approval_only', 'Finishing approval sign-off', 1, true)
+        """,
+        rule_id,
+        production_lab.data.organization_id,
+        production_lab.data.workflow_stage_id,
+    )
+    base_policies = [
+        {"role": "production_manager", "label": "Production manager", "permissions": ["manage_settings", "manage_production", "do_assigned_work", "sign_off_work", "view_all_operations", "manage_qc_delivery", "manage_commercial"]},
+        {"role": "production_viewer", "label": "Production viewer", "permissions": ["do_assigned_work"]},
+        {"role": "editor", "label": "Editor", "permissions": ["do_assigned_work", "sign_off_work"]},
+        {"role": "colourist", "label": "Colourist", "permissions": ["do_assigned_work", "sign_off_work"]},
+        {"role": "approval_only", "label": "Final creative approver", "permissions": ["sign_off_work"]},
+        {"role": "client", "label": "Client", "permissions": ["sign_off_work"]},
+    ]
+    renamed = production_lab.client.patch("/v1/settings/role-policies", json={"policies": base_policies})
+    assert renamed.status_code == 200, renamed.text
+    assert production_lab.fetchval("SELECT label FROM workflow_stage_approval_rules WHERE id = $1", rule_id) == "Final creative approver sign-off"
+    removal = production_lab.client.patch(
+        "/v1/settings/role-policies", json={"policies": [item for item in base_policies if item["role"] != "approval_only"]}
+    )
+    assert removal.status_code == 409
+    assert "workflow sign-offs" in removal.json()["detail"]
 
 
 def test_episode_creation_rejects_duplicate_numbers_and_foreign_references(production_lab: ProductionApiLab) -> None:

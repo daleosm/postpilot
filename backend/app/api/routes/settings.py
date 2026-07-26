@@ -440,12 +440,26 @@ async def update_role_policies(
         .scalars()
         .all()
     )
+    workflow_roles = (
+        (
+            await session.execute(
+                select(workflow_stage_approval_rules.c.approver_role).where(
+                    and_(
+                        workflow_stage_approval_rules.c.organization_id == actor.organization_id,
+                        workflow_stage_approval_rules.c.approver_role.is_not(None),
+                    )
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     allowed = {CLIENT_ROLE, *(policy.role for policy in policies)}
-    missing = next((role for role in set(assigned) if role not in allowed), None)
+    missing = next((role for role in {*assigned, *workflow_roles} if role not in allowed), None)
     if missing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Reassign people using {missing.replace('_', ' ')} before removing it.",
+            detail=f"Reassign people and workflow sign-offs using {missing.replace('_', ' ')} before removing it.",
         )
     await session.execute(
         delete(organization_role_policies).where(organization_role_policies.c.organization_id == actor.organization_id)
@@ -463,6 +477,19 @@ async def update_role_policies(
                 for policy in policies
             ],
         )
+        # Workflow sign-off labels are derived display text, never a second
+        # source of truth. Keep them in sync when a tenant renames a role.
+        for policy in policies:
+            await session.execute(
+                update(workflow_stage_approval_rules)
+                .where(
+                    and_(
+                        workflow_stage_approval_rules.c.organization_id == actor.organization_id,
+                        workflow_stage_approval_rules.c.approver_role == policy.role,
+                    )
+                )
+                .values(label=f"{policy.label} sign-off", updated_at=datetime.now(UTC))
+            )
     await _audit(
         session,
         actor,
@@ -675,7 +702,7 @@ async def delete_organization_user(user_id: str, actor: CurrentActor, session: D
 async def update_workflow(
     workflow_id: str, actor: CurrentActor, session: DbSession, payload: Annotated[dict[str, Any], Body()]
 ) -> dict[str, object]:
-    """Save the tenant's one ordered workflow without encoding any job roles.
+    """Save the tenant's ordered workflow and its tenant-defined sign-off roles.
 
     The browser sends a drag-ordered stage list. Existing episode sign-offs are
     protected: a stage carrying live episode history cannot be deleted.
@@ -704,6 +731,13 @@ async def update_workflow(
         )
     if len({str(item["key"]).strip() for item in stages_input}) != len(stages_input):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow stage keys must be unique.")
+    if sum(bool(item.get("is_terminal")) for item in stages_input) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="A workflow needs exactly one terminal stage."
+        )
+    valid_delivery_gates = {"none", "facility_dispatch", "client_acceptance"}
+    if any(str(item.get("delivery_gate") or "none") not in valid_delivery_gates for item in stages_input):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow contains an invalid delivery gate.")
     existing = (
         await session.execute(
             select(workflow_stages).where(
@@ -754,6 +788,31 @@ async def update_workflow(
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow contains an invalid sign-off slot."
+        )
+    configured_roles = {
+        row.role: row.label
+        for row in (
+            await session.execute(
+                select(organization_role_policies.c.role, organization_role_policies.c.label).where(
+                    organization_role_policies.c.organization_id == actor.organization_id
+                )
+            )
+        ).all()
+    }
+    configured_roles[CLIENT_ROLE] = CLIENT_LABEL
+    invalid_rule = next(
+        (
+            item
+            for item in rules_input
+            if not str(item.get("approver_role") or "").strip()
+            or str(item.get("approver_role")).strip() not in configured_roles
+        ),
+        None,
+    )
+    if invalid_rule:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Every workflow sign-off must use a role configured for this post house.",
         )
     if any(
         not isinstance(item, dict) or str(item.get("workflow_stage_id", "")) not in submitted_ids
@@ -844,12 +903,15 @@ async def update_workflow(
             )
         )
     for item in rules_input:
+        approver_role = str(item["approver_role"]).strip()
         values = {
             "workflow_stage_id": str(item["workflow_stage_id"]),
-            "label": str(item.get("label") or "Sign-off slot").strip(),
+            # The visible label is derived from the tenant-custom role so it
+            # cannot drift away from the role used for signer enforcement.
+            "label": f"{configured_roles[approver_role]} sign-off",
             "approval_order": int(item.get("approval_order") or 1),
             "is_required": bool(item.get("is_required", True)),
-            "approver_role": None,
+            "approver_role": approver_role,
             "updated_at": datetime.now(UTC),
         }
         rule_id = str(item.get("id", ""))

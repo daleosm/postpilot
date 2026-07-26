@@ -63,7 +63,7 @@ test.describe("Episode operational workspace UI", () => {
     await expect(page.getByRole("heading", { name: "Edit episode" })).toBeVisible();
     await expect(form.locator("..")).toHaveCSS("z-index", "100");
     await expect(form.getByText("Episode team", { exact: true })).toBeVisible();
-    await expect(form.getByText("Workflow sign-off slots", { exact: true })).toBeVisible();
+    await expect(form.getByText("Signer", { exact: true }).first()).toBeVisible();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
   });
 
