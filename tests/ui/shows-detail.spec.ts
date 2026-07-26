@@ -46,11 +46,11 @@ test.describe("Show detail UI", () => {
     expect(await page.locator("#episode-board").getByRole("link").count()).toBeLessThanOrEqual(5);
   });
 
-  test("does not render the show workspace for an artist without Shows permission", async ({ context, page }) => {
+  test("renders an assigned artist's show workspace without show-management controls", async ({ context, page }) => {
     await establishDebugSession(context, "user_copper_editor", COPPERLINE_ORGANIZATION_ID);
     await page.goto(`/shows/${CROSSING_POINT_SHOW_ID}`);
 
-    await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
-    await expect(page.getByText("Crossing Point")).not.toBeVisible();
+    await expect(page.getByRole("heading", { name: "Crossing Point" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit show" })).toHaveCount(0);
   });
 });

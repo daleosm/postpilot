@@ -74,4 +74,17 @@ test.describe("Episode operational workspace UI", () => {
     await expect(page.getByRole("button", { name: "Budget", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Work orders", exact: true })).toBeVisible();
   });
+
+  test("gives an assigned client the complete episode workspace", async ({ context, page }) => {
+    await establishDebugSession(context, "user_copper_client", COPPERLINE_ORGANIZATION_ID);
+    await openEpisode(page);
+
+    for (const tab of ["Overview", "Workflow", "QC", "Work orders", "Bookings", "Delivery manifest", "Budget", "Activity"]) {
+      await expect(page.getByRole("button", { name: tab, exact: true })).toBeVisible();
+    }
+    await page.getByRole("button", { name: "Budget", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Budget" })).toBeVisible();
+    await page.getByRole("button", { name: "Activity", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
+  });
 });

@@ -539,19 +539,18 @@ def test_member_without_production_capability_cannot_create_or_edit_a_show(produ
     assert update.status_code == 403
 
 
-def test_client_episode_workspace_is_redacted_and_foreign_routes_remain_hidden(
+def test_client_episode_workspace_is_complete_for_an_assigned_episode_and_foreign_routes_remain_hidden(
     production_lab: ProductionApiLab,
 ) -> None:
-    """A client signer gets workflow context, never the internal post floor."""
+    """A client can inspect all workspace data only for their assigned episode."""
     production_lab.sign_in_as_manager()
     episode_id = next(
         item["id"]
         for item in production_lab.client.get("/v1/episodes").json()["episodes"]
         if item["title"] == "Prior Python episode"
     )
-    # Client membership is intentionally not enough to inspect an episode.
-    # Share this one explicitly so the test exercises the redacted workspace
-    # projection rather than an unauthorised-route response.
+    # Client membership alone is insufficient. Share one episode explicitly
+    # so the test exercises the complete assigned-episode projection.
     production_lab.execute(
         """
         INSERT INTO episode_team_assignments (id, organization_id, episode_id, person_id, is_lead)
@@ -562,26 +561,59 @@ def test_client_episode_workspace_is_redacted_and_foreign_routes_remain_hidden(
         episode_id,
         production_lab.data.client_person_id,
     )
+    production_lab.execute(
+        """
+        INSERT INTO budget_lines (
+          id, organization_id, show_id, season_id, episode_id, external_cost,
+          category, description, budgeted_amount, actual_amount, currency, cost_type
+        ) VALUES ($1, $2, $3, $4, $5, false, 'Edit suite', 'Shared client budget', 500, 125, 'GBP', 'internal')
+        """,
+        str(uuid4()),
+        production_lab.data.organization_id,
+        production_lab.data.show_id,
+        production_lab.data.season_id,
+        episode_id,
+    )
+    production_lab.execute(
+        """
+        INSERT INTO activity_log (id, organization_id, actor_user_id, action, entity_type, entity_id, metadata)
+        VALUES ($1, $2, $3, 'workflow.stage_completed', 'episode', $4, '{}'::json)
+        """,
+        str(uuid4()),
+        production_lab.data.organization_id,
+        production_lab.data.manager_user_id,
+        episode_id,
+    )
 
     production_lab.sign_in_as_client()
+    shows = production_lab.client.get("/v1/shows")
+    assert shows.status_code == 200, shows.text
+    assert [item["id"] for item in shows.json()["shows"]] == [production_lab.data.show_id]
+    show_workspace = production_lab.client.get(f"/v1/shows/{production_lab.data.show_id}/workspace")
+    assert show_workspace.status_code == 200, show_workspace.text
+    assert [item["id"] for item in show_workspace.json()["episodes"]] == [episode_id]
     workspace = production_lab.client.get(f"/v1/episodes/{episode_id}/workspace")
     assert workspace.status_code == 200, workspace.text
     payload = workspace.json()
-    assert payload["episode"]["editor_name"] is None
-    assert payload["episode"]["producer_name"] is None
-    assert payload["schedule"] == []
-    assert payload["budget"] == []
-    assert payload["activity"] == []
-    assert payload["episode_team"] == []
-    assert payload["work_orders"] == []
-    assert payload["qc_history"] == []
-    assert payload["vendor_options"] == []
-    assert payload["delivery_manifest"] is None
+    assert payload["episode"]["editor_name"] == "Python Editor"
+    assert payload["budget"] == [
+        {
+            "id": payload["budget"][0]["id"],
+            "category": "Edit suite",
+            "description": "Shared client budget",
+            "budgeted_amount": "500.00",
+            "actual_amount": "125.00",
+        }
+    ]
+    assert [(item["action"], item["metadata"]) for item in payload["activity"]] == [
+        ("workflow.stage_completed", {})
+    ]
+    assert {item["person_id"] for item in payload["episode_team"]} >= {production_lab.data.client_person_id}
 
     direct = production_lab.client.get(f"/v1/episodes/{episode_id}")
     assert direct.status_code == 200
-    assert direct.json()["team"] == []
-    assert direct.json()["episode"]["editor_name"] is None
+    assert {item["person_id"] for item in direct.json()["team"]} >= {production_lab.data.client_person_id}
+    assert direct.json()["episode"]["editor_name"] == "Python Editor"
     foreign_workspace = production_lab.client.get(f"/v1/episodes/{production_lab.data.foreign_episode_id}/workspace")
     assert foreign_workspace.status_code == 404
 
@@ -1266,7 +1298,6 @@ def test_role_settings_cannot_remove_a_workflow_role_and_renaming_updates_its_la
         {"role": "editor", "label": "Editor", "permissions": ["do_assigned_work", "sign_off_work"]},
         {"role": "colourist", "label": "Colourist", "permissions": ["do_assigned_work", "sign_off_work"]},
         {"role": "approval_only", "label": "Final creative approver", "permissions": ["sign_off_work"]},
-        {"role": "client", "label": "Client", "permissions": ["sign_off_work", "request_catering"]},
     ]
     renamed = production_lab.client.patch("/v1/settings/role-policies", json={"policies": base_policies})
     assert renamed.status_code == 200, renamed.text

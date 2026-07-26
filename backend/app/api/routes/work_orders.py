@@ -931,11 +931,6 @@ async def update_work_order(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Submitted work can only be approved, returned for changes, or cancelled.",
                 )
-            if payload.status == "in_progress" and work_order.created_by_user_id == actor.user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="The person who created a work order cannot approve it.",
-                )
         elif work_order.status == "in_progress":
             if payload.status not in {"ready_for_review", "complete", "cancelled"}:
                 raise HTTPException(

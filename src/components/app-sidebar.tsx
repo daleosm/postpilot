@@ -33,7 +33,7 @@ const navigation = [
 ];
 
 export async function AppSidebar() {
-  const [person, context, mayManageUsers, mayManageWorkflowConfiguration, mayManageDeliveryProfiles, mayRecordActuals, permitted] = await Promise.all([
+  const [person, context, mayManageUsers, mayManageWorkflowConfiguration, mayManageDeliveryProfiles, mayRecordActuals, permitted, hasVisibleShows] = await Promise.all([
     getCurrentPerson(),
     getActiveOrganizationContext(),
     can("manage_users"),
@@ -47,11 +47,15 @@ export async function AppSidebar() {
           : null,
       ),
     ),
+    loadShowVisibility(),
   ]);
   const [pending, hasApprovalAccess] = await (context?.organization && context.person
     ? loadFastApprovalSummary()
     : Promise.resolve([0, false] as [number, boolean]));
   const visible = permitted.filter((item): item is NonNullable<typeof item> => Boolean(item));
+  if (hasVisibleShows && !visible.some((item) => item.label === "Shows")) {
+    visible.splice(1, 0, { label: "Shows", icon: Clapperboard, href: "/shows" });
+  }
   if (hasApprovalAccess || mayRecordActuals) {
     const bookingsIndex = visible.findIndex((item) => item.label === "Bookings");
     visible.splice(bookingsIndex >= 0 ? bookingsIndex + 1 : 0, 0, { label: "My work", icon: FileCheck2, href: "/review" });
@@ -94,6 +98,17 @@ export async function AppSidebar() {
       </div>
     </aside>
   );
+}
+
+/** The API applies the episode-team predicate, so this only exposes Shows
+ * when the signed-in person has at least one visible assigned episode. */
+async function loadShowVisibility() {
+  try {
+    const response = await postpilotApiServerFetch<{ shows: Array<{ id: string }> }>("/shows");
+    return response.shows.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 async function loadFastApprovalSummary(): Promise<[number, boolean]> {

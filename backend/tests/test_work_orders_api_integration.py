@@ -204,7 +204,7 @@ def test_work_order_create_defaults_stage_work_to_blocking_and_keeps_item_ledger
     assert work_order_id in {item["id"] for item in production_lab.client.get("/v1/work-orders").json()["work_orders"]}
 
 
-def test_work_order_lifecycle_requires_a_separate_manager_to_approve(production_lab: ProductionApiLab) -> None:
+def test_work_order_lifecycle_allows_the_creator_with_approval_capability_to_approve(production_lab: ProductionApiLab) -> None:
     production_lab.sign_in_as_manager()
     created = production_lab.client.post("/v1/work-orders", json=_payload(production_lab, title="Review an ADR pickup"))
     assert created.status_code == 201, created.text
@@ -213,7 +213,7 @@ def test_work_order_lifecycle_requires_a_separate_manager_to_approve(production_
     submitted = production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"})
     self_approval = production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "in_progress"})
     assert submitted.status_code == 200
-    assert self_approval.status_code == 403
+    assert self_approval.status_code == 200, self_approval.text
 
     # Give the second internal user the same *capability*, not a named role.
     # The endpoint must resolve the live tenant policy for every request.
@@ -227,9 +227,6 @@ def test_work_order_lifecycle_requires_a_separate_manager_to_approve(production_
     )
     production_lab.sign_out()
     production_lab.sign_in_as_viewer()
-    approved = production_lab.client.patch(
-        f"/v1/work-orders/{work_order_id}", json={"status": "in_progress", "approval_note": "Scope confirmed."}
-    )
     premature_complete = production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "complete"})
     reservation = production_lab.client.post(
         f"/v1/work-orders/{work_order_id}/booking",
@@ -241,7 +238,7 @@ def test_work_order_lifecycle_requires_a_separate_manager_to_approve(production_
     )
     complete = production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "complete"})
 
-    assert approved.status_code == complete.status_code == 200
+    assert complete.status_code == 200
     assert reservation.status_code == 201
     assert premature_complete.status_code == 409
     assert "Place a room booking" in premature_complete.json()["detail"]
@@ -256,7 +253,7 @@ def test_work_order_lifecycle_requires_a_separate_manager_to_approve(production_
     )
     assert saved and dict(saved) == {
         "status": "complete",
-        "approved_by_person_id": viewer_person_id,
+        "approved_by_person_id": production_lab.data.manager_person_id,
         "completed_by_person_id": viewer_person_id,
     }
 
@@ -752,7 +749,7 @@ def test_booking_an_unbooked_ready_for_review_internal_work_order_resumes_it(
     approved = production_lab.client.patch(
         f"/v1/work-orders/{work_order_id}", json={"status": "in_progress", "approval_note": "Approved."}
     )
-    assert approved.status_code == 403  # Creators cannot approve their own work.
+    assert approved.status_code == 200, approved.text
 
     # Seed the historical state directly: it mirrors records created before
     # the booking-first completion rule was introduced.

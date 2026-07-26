@@ -335,6 +335,16 @@ async def get_show_workspace(show_id: str, actor: CurrentActor, session: DbSessi
 
     # This is intentionally limited to completed-stage events attached to an
     # episode in this show. It does not expose tenant-wide commercial activity.
+    activity_conditions = [
+        activity_log.c.organization_id == actor.organization_id,
+        activity_log.c.entity_type == "episode",
+        activity_log.c.action == "workflow.stage_completed",
+        episodes.c.organization_id == actor.organization_id,
+        seasons.c.organization_id == actor.organization_id,
+        seasons.c.show_id == show_id,
+    ]
+    if not visible_all:
+        activity_conditions.append(episodes.c.id.in_(episode_ids))
     activity = (
         await session.execute(
             select(
@@ -350,16 +360,7 @@ async def get_show_workspace(show_id: str, actor: CurrentActor, session: DbSessi
             .select_from(activity_log)
             .join(episodes, activity_log.c.entity_id == cast(episodes.c.id, Text))
             .join(seasons, seasons.c.id == episodes.c.season_id)
-            .where(
-                and_(
-                    activity_log.c.organization_id == actor.organization_id,
-                    activity_log.c.entity_type == "episode",
-                    activity_log.c.action == "workflow.stage_completed",
-                    episodes.c.organization_id == actor.organization_id,
-                    seasons.c.organization_id == actor.organization_id,
-                    seasons.c.show_id == show_id,
-                )
-            )
+            .where(and_(*activity_conditions))
             .order_by(desc(activity_log.c.created_at))
             .limit(8)
         )

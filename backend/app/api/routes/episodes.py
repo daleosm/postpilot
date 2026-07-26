@@ -18,8 +18,8 @@ from app.api.production import (
 from app.api.schemas import (
     EpisodeCreateRequest,
     EpisodeTeamAddRequest,
-    EpisodeUpdateRequest,
     EpisodeTeamSignerRequest,
+    EpisodeUpdateRequest,
     WorkflowActionRequest,
 )
 from app.auth import has_permission, require_permission
@@ -493,19 +493,9 @@ async def get_episode(episode_id: str, actor: CurrentActor, session: DbSession) 
             .order_by(people.c.name)
         )
     ).all()
-    episode_value = _episode_response(episode)
-    # A client who is assigned to an episode may need its code, title and
-    # workflow state, but must never be able to enumerate the internal post
-    # team by calling the generic record endpoint directly.
-    is_client = bool(actor.active_organization and actor.active_organization.role == "client")
-    if is_client:
-        episode_value["editor_name"] = None
-        episode_value["producer_name"] = None
     return {
-        "episode": episode_value,
-        "team": []
-        if is_client
-        else [
+        "episode": _episode_response(episode),
+        "team": [
             {
                 "assignment_id": item.assignment_id,
                 "person_id": item.person_id,
@@ -533,93 +523,6 @@ async def get_episode_workspace(episode_id: str, actor: CurrentActor, session: D
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found.")
     row = episode_rows[0]
     _, stages, rules, approvals = await _workflow_context(session, actor, episode_id)
-
-    # The normal client UI shows either an explicitly shared delivery
-    # manifest or this narrowly scoped workflow panel.  Keep that restriction
-    # at the API boundary too: a curious browser must not obtain the internal
-    # roster, bookings, QC notes, work orders, vendor data, or budget simply
-    # by requesting the workspace endpoint directly.
-    if actor.active_organization and actor.active_organization.role == "client":
-        episode_value = _episode_response(row)
-        episode_value["editor_name"] = None
-        episode_value["producer_name"] = None
-        return {
-            "episode": {
-                **episode_value,
-                "status": row.workflow_status,
-                "workflow_state": {
-                    "display_status": row.workflow_status,
-                    "label": workflow_projection(row)["workflow_label"],
-                    "primary_stage_id": str(row.workflow_stage_id) if row.workflow_stage_id else None,
-                    "primary_stage_name": row.workflow_stage_name,
-                },
-            },
-            "schedule": [],
-            "budget": [],
-            "activity": [],
-            "workflow_stages": [
-                {
-                    "id": str(item.id),
-                    "name": item.name,
-                    "key": item.key,
-                    "position": item.position,
-                    "is_terminal": item.is_terminal,
-                    "can_start_early": item.can_start_early,
-                    "requires_qc_pass": item.requires_qc_pass,
-                    "delivery_gate": item.delivery_gate,
-                }
-                for item in stages
-            ],
-            "workflow_approval_rules": [
-                {
-                    "id": str(item.id),
-                    "workflow_stage_id": str(item.workflow_stage_id),
-                    "approver_role": None,
-                    "label": item.label,
-                    "approval_order": item.approval_order,
-                    "is_required": item.is_required,
-                }
-                for item in rules
-            ],
-            "workflow_approvals": [
-                {
-                    "id": str(item.id),
-                    "workflow_stage_id": str(item.workflow_stage_id),
-                    "approval_rule_id": str(item.approval_rule_id),
-                    "approver_role": None,
-                    # Expose only the caller's identity; other named signers
-                    # remain internal even when their slot has been approved.
-                    "required_person_id": (
-                        actor.person_id if str(item.required_person_id or "") == actor.person_id else None
-                    ),
-                    "status": item.status,
-                    "comment": item.comment if str(item.required_person_id or "") == actor.person_id else None,
-                    "submitted_at": item.submitted_at,
-                    "responded_at": item.responded_at,
-                }
-                for item in approvals
-            ],
-            "workflow_exceptions": [],
-            "workflow_operational_blockers": [],
-            "workflow_approvers": [],
-            "workflow_signers": [
-                {
-                    "approval_rule_id": str(item.approval_rule_id),
-                    "person_id": actor.person_id,
-                    "name": actor.person_name,
-                    "role": actor.person_role,
-                }
-                for item in approvals
-                if str(item.required_person_id or "") == actor.person_id
-            ],
-            "episode_team": [],
-            "work_orders": [],
-            "qc_history": [],
-            "qc_issue_history": [],
-            "vendor_options": [],
-            "delivery_manifest": None,
-            "delivery_profiles": [],
-        }
 
     team_rows = (
         await session.execute(
@@ -783,9 +686,11 @@ async def get_episode_workspace(episode_id: str, actor: CurrentActor, session: D
 
     current_stage = next((stage for stage in stages if stage.id == row.workflow_stage_id), None)
     blocker = await _stage_blocker(session, actor, episode_id, current_stage) if current_stage else None
-    can_manage_commercial = await has_permission(session, actor, "manage_commercial")
+    can_view_commercial = await has_permission(session, actor, "manage_commercial") or bool(
+        actor.active_organization and actor.active_organization.role == "client"
+    )
     budget_rows = []
-    if can_manage_commercial:
+    if can_view_commercial:
         budget_rows = (
             await session.execute(
                 select(
@@ -1712,7 +1617,9 @@ async def transition_episode_workflow(
                 )
             ).all()
             signer_by_role = {item.role: item.person_id for item in signers}
-            missing = [rule for rule in stage_rules if not rule.approver_role or rule.approver_role not in signer_by_role]
+            missing = [
+                rule for rule in stage_rules if not rule.approver_role or rule.approver_role not in signer_by_role
+            ]
             if missing:
                 missing_roles = ", ".join(
                     sorted({(rule.approver_role or "unconfigured role").replace("_", " ") for rule in missing})

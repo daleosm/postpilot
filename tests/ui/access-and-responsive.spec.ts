@@ -23,8 +23,9 @@ test.describe("Workspace access and responsive UI", () => {
     await signInAs(context, "user_copper_editor");
     await page.goto("/");
 
-    await expect(page.getByRole("link", { name: "Episodes", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "My work", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Shows", exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation").getByRole("link", { name: "Bookings", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "My work", exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Budget", exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Clients & vendors", exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Runner desk", exact: true })).toHaveCount(0);
@@ -36,7 +37,7 @@ test.describe("Workspace access and responsive UI", () => {
 
     await expect(page.getByRole("link", { name: "Budget", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Clients & vendors", exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Bookings", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Bookings", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Runner desk", exact: true })).toHaveCount(0);
   });
 
@@ -50,12 +51,13 @@ test.describe("Workspace access and responsive UI", () => {
     await expect(page.getByRole("link", { name: "Shows", exact: true })).toHaveCount(0);
   });
 
-  test("exposes client catering but not internal navigation to a client account", async ({ context, page }) => {
+  test("exposes an assigned client's show while keeping commercial and facility navigation hidden", async ({ context, page }) => {
     await signInAs(context, "user_copper_client");
     await page.goto("/");
 
     await expect(page.getByRole("link", { name: "Budget", exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Bookings", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Shows", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Catering", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Clients & vendors", exact: true })).toHaveCount(0);
   });
