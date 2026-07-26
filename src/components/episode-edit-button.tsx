@@ -49,12 +49,12 @@ export function EpisodeEditButton({ episode }: { episode: EditableEpisode }) {
           <h2 id="edit-episode-title" className="text-lg font-semibold">Edit episode</h2>
           <Button isIconOnly type="button" variant="tertiary" onPress={() => setOpen(false)} aria-label="Close"><X size={16} /></Button>
         </div>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <label>Title<input name="title" defaultValue={episode.title} /></label>
-          <label>Production code<input name="productionCode" defaultValue={episode.productionCode ?? ""} /></label>
-          <label>Air date<input type="date" name="airDate" defaultValue={episode.airDate ?? ""} /></label>
-          <label>Lock date<input type="date" name="lockedCutDate" defaultValue={episode.lockedCutDate ?? ""} /></label>
-          <label>Delivery deadline<input type="datetime-local" name="deliveryDeadline" defaultValue={episode.deliveryDeadline ? new Date(episode.deliveryDeadline).toISOString().slice(0, 16) : ""} /></label>
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <EpisodeField label="Title"><input name="title" defaultValue={episode.title} /></EpisodeField>
+          <EpisodeField label="Production code"><input name="productionCode" defaultValue={episode.productionCode ?? ""} /></EpisodeField>
+          <EpisodeField label="Air date"><input type="date" name="airDate" defaultValue={episode.airDate ?? ""} /></EpisodeField>
+          <EpisodeField label="Lock date"><input type="date" name="lockedCutDate" defaultValue={episode.lockedCutDate ?? ""} /></EpisodeField>
+          <EpisodeField label="Delivery deadline" className="sm:col-span-2"><input type="datetime-local" name="deliveryDeadline" defaultValue={episode.deliveryDeadline ? new Date(episode.deliveryDeadline).toISOString().slice(0, 16) : ""} /></EpisodeField>
         </div>
         <EpisodeTeamModal episodeId={episode.id} />
         {error && <p className="mt-3 text-xs text-[#a35e41]">{error}</p>}
@@ -69,4 +69,8 @@ export function EpisodeEditButton({ episode }: { episode: EditableEpisode }) {
     <Button variant="tertiary" onPress={() => setOpen(true)} className="border border-[#dfe3df]"><Pencil size={14} /> Edit episode</Button>
     {dialog ? createPortal(dialog, document.body) : null}
   </>;
+}
+
+function EpisodeField({ label, className = "", children }: { label: string; className?: string; children: React.ReactNode }) {
+  return <label className={`block min-w-0 text-xs font-medium text-[#4b5651] ${className}`}><span>{label}</span><span className="mt-1.5 block [&_input]:h-10 [&_input]:w-full [&_input]:min-w-0 [&_input]:rounded-md [&_input]:border [&_input]:border-[#d9dfda] [&_input]:bg-white [&_input]:px-3 [&_input]:text-sm [&_input]:text-[#333c37]">{children}</span></label>;
 }
