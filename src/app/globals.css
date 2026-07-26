@@ -55,9 +55,19 @@ button, a { -webkit-tap-highlight-color: transparent; }
 
 a, button, input, select, textarea { transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease, opacity 160ms ease; }
 
+/* HeroUI and legacy button variants both supply their own interaction state.
+ * Do not animate the button shell itself: competing transform/background
+ * transitions can paint as a flash when the pointer enters a control. */
+:where(button, [role="button"], .button) {
+  transition: none !important;
+}
+:where(button, [role="button"], .button):hover,
+:where(button, [role="button"], .button):active:not(:disabled):not([aria-disabled="true"]) {
+  transform: none !important;
+}
+
 /* Feedback is deliberately quick: it confirms intent without making the
  * production interface feel animated for its own sake. */
-:where(button, [role="button"], .button):active:not(:disabled):not([aria-disabled="true"]) { transform: translateY(1px) scale(0.985); }
 :where(button, [role="button"], .button)[aria-busy="true"], :where(button, [role="button"], .button):disabled { cursor: wait; }
 .pp-status { transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease; }
 p[role="status"], p[role="alert"] { animation: pp-status-in 180ms ease-out both; }
