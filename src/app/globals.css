@@ -401,10 +401,12 @@ input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:f
 
 /* Tab content moves as a single compact panel; this avoids an abrupt replace
  * when moving between workflow, QC, bookings, and commercial context. */
-.episode-tab-panel { animation: pp-tab-in 170ms cubic-bezier(.2,.7,.25,1) both; }
+.episode-tab-panel { animation: pp-tab-in 170ms cubic-bezier(.2,.7,.25,1); }
 nav[aria-label="Episode workspace sections"] .button[data-active="true"] { position: relative; }
 nav[aria-label="Episode workspace sections"] .button[data-active="true"]::after { position: absolute; right: 0.75rem; bottom: -2px; left: 0.75rem; height: 2px; border-radius: 999px; background: #567b72; content: ""; }
-@keyframes pp-tab-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+/* Do not retain the animation's transform after it completes: a retained
+ * transform creates a stacking context and can trap fixed dialogs below page panels. */
+@keyframes pp-tab-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
 /* Native disclosure is used for dense detail rows. Opening it reveals the
  * detail as a short expansion rather than a hard layout jump. */

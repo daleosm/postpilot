@@ -6,6 +6,7 @@ import { Button } from "@heroui/react";
 import { Pencil, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { createPortal } from "react-dom";
 
 import { EpisodeTeamModal } from "@/components/episode-team-modal";
 
@@ -42,12 +43,10 @@ export function EpisodeEditButton({ episode }: { episode: EditableEpisode }) {
     router.refresh();
   }
 
-  return <>
-    <Button variant="tertiary" onPress={() => setOpen(true)} className="border border-[#dfe3df]"><Pencil size={14} /> Edit episode</Button>
-    {open && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+  const dialog = open ? <div className="pp-modal-layer fixed inset-0 z-[100] flex items-center justify-center bg-[#18211e]/35 p-4" role="dialog" aria-modal="true" aria-labelledby="edit-episode-title">
       <form action={submit} className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl bg-[#fafbf9] p-6 shadow-xl">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Edit episode</h2>
+          <h2 id="edit-episode-title" className="text-lg font-semibold">Edit episode</h2>
           <Button isIconOnly type="button" variant="tertiary" onPress={() => setOpen(false)} aria-label="Close"><X size={16} /></Button>
         </div>
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -64,6 +63,10 @@ export function EpisodeEditButton({ episode }: { episode: EditableEpisode }) {
           <Button type="submit" variant="primary" className="bg-[#263130] text-white">Save changes</Button>
         </div>
       </form>
-    </div>}
+    </div> : null;
+
+  return <>
+    <Button variant="tertiary" onPress={() => setOpen(true)} className="border border-[#dfe3df]"><Pencil size={14} /> Edit episode</Button>
+    {dialog ? createPortal(dialog, document.body) : null}
   </>;
 }

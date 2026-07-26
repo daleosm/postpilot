@@ -40,7 +40,7 @@ test.describe("Episode operational workspace UI", () => {
     await openEpisode(page);
     await page.getByRole("button", { name: "QC", exact: true }).click();
 
-    await expect(page.getByText("Episode QC", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Quality control" })).toBeVisible();
     await expect(page.getByRole("button", { name: /Record QC result|Start re-QC/ })).toBeVisible();
     await expect(page.getByText("QC exceptions", { exact: true })).toBeVisible();
     await expect(page.getByText("Issue log", { exact: true })).toBeVisible();
@@ -56,10 +56,12 @@ test.describe("Episode operational workspace UI", () => {
 
   test("opens the edit-episode workflow team controls for a production manager", async ({ page }) => {
     await openEpisode(page);
+    await expect.poll(() => page.locator(".episode-tab-panel").evaluate((element) => getComputedStyle(element).transform)).toBe("none");
     await page.getByRole("button", { name: "Edit episode" }).click();
     const form = page.locator("form").filter({ has: page.getByRole("heading", { name: "Edit episode" }) });
 
     await expect(page.getByRole("heading", { name: "Edit episode" })).toBeVisible();
+    await expect(form.locator("..")).toHaveCSS("z-index", "100");
     await expect(form.getByText("Episode team", { exact: true })).toBeVisible();
     await expect(form.getByText("Workflow sign-off slots", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
