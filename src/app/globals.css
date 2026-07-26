@@ -15,6 +15,9 @@
   --pp-brand: #314e46;
   --pp-brand-strong: #203a34;
   --pp-brand-soft: #e7f0ea;
+  --pp-control: #f4f6f2;
+  --pp-control-hover: #f8faf7;
+  --pp-control-focus: #ffffff;
   --pp-success: #39715d;
   --pp-warning: #a96d28;
   --pp-warning-soft: #fff2d9;
@@ -212,28 +215,32 @@ main :where(label, legend) { color: #4d5a54; }
 
 .control {
   width: 100%;
-  height: 2.5rem;
+  min-height: 2.625rem;
   border: 1px solid var(--pp-border);
   border-radius: var(--pp-radius-control);
-  background: rgb(255 255 255 / 0.82);
-  padding: 0 0.75rem;
+  background: var(--pp-control);
+  padding: 0.625rem 0.8125rem;
   color: #293632;
   font: inherit;
   box-shadow: inset 0 1px 1px rgb(24 41 34 / 0.025);
 }
 
-.control:hover { border-color: var(--pp-border-strong); }
-.control:focus { outline: 2px solid rgb(117 155 141 / 0.38); outline-offset: 1px; border-color: #739788; background: #fff; }
+.control:hover { border-color: var(--pp-border-strong); background: var(--pp-control-hover); }
+.control:focus { outline: none; border-color: #5e8778; background: var(--pp-control-focus); box-shadow: 0 0 0 4px rgb(117 155 141 / 0.2), inset 0 1px 1px rgb(24 41 34 / 0.025); }
 
 input:not([type="checkbox"]):not([type="radio"]), select, textarea {
   border-color: var(--pp-border) !important;
-  background-color: rgb(255 255 255 / 0.82) !important;
+  background-color: var(--pp-control) !important;
   border-radius: var(--pp-radius-control) !important;
+  padding: 0.625rem 0.8125rem !important;
   box-shadow: inset 0 1px 1px rgb(24 41 34 / 0.025);
 }
 
-input:not([type="checkbox"]):not([type="radio"]):hover, select:hover, textarea:hover { border-color: var(--pp-border-strong) !important; }
-input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:focus { border-color: #739788 !important; box-shadow: 0 0 0 3px rgb(117 155 141 / 0.16) !important; outline: none; }
+input:not([type="checkbox"]):not([type="radio"]), select { min-height: 2.625rem; }
+textarea { min-height: 5.75rem; line-height: 1.45; }
+input:not([type="checkbox"]):not([type="radio"]):hover, select:hover, textarea:hover { border-color: var(--pp-border-strong) !important; background-color: var(--pp-control-hover) !important; }
+input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:focus { border-color: #5e8778 !important; background-color: var(--pp-control-focus) !important; box-shadow: 0 0 0 4px rgb(117 155 141 / 0.2), inset 0 1px 1px rgb(24 41 34 / 0.025) !important; outline: none; }
+select option, select optgroup { background-color: var(--pp-control); color: var(--pp-ink); }
 
 .pp-sidebar {
   background:
@@ -251,6 +258,12 @@ input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:f
   border-color: rgb(211 217 211 / 0.76);
   background: rgb(250 251 248 / 0.78);
   box-shadow: 0 1px 0 rgb(255 255 255 / 0.75);
+}
+
+/* Header selectors are custom menus rather than native fields. Keep their
+ * triggers and floating panels on the same soft control surface. */
+.pp-topbar :where([class~="bg-white"], [class~="bg-[#fffdf8]"]) {
+  background-color: var(--pp-control) !important;
 }
 
 .dashboard-hero {
@@ -611,8 +624,8 @@ tbody tr { transition: background-color 140ms ease; }
 tbody tr:hover { background: rgb(238 244 239 / 0.52); }
 tbody tr:focus-within { background: #f3f8f4; box-shadow: inset 3px 0 0 #7c9c8f; }
 
-/* Native selects are intentionally compact, while still feeling like controls. */
-select { min-height: 2.25rem; color: #4d5853; }
+/* Native selects retain the shared quiet field treatment. */
+select { color: #4d5853; }
 
 @media (max-width: 1023px) {
   .pp-main { padding-inline: 1rem; }
