@@ -3,7 +3,7 @@
 import { postpilotUiFetch } from "@/lib/postpilot-api-client";
 
 import { Button } from "@heroui/react";
-import { Check, Clapperboard, FileCheck2, MonitorUp, Palette, Send, ShieldCheck, Sparkles, Volume2, type LucideIcon } from "lucide-react";
+import { Activity, CalendarDays, Check, CircleDollarSign, Clapperboard, ClipboardCheck, FileCheck2, LayoutDashboard, MonitorUp, Palette, Send, ShieldCheck, Sparkles, Volume2, Workflow, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { EpisodeWorkOrders } from "@/components/episode-work-orders";
@@ -14,6 +14,16 @@ import { WorkflowStateBadge } from "@/components/workflow-state-badge";
 
 const tabs = ["Overview", "Workflow", "QC", "Work orders", "Bookings", "Delivery manifest", "Budget", "Activity"] as const;
 type TabName = (typeof tabs)[number];
+const tabIcons: Record<TabName, LucideIcon> = {
+  Overview: LayoutDashboard,
+  Workflow,
+  QC: ShieldCheck,
+  "Work orders": ClipboardCheck,
+  Bookings: CalendarDays,
+  "Delivery manifest": Send,
+  Budget: CircleDollarSign,
+  Activity,
+};
 type Row = { id: string; [key: string]: unknown };
 type EpisodeData = { id?: string; title: string; showTitle: string; seasonNumber: number; number: number; status: string; qcStatus: string; workflowStageId: string | null; workflowStage: string | null; workflowState?: { displayStatus: string; label: string; primaryStageId: string | null; primaryStageName: string | null }; editorName: string | null; producerName: string | null; lockedCutDate: string | null; deliveryDeadline: Date | string | null };
 type WorkflowStage = { id: string; name: string; key: string; position: number; isTerminal?: boolean; canStartEarly?: boolean; requiresQcPass?: boolean; deliveryGate?: "none" | "facility_dispatch" | "client_acceptance" };
@@ -31,12 +41,19 @@ export function EpisodeDetailTabs({ data, workflowOnly = false, canUpdateWorkflo
 
   return (
     <section className="min-w-0 space-y-4">
-      <nav aria-label="Episode workspace sections" className="flex overflow-x-auto border-b border-[#dfe5df]">
-        {visibleTabs.map((item) => (
-          <Button key={item} variant="tertiary" data-active={tab === item} onPress={() => setTab(item)} className={`-mb-px h-auto min-w-max rounded-none border-b-2 px-3 py-3 text-xs font-semibold transition ${tab === item ? "border-[#567b72] text-[#385c54]" : "border-transparent text-[#838986] hover:text-[#515a56]"}`}>
-            {item}
-          </Button>
-        ))}
+      <nav aria-label="Episode workspace sections" className="border-b border-[#dfe5df]">
+        <ul className="-mb-px flex min-w-max overflow-x-auto text-center text-sm font-medium" role="list">
+          {visibleTabs.map((item) => {
+            const Icon = tabIcons[item];
+            const active = tab === item;
+            return <li key={item} className="mr-1.5 last:mr-0">
+              <button type="button" data-active={active} aria-current={active ? "page" : undefined} onClick={() => setTab(item)} className={`inline-flex appearance-none items-center justify-center gap-2 rounded-none border-x-0 border-t-0 border-b-2 bg-transparent px-3 py-3 text-xs font-semibold shadow-none transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-[#8caf9f] focus:ring-offset-2 ${active ? "border-[#567b72] text-[#385c54]" : "border-transparent text-[#838986] hover:border-[#aec7ba] hover:bg-transparent hover:text-[#4f7569]"}`}>
+                <Icon aria-hidden="true" size={15} strokeWidth={2} className={active ? "text-[#4d796b]" : "text-[#909a95]"} />
+                <span>{item}</span>
+              </button>
+            </li>;
+          })}
+        </ul>
       </nav>
       <div key={tab} className="episode-tab-panel min-w-0"><TabContent tab={tab} data={data} canUpdateWorkflowWork={canUpdateWorkflowWork} canSubmitWorkflowTracks={canSubmitWorkflowTracks} canSignOffWorkflowTracks={canSignOffWorkflowTracks} canAuthorizeWorkflowExceptions={canAuthorizeWorkflowExceptions} canManageWorkOrders={canManageWorkOrders} canApproveWorkOrders={canApproveWorkOrders} canUpdateWorkOrders={canUpdateWorkOrders} canManageCommercial={canManageCommercial} canManageQc={canManageQc} canVerifyQc={canVerifyQc} canWaiveQc={canWaiveQc} canManageDelivery={canManageDelivery} canUpdateDelivery={canUpdateDelivery} canConfirmDeliveryReceipt={canConfirmDeliveryReceipt} currentPersonId={currentPersonId} /></div>
     </section>
