@@ -559,9 +559,12 @@ details[open] > :not(summary) { animation: pp-expand-in 170ms ease-out both; }
 .gantt-room-label { background: linear-gradient(90deg, #fdfdfb, #fafbf8); }
 .gantt-booking { transition: transform 150ms ease, box-shadow 150ms ease, filter 150ms ease; }
 .gantt-booking:hover { transform: translateY(-1px); filter: saturate(1.06); }
-.gantt-booking--hold { opacity: 0.88; }
-.gantt-booking--reservation { box-shadow: 0 0 0 1px rgb(79 154 121 / 0.22), 0 2px 5px rgb(37 91 68 / 0.1); }
+.gantt-booking--confirmed { border-color: #5f7ee6; background: #eff3ff; }
+.gantt-booking--hold { border-color: #b99143; background: #fff9e9; opacity: 0.88; }
+.gantt-booking--reservation { border-color: #4f9a79; background: #edf7f2; box-shadow: 0 0 0 1px rgb(79 154 121 / 0.22), 0 2px 5px rgb(37 91 68 / 0.1); }
 .gantt-booking--conflict { border-color: #b65e4d !important; background: #fff0ed !important; box-shadow: 0 0 0 1px rgb(182 94 77 / 0.22); }
+.gantt-booking--tentative { border-color: #74899a; background: #f0f4f6; }
+.gantt-booking--cancelled { border-color: #9aa09d; background: #f2f3f1; opacity: 0.62; text-decoration: line-through; }
 .availability-badge { display: inline-flex; border-radius: 999px; padding: 0.125rem 0.375rem; font-size: 0.5625rem; font-weight: 750; letter-spacing: 0.03em; text-transform: uppercase; }
 .availability-badge--free { background: #e5f1e9; color: #37705a; }
 .availability-badge--booked { background: #e9eff4; color: #4d6d7e; }

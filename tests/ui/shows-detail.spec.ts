@@ -23,19 +23,27 @@ test.describe("Show detail UI", () => {
     await page.getByRole("button", { name: "Cancel" }).click();
   });
 
-  test("renders one Seasons & episodes and one Episode team panel", async ({ page }) => {
+  test("keeps the show workspace focused on seasons and episode work", async ({ page }) => {
     await page.goto(`/shows/${CROSSING_POINT_SHOW_ID}`);
 
     await expect(page.getByText("Seasons & episodes", { exact: true })).toHaveCount(1);
-    await expect(page.getByText("Episode team", { exact: true })).toHaveCount(1);
+    await expect(page.getByText("Episode team", { exact: true })).toHaveCount(0);
   });
 
-  test("keeps season navigation inside the show workspace", async ({ page }) => {
+  test("lists every episode for a selected season without leaving the show workspace", async ({ page }) => {
     await page.goto(`/shows/${CROSSING_POINT_SHOW_ID}`);
 
-    await page.getByRole("link", { name: /View board/ }).first().click();
-    await expect(page).toHaveURL(/#episode-board$/);
-    await expect(page.locator("#episode-board")).toContainText("Episode board");
+    await page.getByRole("button", { name: "View episodes" }).first().click();
+    await expect(page.getByRole("heading", { name: "Season 1 episodes" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Season 1 episodes" }).getByRole("link")).toHaveCount(4);
+    await page.getByRole("button", { name: "Close season episodes" }).click();
+    await expect(page.getByRole("heading", { name: "Season 1 episodes" })).not.toBeVisible();
+  });
+
+  test("keeps the show board to the five most recent episodes", async ({ page }) => {
+    await page.goto(`/shows/${CROSSING_POINT_SHOW_ID}`);
+
+    expect(await page.locator("#episode-board").getByRole("link").count()).toBeLessThanOrEqual(5);
   });
 
   test("does not render the show workspace for an artist without Shows permission", async ({ context, page }) => {

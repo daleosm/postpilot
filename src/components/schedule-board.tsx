@@ -28,6 +28,7 @@ export type ScheduleBooking = {
   personId: string | null;
   guestPersonId: string | null;
   notes: string | null;
+  workOrderId: string | null;
   roomName: string | null;
   roomType: string | null;
   episodeTitle: string | null;
@@ -59,6 +60,7 @@ export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, wo
   const rangeEnd = useMemo(() => addDays(cursor, days.length), [cursor, days.length]);
   const visible = useMemo(() => bookings.filter((booking) => overlaps(operationalStart(booking), operationalEnd(booking), cursor, rangeEnd)), [bookings, cursor, rangeEnd]);
   const ganttRows = useMemo(() => buildGanttRows(rooms, visible, cursor, days.length), [rooms, visible, cursor, days.length]);
+  const conflictingBookingIds = useMemo(() => bookingConflictIds(visible), [visible]);
   const move = (direction: number) => setCursor((current) => addDays(current, direction * (mode === "staff" ? 1 : days.length)));
 
   const availableWorkOrders = workOrders.filter((workOrder) => workOrder.workType === "internal" && workOrder.status === "in_progress" && !workOrder.bookingId);
@@ -85,7 +87,7 @@ export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, wo
       <div className="panel overflow-x-auto">
         <div style={{ minWidth: `${ROOM_COLUMN_WIDTH + days.length * DAY_WIDTH}px` }}>
           <GanttHeader days={days} />
-          <GanttTimeline rows={ganttRows} days={days.length} rangeStart={cursor} draggedWorkOrder={draggedWorkOrder} onDropWorkOrder={(roomId, startsAt) => { if (draggedWorkOrder) setPendingReservation({ workOrder: draggedWorkOrder, roomId, startsAt }); setDraggedWorkOrder(null); }} onSelect={setSelectedBooking} />
+          <GanttTimeline rows={ganttRows} days={days.length} rangeStart={cursor} conflictingBookingIds={conflictingBookingIds} draggedWorkOrder={draggedWorkOrder} onDropWorkOrder={(roomId, startsAt) => { if (draggedWorkOrder) setPendingReservation({ workOrder: draggedWorkOrder, roomId, startsAt }); setDraggedWorkOrder(null); }} onSelect={setSelectedBooking} />
         </div>
       </div>
     </section>
@@ -114,19 +116,19 @@ function GanttHeader({ days }: { days: Date[] }) {
   </div>;
 }
 
-function GanttTimeline({ rows, days, rangeStart, draggedWorkOrder, onDropWorkOrder, onSelect }: { rows: GanttRow[]; days: number; rangeStart: Date; draggedWorkOrder: SchedulableWorkOrder | null; onDropWorkOrder: (roomId: string, startsAt: Date) => void; onSelect: (booking: ScheduleBooking) => void }) {
+function GanttTimeline({ rows, days, rangeStart, conflictingBookingIds, draggedWorkOrder, onDropWorkOrder, onSelect }: { rows: GanttRow[]; days: number; rangeStart: Date; conflictingBookingIds: Set<string>; draggedWorkOrder: SchedulableWorkOrder | null; onDropWorkOrder: (roomId: string, startsAt: Date) => void; onSelect: (booking: ScheduleBooking) => void }) {
   if (!rows.length) return <p className="px-4 py-6 text-xs text-[#9a9e9b]">No rooms or bookings in this period.</p>;
-  return <div>{rows.map((row) => <GanttRoomRow key={row.id} row={row} days={days} rangeStart={rangeStart} canDrop={Boolean(draggedWorkOrder) && !["personnel-availability", "unassigned"].includes(row.id)} onDropWorkOrder={onDropWorkOrder} onSelect={onSelect} />)}</div>;
+  return <div>{rows.map((row) => <GanttRoomRow key={row.id} row={row} days={days} rangeStart={rangeStart} conflictingBookingIds={conflictingBookingIds} canDrop={Boolean(draggedWorkOrder) && !["personnel-availability", "unassigned"].includes(row.id)} onDropWorkOrder={onDropWorkOrder} onSelect={onSelect} />)}</div>;
 }
 
-function GanttRoomRow({ row, days, rangeStart, canDrop, onDropWorkOrder, onSelect }: { row: GanttRow; days: number; rangeStart: Date; canDrop: boolean; onDropWorkOrder: (roomId: string, startsAt: Date) => void; onSelect: (booking: ScheduleBooking) => void }) {
+function GanttRoomRow({ row, days, rangeStart, conflictingBookingIds, canDrop, onDropWorkOrder, onSelect }: { row: GanttRow; days: number; rangeStart: Date; conflictingBookingIds: Set<string>; canDrop: boolean; onDropWorkOrder: (roomId: string, startsAt: Date) => void; onSelect: (booking: ScheduleBooking) => void }) {
   const rowHeight = Math.max(52, row.lanes * 48 + 8);
   const totalMinutes = days * MINUTES_IN_SUITE_DAY;
   return <div className="grid border-b border-[#ebeae6]" style={{ gridTemplateColumns: `${ROOM_COLUMN_WIDTH}px minmax(0, 1fr)`, minHeight: `${rowHeight}px` }}>
     <div className="gantt-room-label flex flex-col justify-center border-r border-[#ebeae6] px-3"><div className="flex items-center justify-between gap-2"><p className="truncate text-xs font-semibold text-[#4b5550]">{row.name}</p><span className="text-[10px] font-semibold text-[#7a8580]">{row.bookings.length}</span></div><p className="mt-0.5 truncate text-[10px] capitalize text-[#7d8782]">{row.type.replaceAll("_", " ")}</p></div>
     <div data-testid={`room-timeline-${row.id}`} className={`relative bg-[#fafbf9] ${canDrop ? "ring-inset ring-1 ring-[#b6cfbd]" : ""}`} style={{ minHeight: `${rowHeight}px` }} onDragOver={(event) => { if (canDrop) event.preventDefault(); }} onDrop={(event) => { if (!canDrop) return; event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); const minute = Math.max(0, Math.min(days * MINUTES_IN_SUITE_DAY - 15, Math.floor(((event.clientX - bounds.left) / bounds.width * days * MINUTES_IN_SUITE_DAY) / 15) * 15)); const day = Math.floor(minute / MINUTES_IN_SUITE_DAY); const startsAt = addDays(rangeStart, day); startsAt.setHours(0, SUITE_DAY_START + minute % MINUTES_IN_SUITE_DAY, 0, 0); onDropWorkOrder(row.id, startsAt); }}>
       <TimelineGrid days={days} />
-      {row.bookings.map((placement) => <GanttBookingBar key={placement.booking.id} placement={placement} totalMinutes={totalMinutes} onSelect={onSelect} />)}
+      {row.bookings.map((placement) => <GanttBookingBar key={placement.booking.id} placement={placement} totalMinutes={totalMinutes} hasConflict={conflictingBookingIds.has(placement.booking.id)} onSelect={onSelect} />)}
       {!row.bookings.length && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-[#a2a6a2]">{canDrop ? "Drop work order to reserve" : "Available"}</span>}
     </div>
   </div>;
@@ -157,20 +159,46 @@ function AvailabilityBadge({ state }: { state: "free" | "booked" | "unavailable"
   return <span className={`availability-badge availability-badge--${state}`}>{label}</span>;
 }
 
-function bookingVisualState(booking: ScheduleBooking) {
+function bookingVisualState(booking: ScheduleBooking, hasConflict: boolean) {
+  if (booking.status === "cancelled") return "cancelled";
+  // A red bar is reserved for a live overlap of blocking resources; it is
+  // derived from the calendar windows, not from a label or the booking title.
+  if (hasConflict) return "conflict";
   if (booking.isOption) return "hold";
-  if (/conflict|clash/i.test(booking.status)) return "conflict";
-  if (/reserve|work_order/i.test(booking.status) || booking.bookingType === "work_order") return "reservation";
-  return "confirmed";
+  // Work-order reservations are identified by their real linked record.
+  if (booking.workOrderId) return "reservation";
+  if (booking.status === "confirmed") return "confirmed";
+  return "tentative";
 }
 
-function bookingStateLabel(state: string) { return state === "hold" ? "Hold" : state === "reservation" ? "Reserved" : state === "conflict" ? "Conflict" : "Confirmed"; }
+function bookingStateLabel(state: string) { return state === "hold" ? "Pencil hold" : state === "reservation" ? "Work reservation" : state === "conflict" ? "Conflict" : state === "tentative" ? "Tentative" : state === "cancelled" ? "Cancelled" : "Confirmed"; }
 
-function GanttBookingBar({ placement, totalMinutes, onSelect }: { placement: GanttBooking; totalMinutes: number; onSelect: (booking: ScheduleBooking) => void }) {
+function GanttBookingBar({ placement, totalMinutes, hasConflict, onSelect }: { placement: GanttBooking; totalMinutes: number; hasConflict: boolean; onSelect: (booking: ScheduleBooking) => void }) {
   const { booking } = placement;
   const optionLabel = booking.isOption ? `Pencil ${booking.optionRank ?? "—"} · ` : "";
-  const state = bookingVisualState(booking);
-  return <button data-testid={`booking-bar-${booking.id}`} type="button" onClick={() => onSelect(booking)} aria-label={`Edit ${optionLabel}${booking.title}`} title={`${booking.isOption ? `${optionLabel}provisional hold. ` : ""}Client: ${timeLabel(booking.startsAt)}–${timeLabel(booking.endsAt)}. Operational: ${timeLabel(operationalStart(booking))}–${timeLabel(operationalEnd(booking))}.${booking.workflowState ? ` Episode workflow: ${booking.workflowState.primaryStageName ?? "not started"} (${booking.workflowState.displayStatus.replaceAll("_", " ")}).` : ""}`} style={{ top: `${placement.lane * 48 + 4}px`, left: `calc(${(placement.start / totalMinutes) * 100}% + 3px)`, width: `calc(${Math.max(1.5, ((placement.end - placement.start) / totalMinutes) * 100)}% - 6px)` }} className={`gantt-booking gantt-booking--${state} gantt-booking--${booking.bookingType} absolute ${booking.isOption ? "h-7 border-dashed py-1" : "h-10 py-1.5"} overflow-hidden rounded-md border-l-[3px] px-2 text-left shadow-sm transition-shadow hover:z-10 hover:shadow-md focus:z-10 focus:outline-none focus:ring-2 focus:ring-[#66877f] ${booking.isOption ? "border-[#b99143] bg-[#fff9e9]" : bookingColors(booking.bookingType)}`}><p className="truncate text-[11px] font-semibold text-[#414945]"><span className="mr-1 text-[9px] font-bold uppercase tracking-[.06em] text-[#6d7771]">{bookingStateLabel(state)}</span>{optionLabel}{booking.title}</p>{!booking.isOption && <p className="mt-0.5 truncate text-[10px] text-[#68716d]">{booking.actualStartsAt ? `Actual ${timeLabel(booking.actualStartsAt)}–${timeLabel(booking.actualEndsAt ? booking.actualEndsAt : booking.endsAt)}` : `Client ${timeLabel(booking.startsAt)}–${timeLabel(booking.endsAt)}`} · {booking.workflowState?.primaryStageName ?? booking.personName ?? "Unassigned"}</p>}</button>;
+  const state = bookingVisualState(booking, hasConflict);
+  return <button data-testid={`booking-bar-${booking.id}`} data-booking-state={state} type="button" onClick={() => onSelect(booking)} aria-label={`Edit ${optionLabel}${booking.title}`} title={`${bookingStateLabel(state)}. ${booking.isOption ? `${optionLabel}provisional hold. ` : ""}Client: ${timeLabel(booking.startsAt)}–${timeLabel(booking.endsAt)}. Operational: ${timeLabel(operationalStart(booking))}–${timeLabel(operationalEnd(booking))}.${booking.workflowState ? ` Episode workflow: ${booking.workflowState.primaryStageName ?? "not started"} (${booking.workflowState.displayStatus.replaceAll("_", " ")}).` : ""}`} style={{ top: `${placement.lane * 48 + 4}px`, left: `calc(${(placement.start / totalMinutes) * 100}% + 3px)`, width: `calc(${Math.max(1.5, ((placement.end - placement.start) / totalMinutes) * 100)}% - 6px)` }} className={`gantt-booking gantt-booking--${state} gantt-booking--${booking.bookingType} absolute ${state === "hold" ? "h-7 border-dashed py-1" : "h-10 py-1.5"} overflow-hidden rounded-md border-l-[3px] px-2 text-left shadow-sm transition-shadow hover:z-10 hover:shadow-md focus:z-10 focus:outline-none focus:ring-2 focus:ring-[#66877f]`}><p className="truncate text-[11px] font-semibold text-[#414945]"><span className="mr-1 text-[9px] font-bold uppercase tracking-[.06em] text-[#6d7771]">{bookingStateLabel(state)}</span>{optionLabel}{booking.title}</p>{state !== "hold" && <p className="mt-0.5 truncate text-[10px] text-[#68716d]">{booking.actualStartsAt ? `Actual ${timeLabel(booking.actualStartsAt)}–${timeLabel(booking.actualEndsAt ? booking.actualEndsAt : booking.endsAt)}` : `Client ${timeLabel(booking.startsAt)}–${timeLabel(booking.endsAt)}`} · {booking.workflowState?.primaryStageName ?? booking.personName ?? "Unassigned"}</p>}</button>;
+}
+
+/**
+ * The calendar's red state is calculated from the same operational windows
+ * used to position the bars: planned/actual time plus setup and handover.
+ * Options are deliberately excluded because pencil holds may overlap.
+ */
+function bookingConflictIds(bookings: ScheduleBooking[]) {
+  const active = bookings.filter((booking) => booking.status !== "cancelled" && !booking.isOption);
+  const conflicting = new Set<string>();
+  for (let index = 0; index < active.length; index += 1) {
+    for (let comparisonIndex = index + 1; comparisonIndex < active.length; comparisonIndex += 1) {
+      const left = active[index]; const right = active[comparisonIndex];
+      const sharesRoom = Boolean(left.roomId && left.roomId === right.roomId);
+      const sharesPerson = Boolean(left.personId && left.personId === right.personId);
+      if ((sharesRoom || sharesPerson) && operationalStart(left) < operationalEnd(right) && operationalEnd(left) > operationalStart(right)) {
+        conflicting.add(left.id); conflicting.add(right.id);
+      }
+    }
+  }
+  return conflicting;
 }
 
 function buildGanttRows(rooms: Array<{ id: string; name: string; type: string }>, bookings: ScheduleBooking[], rangeStart: Date, days: number): GanttRow[] {
@@ -199,7 +227,6 @@ function layoutRoomBookings(bookings: ScheduleBooking[], rangeStart: Date, days:
 }
 
 function businessTimelineMinute(value: Date, rangeStart: Date) { const dayIndex = calendarDayDistance(rangeStart, value); const minuteInDay = minutesOfDay(value); return dayIndex * MINUTES_IN_SUITE_DAY + Math.min(MINUTES_IN_SUITE_DAY, Math.max(0, minuteInDay - SUITE_DAY_START)); }
-function bookingColors(type: string) { return { edit: "border-l-[#5f7ee6] bg-[#eff3ff]", color: "border-l-[#9b70e5] bg-[#f5effc]", mix: "border-l-[#4f9a79] bg-[#edf7f2]", qc: "border-l-[#c2764f] bg-[#fcf1eb]", client_review: "border-l-[#c49b4b] bg-[#faf5e8]", ingest: "border-l-[#74899a] bg-[#f0f4f6]", conform: "border-l-[#817eaa] bg-[#f2f1fa]", leave: "border-l-[#b75f75] bg-[#fceff2]", training: "border-l-[#4b8da0] bg-[#eef7f9]", sick: "border-l-[#c2764f] bg-[#fcf1eb]", unavailable: "border-l-[#797d87] bg-[#f1f2f4]" }[type] ?? "border-l-[#74899a] bg-[#f0f4f6]"; }
 function isPersonnelAvailabilityBooking(type: string) { return ["leave", "training", "sick", "unavailable"].includes(type); }
 function startOfDay(date: Date) { const value = new Date(date); value.setHours(0, 0, 0, 0); return value; }
 function suiteDayStart(date: Date) { const value = startOfDay(date); value.setHours(SUITE_DAY_START / 60, 0, 0, 0); return value; }

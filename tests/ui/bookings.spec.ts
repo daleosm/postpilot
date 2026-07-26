@@ -5,6 +5,11 @@ import { establishDebugSession } from "../fixtures/debug-session";
 const COPPERLINE_ORGANIZATION_ID = "10000000-0000-4000-8000-000000000005";
 const ACTUAL_EXTENSION_BOOKING_ID = "f5000000-0000-4000-8000-000000000001";
 const ACTUAL_EXTENSION_BOOKING_TITLE = "Actual calendar extension test";
+const STATE_TEST_BOOKING_IDS = [
+  "f5000000-0000-4000-8000-000000000011",
+  "f5000000-0000-4000-8000-000000000012",
+  "f5000000-0000-4000-8000-000000000013",
+] as const;
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required for booking calendar UI tests.");
 const sql = postgres(databaseUrl, { prepare: false });
@@ -15,6 +20,7 @@ test.beforeEach(async ({ context }) => {
 
 test.afterEach(async () => {
   await sql`delete from bookings where id = ${ACTUAL_EXTENSION_BOOKING_ID}`;
+  await sql`delete from bookings where id in ${sql(STATE_TEST_BOOKING_IDS)}`;
 });
 
 test.afterAll(async () => {
@@ -121,6 +127,29 @@ test.describe("Bookings UI", () => {
     await expect(bar).toBeVisible();
     await expect(bar).toHaveAttribute("title", /Operational: 09:00–18:00/);
     expect(await bar.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(240);
+  });
+
+  test("uses live booking records for pencil and conflict calendar colours", async ({ page }) => {
+    const [[room], [episode], [person]] = await Promise.all([
+      sql<{ id: string }[]>`select id from rooms where organization_id = ${COPPERLINE_ORGANIZATION_ID} and type = 'edit_bay' limit 1`,
+      sql<{ id: string }[]>`select id from episodes where organization_id = ${COPPERLINE_ORGANIZATION_ID} limit 1`,
+      sql<{ id: string }[]>`select id from people where organization_id = ${COPPERLINE_ORGANIZATION_ID} and role = 'editor' limit 1`,
+    ]);
+    if (!room || !episode || !person) throw new Error("Copperline booking test resources are missing.");
+    const start = new Date(); start.setHours(10, 0, 0, 0);
+    const end = new Date(start); end.setHours(12, 0, 0, 0);
+    await sql`
+      insert into bookings (id, organization_id, room_id, episode_id, person_id, title, starts_at, ends_at, status, booking_type, is_option)
+      values
+        (${STATE_TEST_BOOKING_IDS[0]}, ${COPPERLINE_ORGANIZATION_ID}, ${room.id}, ${episode.id}, ${person.id}, 'Calendar conflict A', ${start}, ${end}, 'confirmed', 'edit', false),
+        (${STATE_TEST_BOOKING_IDS[1]}, ${COPPERLINE_ORGANIZATION_ID}, ${room.id}, ${episode.id}, ${person.id}, 'Calendar conflict B', ${start}, ${end}, 'confirmed', 'edit', false),
+        (${STATE_TEST_BOOKING_IDS[2]}, ${COPPERLINE_ORGANIZATION_ID}, ${room.id}, ${episode.id}, ${person.id}, 'Calendar pencil hold', ${start}, ${end}, 'tentative', 'edit', true)
+    `;
+
+    await openBookings(page);
+    await expect(page.getByTestId(`booking-bar-${STATE_TEST_BOOKING_IDS[0]}`)).toHaveAttribute("data-booking-state", "conflict");
+    await expect(page.getByTestId(`booking-bar-${STATE_TEST_BOOKING_IDS[1]}`)).toHaveAttribute("data-booking-state", "conflict");
+    await expect(page.getByTestId(`booking-bar-${STATE_TEST_BOOKING_IDS[2]}`)).toHaveAttribute("data-booking-state", "hold");
   });
 });
 

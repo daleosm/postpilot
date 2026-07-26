@@ -79,6 +79,9 @@ def _booking_values(row: object) -> dict[str, object]:
         "episode_number": getattr(row, "episode_number", None),
         "episode_production_code": getattr(row, "episode_production_code", None),
         "person_name": getattr(row, "person_name", None),
+        # A linked work order is the authoritative source for a calendar
+        # reservation. It is deliberately not inferred from the booking title.
+        "work_order_id": getattr(row, "work_order_id", None),
         "workflow_state": (
             {
                 "primary_stage_id": str(getattr(row, "workflow_stage_id", "")) or None,
@@ -501,6 +504,7 @@ async def list_bookings(
             episodes.c.workflow_status,
             workflow_stages.c.name.label("workflow_stage_name"),
             people.c.name.label("person_name"),
+            post_work_orders.c.id.label("work_order_id"),
         )
         .select_from(bookings)
         .outerjoin(
@@ -521,6 +525,13 @@ async def list_bookings(
         .outerjoin(
             people,
             and_(people.c.id == bookings.c.person_id, people.c.organization_id == actor.organization_id),
+        )
+        .outerjoin(
+            post_work_orders,
+            and_(
+                post_work_orders.c.booking_id == bookings.c.id,
+                post_work_orders.c.organization_id == actor.organization_id,
+            ),
         )
         .where(and_(*conditions))
         .order_by(bookings.c.starts_at, bookings.c.id)

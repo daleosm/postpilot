@@ -56,7 +56,6 @@ pnpm test:e2e
 
 # Focused suites
 pnpm test:shows
-pnpm test:episodes
 pnpm test:bookings
 pnpm test:approvals
 pnpm test:deliveries

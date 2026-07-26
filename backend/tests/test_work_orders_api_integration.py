@@ -826,6 +826,12 @@ def test_assigned_artist_can_reserve_an_active_internal_work_order_without_bypas
         production_lab.fetchval("SELECT booking_id::text FROM post_work_orders WHERE id = $1", first.json()["id"])
         == booking_id
     )
+    # The calendar identifies work reservations from this authoritative link,
+    # never from a title such as "Work order · …".
+    listed = production_lab.client.get("/v1/bookings")
+    assert listed.status_code == 200, listed.text
+    calendar_booking = next(item for item in listed.json()["bookings"] if item["id"] == booking_id)
+    assert calendar_booking["work_order_id"] == first.json()["id"]
     actions = production_lab.fetchval(
         """
         SELECT count(*) FROM activity_log
