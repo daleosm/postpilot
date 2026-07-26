@@ -50,13 +50,13 @@ test.describe("Workspace access and responsive UI", () => {
     await expect(page.getByRole("link", { name: "Shows", exact: true })).toHaveCount(0);
   });
 
-  test("does not expose the internal navigation to a client account", async ({ context, page }) => {
+  test("exposes client catering but not internal navigation to a client account", async ({ context, page }) => {
     await signInAs(context, "user_copper_client");
     await page.goto("/");
 
     await expect(page.getByRole("link", { name: "Budget", exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Bookings", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Catering", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Catering", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Clients & vendors", exact: true })).toHaveCount(0);
   });
 

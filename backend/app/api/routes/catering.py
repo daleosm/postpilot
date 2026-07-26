@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import and_, insert, select, update
+from sqlalchemy import and_, insert, or_, select, update
 
 from app.api.dependencies import CurrentActor, DbSession
 from app.api.schemas import CateringRequestCreateRequest, CateringRequestUpdateRequest
@@ -107,27 +107,39 @@ async def list_catering_requests(actor: CurrentActor, session: DbSession) -> lis
 async def catering_resources(actor: CurrentActor, session: DbSession) -> dict[str, object]:
     await require_permission(session, actor, "request_catering")
     now = datetime.now(UTC)
+    person = await _current_person(session, actor)
     room_rows = await session.execute(
         select(rooms.c.id, rooms.c.name, rooms.c.type)
         .where(rooms.c.organization_id == actor.organization_id)
         .order_by(rooms.c.name)
     )
-    booking_rows = await session.execute(
-        select(bookings.c.id, rooms.c.name.label("room_name"))
-        .select_from(bookings)
-        .join(rooms, and_(rooms.c.id == bookings.c.room_id, rooms.c.organization_id == actor.organization_id))
-        .where(
-            and_(
-                bookings.c.organization_id == actor.organization_id,
-                bookings.c.starts_at <= now,
-                bookings.c.ends_at >= now,
+    active_booking = None
+    if person:
+        active_booking = (
+            await session.execute(
+                select(bookings.c.id, bookings.c.room_id, rooms.c.name.label("room_name"))
+                .select_from(bookings)
+                .join(rooms, and_(rooms.c.id == bookings.c.room_id, rooms.c.organization_id == actor.organization_id))
+                .where(
+                    and_(
+                        bookings.c.organization_id == actor.organization_id,
+                        bookings.c.episode_id.is_not(None),
+                        bookings.c.starts_at <= now,
+                        bookings.c.ends_at >= now,
+                        or_(bookings.c.person_id == person.id, bookings.c.guest_person_id == person.id),
+                    )
+                )
+                .order_by(bookings.c.starts_at.desc())
+                .limit(1)
             )
-        )
-        .order_by(rooms.c.name)
-    )
+        ).first()
     return {
         "rooms": [{"id": str(row.id), "name": row.name, "type": row.type} for row in room_rows.all()],
-        "bookings": [{"id": str(row.id), "room_name": row.room_name} for row in booking_rows.all()],
+        "active_booking": (
+            {"id": str(active_booking.id), "room_id": str(active_booking.room_id), "room_name": active_booking.room_name}
+            if active_booking
+            else None
+        ),
     }
 
 
@@ -139,16 +151,31 @@ async def create_catering_request(
     person = await _current_person(session, actor)
     booking = None
     if payload.booking_id:
+        booking_conditions = [
+            bookings.c.id == payload.booking_id,
+            bookings.c.organization_id == actor.organization_id,
+        ]
+        if actor.active_organization and actor.active_organization.role == "client":
+            if not person:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Client account is not linked to a person.")
+            booking_conditions.extend(
+                [
+                    bookings.c.starts_at <= datetime.now(UTC),
+                    bookings.c.ends_at >= datetime.now(UTC),
+                    bookings.c.episode_id.is_not(None),
+                    or_(bookings.c.person_id == person.id, bookings.c.guest_person_id == person.id),
+                ]
+            )
         booking = (
             await session.execute(
                 select(bookings.c.id, bookings.c.room_id)
-                .where(and_(bookings.c.id == payload.booking_id, bookings.c.organization_id == actor.organization_id))
+                .where(and_(*booking_conditions))
                 .limit(1)
             )
         ).first()
         if not booking:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
-    if payload.room_id and not booking:
+    if payload.room_id:
         room = (
             await session.execute(
                 select(rooms.c.id)
@@ -164,7 +191,10 @@ async def create_catering_request(
             .values(
                 organization_id=actor.organization_id,
                 booking_id=payload.booking_id,
-                room_id=booking.room_id if booking else payload.room_id,
+                # The booking keeps the episode billing connection. The room
+                # is a practical delivery location and may change at short
+                # notice without changing the client's booked episode.
+                room_id=payload.room_id or (booking.room_id if booking else None),
                 requested_by_person_id=person.id if person else None,
                 request_type=payload.request_type,
                 item=payload.item,

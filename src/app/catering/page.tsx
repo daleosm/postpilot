@@ -15,12 +15,12 @@ export default async function CateringPage() {
 async function load() {
   const context = await getActiveOrganizationContext();
   const [resources, requests] = await Promise.all([
-    postpilotApiServerFetch<{ rooms: Array<{ id: string; name: string; type: string }>; bookings: Array<{ id: string; room_name: string }> }>("/catering/resources"),
+    postpilotApiServerFetch<{ rooms: Array<{ id: string; name: string; type: string }>; active_booking: { id: string; room_id: string; room_name: string } | null }>("/catering/resources"),
     postpilotApiServerFetch<Array<{ id: string; request_type: string; item: string; quantity: number; notes: string | null; requested_for: string | null; status: string; room_name: string | null }>>("/catering-requests"),
   ]);
   return {
     organizationName: context?.organization?.organizationName ?? "Post house",
-    resources: { rooms: resources.rooms, bookings: resources.bookings.map((booking) => ({ id: booking.id, roomName: booking.room_name })) },
+    resources: { rooms: resources.rooms, activeBooking: resources.active_booking ? { id: resources.active_booking.id, roomId: resources.active_booking.room_id, roomName: resources.active_booking.room_name } : null },
     requests: requests.map((request) => ({ id: request.id, requestType: request.request_type, item: request.item, quantity: request.quantity, notes: request.notes, requestedFor: request.requested_for ? new Date(request.requested_for) : null, status: request.status, roomName: request.room_name })),
   };
 }

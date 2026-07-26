@@ -27,7 +27,7 @@ test.beforeEach(async ({ context }) => {
 test.describe("Operational completion journeys", () => {
   test("sends a practical catering request with room, quantity, timing, and notes", async ({ page }) => {
     await page.goto("/catering");
-    const room = page.locator("label", { hasText: "Other room" }).locator("select");
+    const room = page.getByLabel("Room");
     await room.selectOption({ index: 1 });
     await page.getByLabel("Request type").selectOption("tea_coffee");
     await page.getByLabel("What would you like?").fill("Four oat flat whites");
