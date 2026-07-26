@@ -512,6 +512,33 @@ def test_creates_a_show_inside_the_active_tenant(production_lab: ProductionApiLa
     }
 
 
+def test_new_user_uses_the_password_selected_by_the_tenant_administrator(production_lab: ProductionApiLab) -> None:
+    production_lab.sign_in_as_manager()
+    email = f"password-user-{uuid4().hex[:12]}@postpilot.test"
+    password = "chosen-user-password"
+
+    response = production_lab.client.post(
+        "/v1/settings/users",
+        json={
+            "name": "Password User",
+            "email": email,
+            "password": password,
+            "person_role": "production_viewer",
+            "membership_role": "member",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    user_id = response.json()["id"]
+    production_lab.sign_out()
+    assert production_lab.client.post("/v1/auth/sign-in", json={"email": email, "password": password}).status_code == 200
+    production_lab.sign_out()
+    assert production_lab.client.post("/v1/auth/sign-in", json={"email": email, "password": "password"}).status_code == 401
+
+    production_lab.execute("DELETE FROM auth_login_attempts WHERE email = $1", email)
+    production_lab.execute("DELETE FROM users WHERE id = $1", user_id)
+
+
 def test_rejects_invalid_show_payload_before_writing(production_lab: ProductionApiLab) -> None:
     production_lab.sign_in_as_manager()
     initial_count = production_lab.fetchval(

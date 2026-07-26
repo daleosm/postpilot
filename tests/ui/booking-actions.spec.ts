@@ -112,6 +112,8 @@ test.describe("Booking creation and conflict UX", () => {
     await page.getByRole("button", { name: "Create", exact: true }).click();
     await page.getByLabel("Name").fill("UI Guest Reviewer");
     await page.getByLabel("Email").fill("ui.guest@example.test");
+    await page.locator('input[name="password"]').fill("guest-access-password");
+    await page.locator('input[name="confirmPassword"]').fill("guest-access-password");
     const requestBody = await captureJsonWrite(page, "**/v1/bookings/guest-accounts", {
       id: "a5000000-0000-4000-8000-000000000004",
       name: "UI Guest Reviewer",
@@ -121,7 +123,7 @@ test.describe("Booking creation and conflict UX", () => {
 
     await page.getByRole("button", { name: "Create guest" }).click();
 
-    await expect.poll(requestBody).toMatchObject({ name: "UI Guest Reviewer", email: "ui.guest@example.test" });
+    await expect.poll(requestBody).toMatchObject({ name: "UI Guest Reviewer", email: "ui.guest@example.test", password: "guest-access-password" });
     await expect(page.getByRole("dialog", { name: "Create guest account" })).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Search guest accounts" })).toHaveValue("UI Guest Reviewer");
   });

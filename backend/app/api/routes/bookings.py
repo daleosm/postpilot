@@ -1041,7 +1041,7 @@ async def create_booking_guest_account(
 
         await session.execute(
             insert(users).values(
-                id=user_id, name=payload.name, email=email, password_hash=hash_node_scrypt_password("password")
+                id=user_id, name=payload.name, email=email, password_hash=hash_node_scrypt_password(payload.password)
             )
         )
     await session.execute(

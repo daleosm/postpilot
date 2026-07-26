@@ -67,10 +67,12 @@ test.describe("Settings and CRM form feedback", () => {
 
     await page.getByLabel("Name").fill("UI Access Test");
     await page.getByLabel("Work email").fill("ui-access@example.test");
+    await page.locator('input[name="password"]').fill("ui-access-password");
+    await page.locator('input[name="confirmPassword"]').fill("ui-access-password");
     const requestBody = await captureJsonWrite(page, "**/v1/settings/users", { user_id: "f9000000-0000-4000-8000-000000000001" }, 201);
     await page.getByRole("button", { name: "Create user" }).click();
 
-    await expect.poll(requestBody).toMatchObject({ name: "UI Access Test", email: "ui-access@example.test" });
+    await expect.poll(requestBody).toMatchObject({ name: "UI Access Test", email: "ui-access@example.test", password: "ui-access-password" });
     await expect(page.getByRole("status")).toContainText("User access created");
   });
 });

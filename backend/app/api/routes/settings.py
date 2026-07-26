@@ -565,11 +565,12 @@ async def create_organization_user(
             detail="This work email is already linked to a different tenant account.",
         )
     if not user:
-        # New locally managed accounts use the documented demo credential until
-        # a password-reset flow is introduced. The hash is never returned.
+        # Passwords are set only while creating a global account. Adding an
+        # existing account to this tenant must not allow a tenant admin to
+        # overwrite that person's password or other tenant access.
         await session.execute(
             insert(users).values(
-                id=user_id, name=payload.name, email=email, password_hash=hash_node_scrypt_password("password")
+                id=user_id, name=payload.name, email=email, password_hash=hash_node_scrypt_password(payload.password)
             )
         )
     await session.execute(

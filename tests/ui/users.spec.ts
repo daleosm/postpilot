@@ -28,6 +28,8 @@ test.describe("User access UI", () => {
     await expect(page.getByRole("heading", { name: "Add user", exact: true })).toBeVisible();
     await page.getByLabel("Name").fill("User Access Lab");
     await page.getByLabel("Work email").fill(testEmail);
+    await page.locator('input[name="password"]').fill("user-access-password");
+    await page.locator('input[name="confirmPassword"]').fill("user-access-password");
     await page.getByLabel("Post-house role").selectOption("editor");
     await page.getByLabel("Account access").selectOption("member");
     await page.getByRole("button", { name: "Create user", exact: true }).click();

@@ -1066,6 +1066,7 @@ class RolePoliciesUpdateRequest(BaseModel):
 class OrganizationUserCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     email: PostPilotEmail
+    password: str = Field(min_length=8, max_length=1024)
     person_role: str = Field(pattern="^[a-z0-9_]+$")
     membership_role: str = Field(pattern="^(owner|admin|member|client)$")
 
@@ -1098,6 +1099,7 @@ class BookingGuestAccountRequest(BaseModel):
     episode_id: str
     name: str = Field(min_length=1, max_length=160)
     email: PostPilotEmail
+    password: str = Field(min_length=8, max_length=1024)
 
 
 class CopyEpisodeBookingsRequest(BaseModel):
