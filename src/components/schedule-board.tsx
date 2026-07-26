@@ -49,11 +49,12 @@ const HOURS_PER_DAY = MINUTES_IN_SUITE_DAY / 60;
 const ROOM_COLUMN_WIDTH = 168;
 const DAY_WIDTH = 260;
 
-export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, workOrders, initialDate, initialWorkOrderId, canManage, canSubmitOwnTime, currentPersonId }: { bookings: ScheduleBooking[]; rooms: Array<{ id: string; name: string; type: string }>; resources: BookingResources; cateringRequests: CateringRequest[]; workOrders: Array<SchedulableWorkOrder & { bookingId: string | null; workType: string; assigneePersonId: string | null; status: string }>; initialDate: string; initialWorkOrderId: string | null; canManage: boolean; canSubmitOwnTime: boolean; currentPersonId: string | null }) {
+export function ScheduleBoard({ bookings, rooms, resources, cateringRequests, workOrders, initialDate, initialWorkOrderId, initialBookingId, canManage, canSubmitOwnTime, currentPersonId }: { bookings: ScheduleBooking[]; rooms: Array<{ id: string; name: string; type: string }>; resources: BookingResources; cateringRequests: CateringRequest[]; workOrders: Array<SchedulableWorkOrder & { bookingId: string | null; workType: string; assigneePersonId: string | null; status: string }>; initialDate: string; initialWorkOrderId: string | null; initialBookingId: string | null; canManage: boolean; canSubmitOwnTime: boolean; currentPersonId: string | null }) {
+  const initialBooking = bookings.find((booking) => booking.id === initialBookingId) ?? null;
   const [view, setView] = useState<"day" | "week">("week");
   const [mode, setMode] = useState<"rooms" | "staff">("rooms");
-  const [cursor, setCursor] = useState(() => startOfDay(new Date(initialDate)));
-  const [selectedBooking, setSelectedBooking] = useState<ScheduleBooking | null>(null);
+  const [cursor, setCursor] = useState(() => startOfDay(initialBooking?.startsAt ?? new Date(initialDate)));
+  const [selectedBooking, setSelectedBooking] = useState<ScheduleBooking | null>(initialBooking);
   const [draggedWorkOrder, setDraggedWorkOrder] = useState<SchedulableWorkOrder | null>(null);
   const [pendingReservation, setPendingReservation] = useState<{ workOrder: SchedulableWorkOrder; roomId: string; startsAt: Date } | null>(null);
   const days = useMemo(() => Array.from({ length: view === "week" ? 7 : 1 }, (_, index) => addDays(cursor, index)), [cursor, view]);

@@ -7,14 +7,14 @@ import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 import { canManageBookings, canRecordBookingActuals, canViewAllOperations, roleHome } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 
-export default async function SchedulePage({ searchParams }: { searchParams: Promise<{ workOrder?: string }> }) {
+export default async function SchedulePage({ searchParams }: { searchParams: Promise<{ workOrder?: string; booking?: string }> }) {
   const [mayManage, maySubmitOwnTime, mayViewAll] = await Promise.all([canManageBookings(), canRecordBookingActuals(), canViewAllOperations()]);
   if (!mayManage && !maySubmitOwnTime && !mayViewAll) redirect(await roleHome());
   const context = await getActiveOrganizationContext();
   const data = await getScheduleData();
-  const { workOrder: requestedWorkOrderId } = await searchParams;
+  const { workOrder: requestedWorkOrderId, booking: requestedBookingId } = await searchParams;
   const initialStart = inputDate(new Date());
-  return <div className="pp-page"><PageHeader eyebrow={`Post floor calendar · ${data.organizationName}`} title="Bookings" description="Edit bays, colour, mix, QC, artist assignments, and episode-linked work." metrics={[{ label: "Bookings", value: data.bookings.length }, { label: "Rooms", value: data.resources.rooms.length }, { label: "Option holds", value: data.bookings.filter((booking) => booking.isOption).length, tone: "warning" }]} action={mayManage ? <div className="flex flex-wrap gap-2"><CopyEpisodeBookingsDialog resources={data.resources} initialStart={initialStart} /><BookingFormDialog resources={data.resources} initialStart={initialStart} /></div> : undefined} /><ScheduleBoard bookings={data.bookings} rooms={data.resources.rooms} resources={data.resources} cateringRequests={data.cateringRequests} workOrders={data.workOrders} initialDate={new Date().toISOString()} initialWorkOrderId={requestedWorkOrderId ?? null} canManage={mayManage} canSubmitOwnTime={maySubmitOwnTime} currentPersonId={context?.person?.id ?? null} /></div>;
+  return <div className="pp-page"><PageHeader eyebrow={`Post floor calendar · ${data.organizationName}`} title="Bookings" description="Edit bays, colour, mix, QC, artist assignments, and episode-linked work." metrics={[{ label: "Bookings", value: data.bookings.length }, { label: "Rooms", value: data.resources.rooms.length }, { label: "Option holds", value: data.bookings.filter((booking) => booking.isOption).length, tone: "warning" }]} action={mayManage ? <div className="flex flex-wrap gap-2"><CopyEpisodeBookingsDialog resources={data.resources} initialStart={initialStart} /><BookingFormDialog resources={data.resources} initialStart={initialStart} /></div> : undefined} /><ScheduleBoard bookings={data.bookings} rooms={data.resources.rooms} resources={data.resources} cateringRequests={data.cateringRequests} workOrders={data.workOrders} initialDate={new Date().toISOString()} initialWorkOrderId={requestedWorkOrderId ?? null} initialBookingId={requestedBookingId ?? null} canManage={mayManage} canSubmitOwnTime={maySubmitOwnTime} currentPersonId={context?.person?.id ?? null} /></div>;
 }
 
 async function getScheduleData() {

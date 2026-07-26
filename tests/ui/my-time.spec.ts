@@ -30,7 +30,7 @@ test.describe("My work time confirmation", () => {
     await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
   });
 
-  test("gives an artist time confirmation inside My work without the facility calendar", async ({ page }) => {
+  test("gives an artist booking and time controls inside My work", async ({ page }) => {
     const [editor] = await sql<{ id: string }[]>`
       select id from people
       where organization_id = ${COPPERLINE_ORGANIZATION_ID} and user_id = ${COPPERLINE_EDITOR_USER_ID}
@@ -57,10 +57,15 @@ test.describe("My work time confirmation", () => {
 
     await expect(page.getByRole("heading", { name: "My work", exact: true })).toBeVisible();
     await expect(page.getByText("The last 60 days and next 30 days. Submit actual time only for work assigned to you.")).toBeVisible();
-    await expect(page.getByRole("link", { name: "My work", exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Bookings", exact: true })).not.toBeVisible();
+    await expect(page.getByRole("link", { name: /^My work(?: \d+)?$/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Bookings", exact: true })).toBeVisible();
     const testBooking = page.getByRole("article").filter({ hasText: TEST_BOOKING_TITLE });
     await expect(testBooking).toBeVisible();
+    await testBooking.getByRole("button", { name: "Open booking", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/bookings\\?booking=${TEST_BOOKING_ID}`));
+    await expect(page.getByRole("button", { name: "Confirm actual time", exact: true })).toBeVisible();
+
+    await page.goto("/review");
     await testBooking.getByRole("button", { name: "Confirm actual time", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Confirm actual time", exact: true })).toBeVisible();
     await expect(page.getByLabel("Actual start")).toBeVisible();

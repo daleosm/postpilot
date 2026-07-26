@@ -1,7 +1,8 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { CheckCircle2, Clock3, Timer } from "lucide-react";
+import { CalendarDays, CheckCircle2, Clock3, Timer } from "lucide-react";
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { ActualTimeDialog } from "@/components/actual-time-dialog";
@@ -21,6 +22,7 @@ export type MyTimeBooking = {
 };
 
 export function MyTimeBoard({ bookings }: { bookings: MyTimeBooking[] }) {
+  const router = useRouter();
   const ready = bookings.filter((booking) => booking.timeStatus === "ready").length;
   const confirmed = bookings.filter((booking) => booking.timeStatus === "confirmed").length;
 
@@ -44,7 +46,17 @@ export function MyTimeBoard({ bookings }: { bookings: MyTimeBooking[] }) {
           <p className="mt-1 text-xs text-[#737c78]">{formatDateTime(booking.startsAt)}–{timeLabel(booking.endsAt)} · {booking.roomName ?? "No room"}</p>
           <p className="mt-1 text-xs text-[#858a87]">{booking.episodeProductionCode ?? "Unlinked work"}{booking.episodeTitle ? ` · ${booking.episodeTitle}` : ""}{booking.timeStatus === "confirmed" && booking.actualStartsAt ? ` · Actual ${formatDateTime(booking.actualStartsAt)}–${timeLabel(booking.actualEndsAt)}` : ""}</p>
         </div>
-        <div className="shrink-0">{booking.timeStatus === "ready" ? <ActualTimeDialog booking={booking} /> : <Button size="sm" variant="tertiary" isDisabled className="border border-[#dbe8de] bg-[#f0f7f1] text-[#4d8068]">Confirmed</Button>}</div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="tertiary"
+            onPress={() => router.push(`/bookings?booking=${encodeURIComponent(booking.id)}`)}
+            className="border border-[#dfe1dd] bg-white text-[#54605b]"
+          >
+            <CalendarDays size={15} /> Open booking
+          </Button>
+          {booking.timeStatus === "ready" ? <ActualTimeDialog booking={booking} /> : <Button size="sm" variant="tertiary" isDisabled className="border border-[#dbe8de] bg-[#f0f7f1] text-[#4d8068]">Confirmed</Button>}
+        </div>
       </article>)}</div> : <div className="px-5 py-14 text-center"><Clock3 className="mx-auto text-[#a0a6a1]" size={23} /><p className="mt-3 text-sm font-medium text-[#59615d]">No assigned bookings in this period</p><p className="mt-1 text-xs text-[#858a87]">When production assigns you to a booking, it will appear here for time confirmation.</p></div>}
     </section>
   </div>;
