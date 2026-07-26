@@ -19,6 +19,9 @@ from app.db.session import get_engine
 from app.security import hash_node_scrypt_password
 
 TENANT_IDS = tuple(f"10000000-0000-4000-8000-{index:012d}" for index in range(1, 6))
+DEMO_BOOKINGS_PER_TENANT = 12
+DEMO_WORK_ORDERS_PER_TENANT = 8
+DEMO_MANIFESTS_PER_TENANT = 6
 
 STAGES = (
     ("Post setup and delivery specifications", "post_setup_delivery_specifications", "#71869a", "post_supervisor"),
@@ -92,6 +95,43 @@ MASTER_RATES = (
     ("Colourist", "Colourist", "day", 820),
     ("Sound mixer", "Sound mixer", "day", 740),
     ("QC operator", "QC operator", "hour", 72),
+)
+
+# These people fill the specialist sign-off roles that each tenant's core
+# roster does not explicitly list.  Keep their display names human and short:
+# the debug switcher is a useful test tool, not a place to repeat a post-house
+# name in every user label.
+SUPPLEMENTAL_PEOPLE = (
+    {
+        "online_editor": "Robin Hale",
+        "vfx_supervisor": "Cameron Yu",
+        "supervising_sound_editor": "Drew Ellis",
+        "rerecording_mixer": "Toby King",
+    },
+    {
+        "online_editor": "Parker Shaw",
+        "vfx_supervisor": "Jordan Wells",
+        "supervising_sound_editor": "Sasha Reid",
+        "rerecording_mixer": "Morgan Price",
+    },
+    {
+        "online_editor": "Emery Nash",
+        "vfx_supervisor": "Rowan Blake",
+        "supervising_sound_editor": "Quinn Frost",
+        "rerecording_mixer": "Riley Moss",
+    },
+    {
+        "online_editor": "Hayden Brooks",
+        "vfx_supervisor": "Ari Sutton",
+        "supervising_sound_editor": "Taylor Finch",
+        "rerecording_mixer": "Jamie Cole",
+    },
+    {
+        "online_editor": "Skyler Dean",
+        "vfx_supervisor": "Frankie Lowe",
+        "supervising_sound_editor": "Alexis Hart",
+        "rerecording_mixer": "Casey North",
+    },
 )
 
 
@@ -284,7 +324,12 @@ async def seed() -> None:
 
     show_count = sum(len(tenant["shows"]) for tenant in TENANTS)
     episode_count = sum(len(show[3]) for tenant in TENANTS for show in tenant["shows"])
-    print(f"Seeded {len(TENANTS)} isolated PostPilot post houses with {show_count} shows and {episode_count} episodes.")
+    print(
+        f"Seeded {len(TENANTS)} isolated PostPilot post houses with {show_count} shows, {episode_count} episodes, "
+        f"{len(TENANTS) * DEMO_BOOKINGS_PER_TENANT} bookings, "
+        f"{len(TENANTS) * DEMO_WORK_ORDERS_PER_TENANT} work orders, and "
+        f"{len(TENANTS) * DEMO_MANIFESTS_PER_TENANT} delivery manifests."
+    )
 
 
 async def _seed_tenant(connection, number: int, organization_id: str, tenant: dict, password_hash: str) -> None:  # noqa: C901, PLR0915
@@ -328,14 +373,11 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
 
     people = list(tenant["people"])
     existing_roles = {person[2] for person in people}
-    for role, title in (
-        ("online_editor", "Online Editor"),
-        ("vfx_supervisor", "VFX Supervisor"),
-        ("supervising_sound_editor", "Supervising Sound Editor"),
-        ("rerecording_mixer", "Re-recording Mixer"),
-    ):
+    for role in ("online_editor", "vfx_supervisor", "supervising_sound_editor", "rerecording_mixer"):
         if role not in existing_roles:
-            people.append((f"{tenant['name']} {title}", f"{role}@{slug}.test", role, None, "member"))
+            name = SUPPLEMENTAL_PEOPLE[number - 1][role]
+            stable_user_id = f"user_{slug.replace('-', '_')}_{len(people) + 1}"
+            people.append((name, f"{role}@{slug}.test", role, stable_user_id, "member"))
     users = []
     for index, (name, email, _role, user_id, _member_role) in enumerate(people, start=1):
         resolved_user_id = user_id or f"user_{slug.replace('-', '_')}_{index}"
@@ -747,6 +789,31 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                 )
     await connection.execute(insert(t.episode_team_assignments).values(assignments))
     await connection.execute(insert(t.episode_workflow_signers).values(signer_rows))
+    approval_rows = []
+    stage_positions = {stage_id(position): position for position in range(1, len(STAGES) + 1)}
+    for episode in episode_rows:
+        if episode["workflow_status"] != "awaiting_sign_off":
+            continue
+        position = stage_positions[episode["workflow_stage_id"]]
+        approver_role = STAGES[position - 1][3]
+        person_position = role_indices.get(approver_role)
+        if not person_position:
+            continue
+        approval_rows.append(
+            {
+                "id": uid(number, "2d", len(approval_rows) + 1),
+                "organization_id": organization_id,
+                "episode_id": episode["id"],
+                "workflow_stage_id": episode["workflow_stage_id"],
+                "approval_rule_id": rule_id(position),
+                "approver_role": approver_role,
+                "required_person_id": person_id(person_position),
+                "status": "pending",
+                "submitted_at": now_at(-1, 15),
+            }
+        )
+    if approval_rows:
+        await connection.execute(insert(t.episode_workflow_approvals).values(approval_rows))
 
     await connection.execute(
         insert(t.rooms).values(
@@ -772,12 +839,52 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
             ]
         )
     )
+    # Keep a dense but realistic live calendar: confirmed rooms, concurrent
+    # pencil holds, a linked work-order reservation, and actuals/overtime.
+    # This makes the Gantt states useful immediately after a reset.
     booking_specs = (
-        (1, 1, "editor", 0, 1, "edit", "confirmed"),
-        (3, 4, "colorist", 1, 2, "color", "confirmed"),
-        (4, 7, "sound_mixer", 2, 3, "mix", "confirmed"),
-        (5, 4, "qc", 3, 3, "qc", "confirmed"),
-        (2, 8, "editor", 4, 4, "edit", "hold"),
+        (1, 1, "editor", 0, 9, 1, 18, "edit", "confirmed", False, None, None, None, None),
+        (3, 4, "colorist", 0, 10, 0, 16, "color", "confirmed", False, None, None, None, None),
+        (4, 7, "sound_mixer", 1, 9, 1, 18, "mix", "confirmed", False, None, None, None, None),
+        (5, 4, "qc", 2, 9, 2, 17, "qc", "confirmed", False, None, None, None, None),
+        (2, 8, "editor", 3, 10, 3, 16, "edit", "tentative", True, 1, "Client pencil hold", None, None),
+        (2, 8, "editor", 3, 10, 3, 16, "edit", "tentative", True, 2, "Second pencil hold", None, None),
+        (
+            1,
+            3,
+            "assistant_editor",
+            1,
+            13,
+            1,
+            16,
+            "edit",
+            "confirmed",
+            False,
+            None,
+            "Work order · editorial turnover prep",
+            None,
+            None,
+        ),
+        (3, 5, "colorist", -1, 9, -1, 18, "color", "confirmed", False, None, "Grade notes pass", -1, 19),
+        (1, 6, "editor", 2, 11, 2, 15, "client_review", "confirmed", False, None, "Client review session", None, None),
+        (4, 7, "sound_mixer", 4, 9, 4, 18, "mix", "confirmed", False, None, "Dialogue and stem review", None, None),
+        (5, 8, "qc", 5, 9, 5, 14, "qc", "confirmed", False, None, "Delivery preflight", None, None),
+        (
+            1,
+            1,
+            "assistant_editor",
+            6,
+            9,
+            6,
+            18,
+            "ingest",
+            "confirmed",
+            False,
+            None,
+            "Editorial turnover ingest",
+            None,
+            None,
+        ),
     )
     episode_codes = {episode["id"]: episode["production_code"] for episode in episode_rows}
     await connection.execute(
@@ -789,13 +896,16 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                     "room_id": room_id(room_position),
                     "episode_id": episode_id(episode_position),
                     "person_id": person_id(role_indices[role]),
-                    "title": f"{episode_codes[episode_id(episode_position)]} {booking_type} booking",
-                    "starts_at": now_at(start_day, 9),
-                    "ends_at": now_at(end_day, 18),
+                    "title": title or f"{episode_codes[episode_id(episode_position)]} {booking_type} booking",
+                    "starts_at": now_at(start_day, start_hour),
+                    "ends_at": now_at(end_day, end_hour),
                     "setup_minutes": 15,
                     "handover_minutes": 15,
-                    "approved_overtime_minutes": 0,
-                    "is_option": False,
+                    "actual_starts_at": now_at(actual_day, 9) if actual_day is not None else None,
+                    "actual_ends_at": now_at(actual_day, actual_end_hour) if actual_day is not None else None,
+                    "approved_overtime_minutes": 60 if actual_day is not None else 0,
+                    "is_option": is_option,
+                    "option_rank": option_rank,
                     "status": status,
                     "booking_type": booking_type,
                     "notes": "Live facility booking; external review links remain in notes.",
@@ -805,9 +915,16 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                     episode_position,
                     role,
                     start_day,
+                    start_hour,
                     end_day,
+                    end_hour,
                     booking_type,
                     status,
+                    is_option,
+                    option_rank,
+                    title,
+                    actual_day,
+                    actual_end_hour,
                 ) in enumerate(booking_specs, start=1)
             ]
         )
@@ -836,7 +953,10 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
         )
     )
 
-    manifest_episodes = episode_rows[:4]
+    # A spread of manifest states makes the delivery register useful for
+    # demos: preparing, in QC, failed QC, dispatched, receipt-confirmed, and
+    # rejected work all appear without relying on fictional media uploads.
+    manifest_episodes = [episode_rows[index] for index in (0, 1, 3, 5, 6, 7)]
     await connection.execute(
         insert(t.episode_delivery_manifests).values(
             [
@@ -855,8 +975,17 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
         )
     )
     delivery_rows = []
+    manifest_states = ("preparing", "ready_for_qc", "qc_failed", "dispatched", "receipt_confirmed", "rejected")
     for manifest_position, episode in enumerate(manifest_episodes, start=1):
-        delivered = episode["workflow_status"] == "complete"
+        manifest_status = manifest_states[manifest_position - 1]
+        externally_referenced = manifest_status in {"dispatched", "receipt_confirmed", "rejected"}
+        qc_result = (
+            "passed"
+            if manifest_status in {"dispatched", "receipt_confirmed"}
+            else "failed"
+            if manifest_status == "qc_failed"
+            else "not_started"
+        )
         for item_position, (component, label, required, qc_required) in enumerate(profile_items, start=1):
             delivery_rows.append(
                 {
@@ -877,21 +1006,24 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                     "recipient_email": f"delivery@{slug}.client.test",
                     "requires_external_recipient": True,
                     "qc_required": qc_required,
-                    "status": "receipt_confirmed" if delivered else "not_started",
+                    "status": manifest_status,
                     "due_date": (episode["delivery_deadline"] + timedelta(days=-5 + item_position)).date(),
                     "external_url": f"https://example.com/{slug}/delivery/{episode['production_code']}/{component}"
-                    if delivered
+                    if externally_referenced
                     else None,
-                    "external_reference": f"{episode['production_code']}-{component.upper()}" if delivered else None,
-                    "is_externally_shared": delivered,
-                    "submission_method": "Client delivery portal" if delivered else None,
-                    "qc_result": "passed"
-                    if delivered and qc_required
-                    else "not_required"
-                    if not qc_required
-                    else "not_started",
-                    "receipt_confirmed_at": now_at(-1, 16) if delivered else None,
-                    "receipt_confirmed_by": f"{network} Delivery Desk" if delivered else None,
+                    "external_reference": f"{episode['production_code']}-{component.upper()}"
+                    if externally_referenced
+                    else None,
+                    "is_externally_shared": externally_referenced,
+                    "submission_method": "Client delivery portal" if externally_referenced else None,
+                    "qc_result": qc_result if qc_required else "not_required",
+                    "receipt_confirmed_at": now_at(-1, 16) if manifest_status == "receipt_confirmed" else None,
+                    "receipt_confirmed_by": f"{network} Delivery Desk"
+                    if manifest_status == "receipt_confirmed"
+                    else None,
+                    "rejection_reason": "Recipient requested a corrected captions package."
+                    if manifest_status == "rejected"
+                    else None,
                     "position": item_position,
                 }
             )
@@ -969,6 +1101,132 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                         "estimated_amount": None,
                         "currency": currency,
                         "external_url": None,
+                        "due_at": now_at(-1, 15),
+                    },
+                    {
+                        "id": uid(number, "38", 3),
+                        "organization_id": organization_id,
+                        "episode_id": episode_id(3),
+                        "workflow_stage_id": stage_id(4),
+                        "work_type": "internal",
+                        "kind": "work_order",
+                        "title": "Prepare editorial turnover notes",
+                        "description": (
+                            "Consolidate bins, cue sheets, and editorial handover notes before the next review."
+                        ),
+                        "department": "Editorial",
+                        "assignee_person_id": person_id(role_indices["assistant_editor"]),
+                        "assignee_role": "assistant_editor",
+                        "priority": "normal",
+                        "is_blocking": False,
+                        "status": "in_progress",
+                        "billing_scope": "included",
+                        "billing_status": "not_billable",
+                        "currency": currency,
+                        "due_at": now_at(1, 16),
+                    },
+                    {
+                        "id": uid(number, "38", 4),
+                        "organization_id": organization_id,
+                        "episode_id": episode_id(5),
+                        "workflow_stage_id": stage_id(13),
+                        "booking_id": booking_id(8),
+                        "work_type": "internal",
+                        "kind": "work_order",
+                        "title": "Apply colour pass notes",
+                        "description": "Apply approved grade notes and confirm the updated pass with editorial.",
+                        "department": "Colour",
+                        "assignee_person_id": person_id(role_indices["colorist"]),
+                        "assignee_role": "colorist",
+                        "priority": "high",
+                        "is_blocking": False,
+                        "status": "in_progress",
+                        "billing_scope": "included",
+                        "billing_status": "not_billable",
+                        "actual_amount": Decimal("246") * multiplier,
+                        "currency": currency,
+                        "due_at": now_at(0, 17),
+                    },
+                    {
+                        "id": uid(number, "38", 5),
+                        "organization_id": organization_id,
+                        "episode_id": episode_id(7),
+                        "workflow_stage_id": stage_id(7),
+                        "work_type": "internal",
+                        "kind": "work_order",
+                        "title": "Prepare mix review reference",
+                        "description": "Check the mix reference and prepare a review link for the producer.",
+                        "department": "Sound",
+                        "assignee_person_id": person_id(role_indices["sound_mixer"]),
+                        "assignee_role": "sound_mixer",
+                        "priority": "normal",
+                        "is_blocking": False,
+                        "status": "in_progress",
+                        "billing_scope": "included",
+                        "billing_status": "not_billable",
+                        "currency": currency,
+                        "due_at": now_at(2, 12),
+                    },
+                    {
+                        "id": uid(number, "38", 6),
+                        "organization_id": organization_id,
+                        "episode_id": episode_id(7),
+                        "workflow_stage_id": stage_id(7),
+                        "work_type": "internal",
+                        "kind": "work_order",
+                        "title": "Resolve outstanding client note",
+                        "description": "Assign an owner and resolve the remaining client note before sign-off.",
+                        "department": "Production",
+                        "priority": "blocker",
+                        "is_blocking": True,
+                        "status": "open",
+                        "billing_scope": "included",
+                        "billing_status": "not_billable",
+                        "currency": currency,
+                        "due_at": now_at(-1, 12),
+                    },
+                    {
+                        "id": uid(number, "38", 7),
+                        "organization_id": organization_id,
+                        "episode_id": episode_id(1),
+                        "workflow_stage_id": stage_id(4),
+                        "work_type": "internal",
+                        "kind": "work_order",
+                        "title": "Client change — lower-third revision",
+                        "description": "Approved editorial change for a revised lower-third and legal line.",
+                        "department": "Editorial",
+                        "assignee_person_id": person_id(role_indices["editor"]),
+                        "assignee_role": "editor",
+                        "priority": "high",
+                        "is_blocking": False,
+                        "status": "ready_for_review",
+                        "billing_scope": "billable_change",
+                        "billing_status": "draft",
+                        "client_quote_amount": Decimal("850") * multiplier,
+                        "client_quote_currency": currency,
+                        "currency": currency,
+                        "billing_notes": "Approved change to be billed against the active client PO.",
+                        "due_at": now_at(4, 12),
+                    },
+                    {
+                        "id": uid(number, "38", 8),
+                        "organization_id": organization_id,
+                        "episode_id": episode_id(2),
+                        "workflow_stage_id": stage_id(4),
+                        "work_type": "internal",
+                        "kind": "work_order",
+                        "title": "Archive prior editorial exports",
+                        "department": "Editorial",
+                        "assignee_person_id": person_id(role_indices["assistant_editor"]),
+                        "assignee_role": "assistant_editor",
+                        "priority": "low",
+                        "is_blocking": False,
+                        "status": "complete",
+                        "billing_scope": "included",
+                        "billing_status": "not_billable",
+                        "currency": currency,
+                        "completed_by_person_id": person_id(role_indices["assistant_editor"]),
+                        "completed_at": now_at(-2, 17),
                     },
                 ]
             )
@@ -1194,6 +1452,11 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
             external_document_url=f"https://example.com/client-purchase-orders/{slug}-001",
             created_by_user_id=users[1]["id"],
         )
+    )
+    await connection.execute(
+        update(t.post_work_orders)
+        .where(t.post_work_orders.c.id == uid(number, "38", 7))
+        .values(client_purchase_order_id=client_po_id)
     )
     await connection.execute(
         insert(t.billables).values(

@@ -184,6 +184,33 @@ def test_dashboard_work_order_attention_is_an_exception_queue(client: TestClient
         assert due_soon_or_overdue or unassigned or blocks_pending_sign_off
 
 
+def test_demo_calendar_and_work_orders_exercise_current_operational_states(client: TestClient) -> None:
+    sign_in_as_maya(client)
+
+    bookings = client.get("/v1/bookings")
+    work_orders = client.get("/v1/work-orders")
+    debug_users = client.get("/v1/debug/users")
+
+    assert bookings.status_code == work_orders.status_code == debug_users.status_code == 200
+    booking_rows = bookings.json()["bookings"]
+    work_order_rows = work_orders.json()["work_orders"]
+
+    assert len(booking_rows) >= 12
+    assert any(item["is_option"] and item["option_rank"] == 1 for item in booking_rows)
+    assert any(item["is_option"] and item["option_rank"] == 2 for item in booking_rows)
+    assert any(item["work_order_id"] for item in booking_rows)
+    assert any(item["actual_starts_at"] and item["approved_overtime_minutes"] for item in booking_rows)
+    assert {"open", "in_progress", "ready_for_review", "complete"} <= {item["status"] for item in work_order_rows}
+    assert any(
+        item["work_type"] == "internal" and item["status"] == "in_progress" and not item["booking_id"]
+        for item in work_order_rows
+    )
+    assert all(
+        not user["name"].startswith(("Northstar Post ", "Riverside Post ", "Horizon Finish "))
+        for user in debug_users.json()
+    )
+
+
 def test_show_workspace_contains_only_the_authorized_show_read_model(client: TestClient) -> None:
     sign_in_as_maya(client)
     show_id = client.get("/v1/shows").json()["shows"][0]["id"]
