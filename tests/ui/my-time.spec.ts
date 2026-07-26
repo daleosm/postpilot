@@ -22,8 +22,15 @@ test.afterAll(async () => {
   await sql.end();
 });
 
-test.describe("My time UI", () => {
-  test("gives an artist a personal time-confirmation workspace without the facility calendar", async ({ page }) => {
+test.describe("My work time confirmation", () => {
+  test("does not retain the retired My time route", async ({ page }) => {
+    const response = await page.goto("/my-time");
+
+    expect(response?.status()).toBe(404);
+    await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+  });
+
+  test("gives an artist time confirmation inside My work without the facility calendar", async ({ page }) => {
     const [editor] = await sql<{ id: string }[]>`
       select id from people
       where organization_id = ${COPPERLINE_ORGANIZATION_ID} and user_id = ${COPPERLINE_EDITOR_USER_ID}
@@ -46,11 +53,11 @@ test.describe("My time UI", () => {
       )
     `;
 
-    await page.goto("/my-time");
+    await page.goto("/review");
 
-    await expect(page.getByRole("heading", { name: "My time", exact: true })).toBeVisible();
-    await expect(page.getByText("Confirm the actual time you worked.")).toBeVisible();
-    await expect(page.getByRole("link", { name: "My time", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "My work", exact: true })).toBeVisible();
+    await expect(page.getByText("The last 60 days and next 30 days. Submit actual time only for work assigned to you.")).toBeVisible();
+    await expect(page.getByRole("link", { name: "My work", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Bookings", exact: true })).not.toBeVisible();
     const testBooking = page.getByRole("article").filter({ hasText: TEST_BOOKING_TITLE });
     await expect(testBooking).toBeVisible();

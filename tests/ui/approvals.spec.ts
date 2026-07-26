@@ -12,11 +12,11 @@ async function openReview(page: Page) {
   await page.waitForTimeout(400);
 }
 
-test.describe("Approvals UI", () => {
+test.describe("My work UI", () => {
   test("shows the signer-specific workflow approval inbox", async ({ page }) => {
     await openReview(page);
 
-    await expect(page.getByRole("heading", { name: "Approvals" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "My work" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Awaiting my sign-off" })).toBeVisible();
     await expect(page.getByText("Current workflow stages where you are the named sign-off person.")).toBeVisible();
   });
@@ -24,7 +24,7 @@ test.describe("Approvals UI", () => {
   test("explains the workflow and assigned-work approval inbox", async ({ page }) => {
     await openReview(page);
 
-    await expect(page.getByText("Workflow gates awaiting sign-off and practical post work assigned to you.")).toBeVisible();
+    await expect(page.getByText("Your workflow sign-offs, assigned post work, and booked time to confirm.")).toBeVisible();
     await expect(page.getByRole("heading", { name: "My assigned work" })).toBeVisible();
   });
 

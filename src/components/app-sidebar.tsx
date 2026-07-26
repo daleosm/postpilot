@@ -2,7 +2,6 @@ import Link from "next/link";
 import {
   Building2,
   CalendarRange,
-  Clock3,
   Coffee,
   Clapperboard,
   DollarSign,
@@ -15,14 +14,13 @@ import {
 
 import { LogoutButton } from "@/components/logout-button";
 import { getActiveOrganizationContext } from "@/lib/organizations";
-import { can, getCurrentPerson } from "@/lib/permissions";
+import { can, canRecordBookingActuals, getCurrentPerson } from "@/lib/permissions";
 import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 
 const navigation = [
   { label: "Dashboard", icon: House, href: "/" },
   { label: "Shows", icon: Clapperboard, href: "/shows", permissions: ["manage_shows", "view_all_operations"] },
   { label: "Bookings", icon: CalendarRange, href: "/bookings", permissions: ["manage_bookings", "view_all_operations"] },
-  { label: "My time", icon: Clock3, href: "/my-time", permissions: ["update_assigned_work"] },
   { label: "Catering", icon: Coffee, href: "/catering", permissions: ["request_catering"] },
   { label: "Runner desk", icon: Coffee, href: "/runner", permissions: ["manage_catering"] },
   { label: "Budget", icon: DollarSign, href: "/budget", permissions: ["manage_budget"] },
@@ -32,12 +30,13 @@ const navigation = [
 ];
 
 export async function AppSidebar() {
-  const [person, context, mayManageUsers, mayManageWorkflowConfiguration, mayManageDeliveryProfiles, permitted] = await Promise.all([
+  const [person, context, mayManageUsers, mayManageWorkflowConfiguration, mayManageDeliveryProfiles, mayRecordActuals, permitted] = await Promise.all([
     getCurrentPerson(),
     getActiveOrganizationContext(),
     can("manage_users"),
     can("manage_workflow_configuration"),
     can("manage_delivery_profiles"),
+    canRecordBookingActuals(),
     Promise.all(
       navigation.map(async (item) =>
         !item.permissions || (await Promise.all(item.permissions.map((permission) => can(permission)))).some(Boolean)
@@ -50,7 +49,10 @@ export async function AppSidebar() {
     ? loadFastApprovalSummary()
     : Promise.resolve([0, false] as [number, boolean]));
   const visible = permitted.filter((item): item is NonNullable<typeof item> => Boolean(item));
-  if (hasApprovalAccess) visible.push({ label: "Approvals", icon: FileCheck2, href: "/review" });
+  if (hasApprovalAccess || mayRecordActuals) {
+    const bookingsIndex = visible.findIndex((item) => item.label === "Bookings");
+    visible.splice(bookingsIndex >= 0 ? bookingsIndex + 1 : 0, 0, { label: "My work", icon: FileCheck2, href: "/review" });
+  }
   const settingsHref = mayManageWorkflowConfiguration
     ? "/settings/workflow"
     : mayManageUsers
@@ -68,7 +70,7 @@ export async function AppSidebar() {
           <Link key={label} href={href} className="group flex h-9 items-center gap-3 rounded-lg px-3 text-[13px] transition">
             <Icon size={16} strokeWidth={1.75} />
             <span className="flex-1">{label}</span>
-            {label === "Approvals" && pending > 0 && <span className="rounded-full bg-[#e8d7c8] px-1.5 py-0.5 text-[10px] font-semibold text-[#714222]">{pending}</span>}
+            {label === "My work" && pending > 0 && <span className="rounded-full bg-[#e8d7c8] px-1.5 py-0.5 text-[10px] font-semibold text-[#714222]">{pending}</span>}
           </Link>
         ))}
       </nav>

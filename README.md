@@ -27,7 +27,7 @@ Self-hosting still needs backups, monitoring, secure credentials, tested upgrade
 | Multi-tenant operations | Isolated post-house workspaces, membership-aware context switching, server-side tenant scoping, and debug-only context testing |
 | Workflow and approvals | One configurable ordered workflow per facility, named episode signers, capability-based access, and practical QC/delivery gates |
 | Bookings | Room and person bookings, conflict warnings, buffers, option holds, guest attendance, copied sequences, and Gantt scheduling |
-| My time and work orders | Assigned work, actual time/overtime, internal or vendor work, billing status, and drag-to-book reservations |
+| My work and work orders | Workflow sign-offs, assigned work, actual time/overtime, internal or vendor work, billing status, and drag-to-book reservations |
 | QC and delivery | QC reports/issues, corrections, delivery profiles/manifests, external references, dispatch, and receipt tracking |
 | Budget and rates | Master, network, show, and episode rate cards; booking-derived costs; actuals; budgets; and invoice readiness |
 | CRM and procurement | Client, network, production-company, and vendor accounts; contacts; vendor/client POs; allocations; and supplier actuals |

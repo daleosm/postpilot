@@ -44,9 +44,9 @@ Practical gates remain visible as simple blockers:
 
 Use shows for the programme-level view: seasons, episode health, delivery contacts, current work, workflow settings, and activity. Use the episode workspace to run the actual post process, maintain its team, and work through the episode tabs.
 
-### Approvals
+### My work
 
-Approvals shows only the workflow work awaiting a selected episode signer. A user must have the sign-off capability and be the named signer for that episode and stage. This keeps stage sign-off tied to accountable people rather than a broad job title alone.
+My work combines workflow work awaiting a selected episode signer, assigned work orders, and an artist's booked time awaiting confirmation. A user must have the sign-off capability and be the named signer for that episode and stage. This keeps stage sign-off tied to accountable people rather than a broad job title alone.
 
 ### Bookings and my time
 

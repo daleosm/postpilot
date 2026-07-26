@@ -13,7 +13,7 @@ test.describe("Workspace access and responsive UI", () => {
     await signInAs(context, "user_maya");
     await page.goto("/");
 
-    for (const item of ["Dashboard", "Shows", "Bookings", "My time", "Catering", "Runner desk", "Budget", "Deliveries", "Clients & vendors", "Team", "Approvals"]) {
+    for (const item of ["Dashboard", "Shows", "Bookings", "Catering", "Runner desk", "Budget", "Deliveries", "Clients & vendors", "Team", "My work"]) {
       await expect(page.getByRole("navigation").getByRole("link", { name: item, exact: true })).toBeVisible();
     }
     await expect(page.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
@@ -24,7 +24,7 @@ test.describe("Workspace access and responsive UI", () => {
     await page.goto("/");
 
     await expect(page.getByRole("link", { name: "Episodes", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "My time", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "My work", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Budget", exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Clients & vendors", exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Runner desk", exact: true })).toHaveCount(0);

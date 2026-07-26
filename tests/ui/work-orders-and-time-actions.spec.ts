@@ -139,7 +139,7 @@ test.describe("Work-order reservation and time confirmation UI", () => {
         now() - interval '3 hours', now() - interval '2 hours', 'confirmed', 'edit'
       )
     `;
-    await page.goto("/my-time");
+    await page.goto("/review");
     const row = page.getByRole("article").filter({ hasText: TEST_BOOKING_TITLE });
     await row.getByRole("button", { name: "Confirm actual time" }).click();
     await page.getByLabel("Overtime minutes").fill("45");

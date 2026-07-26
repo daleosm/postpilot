@@ -109,6 +109,6 @@ test.describe("Debug context, error and responsive safeguards", () => {
     await page.goto("/assets");
 
     await expect(page).toHaveURL(/\/review$/);
-    await expect(page.getByRole("heading", { name: "Approvals" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "My work" })).toBeVisible();
   });
 });

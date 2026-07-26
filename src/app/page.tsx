@@ -179,14 +179,14 @@ export default async function DashboardPage() {
       <section className="dashboard-signal-strip grid grid-cols-2 gap-x-3 gap-y-2 xl:grid-cols-5">
         <Metric href="/shows" label="Active shows" value={String(activeShows.length)} detail={`${showRows.length} total shows`} icon={<Film size={15} />} />
         <Metric href="/shows" label="Episodes due" value={String(dueThisWeek.length)} detail="Next 7 days" icon={<Clock3 size={15} />} alert={dueThisWeek.length > 0} />
-        <Metric href="/review" label="Locks awaiting approval" value={String(lockedCuts.length)} detail="Picture lock stage" icon={<CheckCircle2 size={15} />} />
+        <Metric href="/review" label="Locks awaiting sign-off" value={String(lockedCuts.length)} detail="Picture lock stage" icon={<CheckCircle2 size={15} />} />
         <Metric href="/shows" label="QC failures" value={String(qcFailures.length)} detail="Need attention" icon={<CircleAlert size={15} />} alert={qcFailures.length > 0} />
         <Metric href="/budget" label="Budget burn" value={budgetBurn === null ? "—" : `${budgetBurn}%`} detail={budget ? `${formatMoney(budget.totals.actual, currency)} actual` : "Restricted"} icon={<DollarSign size={15} />} alert={budgetBurn !== null && budgetBurn > 90} />
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(330px,0.8fr)]">
         <div className="panel dashboard-timeline overflow-hidden">
-          <SectionHeading title="Operational timeline" detail="What needs movement across the post floor" action="Open approvals" href="/review" />
+          <SectionHeading title="Operational timeline" detail="What needs movement across the post floor" action="Open my work" href="/review" />
           <div className="dashboard-timeline__list">
             {operationalTimeline.map((item) => <TimelineItem key={item.id} item={item} />)}
             {!operationalTimeline.length && <EmptyRow label="The post floor is clear for now. New operational events will appear here." />}

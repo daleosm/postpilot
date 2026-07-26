@@ -8,7 +8,7 @@ tenancy, security, lifecycle, and migration contracts live in the FastAPI
 
 | Folder | Purpose | Current coverage |
 | --- | --- | --- |
-| `ui/` | Screen-level user journeys: visible controls, filtering, validation, navigation, responsive layouts, and role-specific workspace access. | Chromium journeys across show and episode workspaces, Bookings, workflow actions, Work orders, actual time, Deliveries, commercial registers, CRM, Settings, Approvals, and recovery states. |
+| `ui/` | Screen-level user journeys: visible controls, filtering, validation, navigation, responsive layouts, and role-specific workspace access. | Chromium journeys across show and episode workspaces, Bookings, workflow actions, My work, actual time, Deliveries, commercial registers, CRM, Settings, and recovery states. |
 | `integration/auth-credentials.spec.ts` | Isolated real sign-in/sign-out and protected-route browser journey. | FastAPI opaque-session behaviour through the UI. |
 | `fixtures/` | Shared test helpers only; these are not test specs. | Debug user and active-tenant session helper. |
 
@@ -56,7 +56,7 @@ tests:
 | Shows | `ui/shows`, `ui/shows-detail` | FastAPI show/resource tests | FastAPI show, CRM, and tenant-scope tests |
 | Episode workspaces | `ui/shows-detail`, `ui/workflow-actions` | FastAPI episode/team access tests | FastAPI workflow, QC, and delivery tests |
 | Bookings | `ui/bookings`, `ui/my-time` | FastAPI booking-scope tests | FastAPI lifecycle, conflicts, actuals, and work-order tests |
-| Approvals | `ui/approvals`, `ui/workflow-actions` | FastAPI actor/signer tests | FastAPI workflow-state tests |
+| My work | `ui/approvals`, `ui/workflow-actions` | FastAPI actor/signer tests | FastAPI workflow-state tests |
 | Budget and POs | `ui/commercial-workflows`, `ui/delivery-and-commercial-actions` | FastAPI commercial-scope tests | FastAPI budget, rate-card, PO, and billing tests |
 | Work orders & actual time | `ui/work-orders-and-time-actions`, `ui/my-time` | FastAPI work-order and time-scope tests | FastAPI lifecycle, approval, billing, and actual-cost tests |
 | CRM & organisation settings | `ui/commercial-workflows`, `ui/settings-context-and-resilience`, `ui/workflow-settings`, `ui/users` | FastAPI membership and CRM-scope tests | FastAPI capability, validation, and authentication tests |

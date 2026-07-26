@@ -133,7 +133,7 @@ test.describe("Approval action feedback", () => {
       sign_offs: [expect.objectContaining({ episode_id: EPISODE_CLIENT_SIGN_OFF, approval_rule_id: rule.id })],
     });
     await page.goto("/review");
-    await expect(page.getByRole("heading", { name: "Approvals" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "My work" })).toBeVisible();
     const requestBody = await captureJsonWrite(page, /\/v1\/episodes\/[^/]+$/, { stage_complete: true });
 
     await page.getByRole("button", { name: "Sign off" }).first().click();
