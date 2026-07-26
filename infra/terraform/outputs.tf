@@ -68,3 +68,8 @@ output "observability_sns_topic_arn" {
   value       = aws_sns_topic.postpilot_observability.arn
   description = "SNS topic used by optional PostPilot observability alarm subscriptions."
 }
+
+output "karpenter_interruption_queue_url" {
+  value       = aws_sqs_queue.karpenter_interruption.url
+  description = "SQS queue Karpenter monitors for Spot and EC2 interruption events."
+}

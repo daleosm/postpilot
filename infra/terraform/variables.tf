@@ -87,6 +87,36 @@ variable "argocd_chart_version" {
   default     = "10.1.3"
 }
 
+variable "metrics_server_chart_version" {
+  description = "Pinned official Metrics Server Helm chart version. Metrics Server supplies the resource metrics used by HorizontalPodAutoscalers and kubectl top."
+  type        = string
+  default     = "3.13.1"
+}
+
+variable "karpenter_chart_version" {
+  description = "Pinned Karpenter Helm chart version. Upgrade deliberately after reviewing Karpenter's EKS and Kubernetes compatibility guidance."
+  type        = string
+  default     = "1.14.0"
+}
+
+variable "karpenter_instance_types" {
+  description = "Small x86 Spot instance types Karpenter may launch for unschedulable PostPilot Pods."
+  type        = list(string)
+  default     = ["t3.small", "t3a.small"]
+}
+
+variable "karpenter_max_cpu" {
+  description = "Maximum aggregate vCPU capacity Karpenter may provision. The fixed managed node group remains outside this cap."
+  type        = number
+  default     = 4
+}
+
+variable "karpenter_max_memory" {
+  description = "Maximum aggregate memory capacity Karpenter may provision, expressed in Kubernetes quantity syntax."
+  type        = string
+  default     = "8Gi"
+}
+
 variable "application_log_retention_days" {
   description = "How long to retain EKS application logs in CloudWatch Logs. Thirty days is the low-cost production baseline."
   type        = number

@@ -96,6 +96,44 @@ resource "aws_eks_addon" "pod_identity_agent" {
   depends_on = [aws_eks_node_group.spot]
 }
 
+# Metrics Server is the Kubernetes resource-metrics API used by the two HPAs
+# in deploy/kubernetes/base and by kubectl top. It is intentionally separate
+# from CloudWatch observability, which is not an autoscaling metrics source.
+resource "helm_release" "metrics_server" {
+  name             = "metrics-server"
+  namespace        = "kube-system"
+  repository       = "https://kubernetes-sigs.github.io/metrics-server/"
+  chart            = "metrics-server"
+  version          = var.metrics_server_chart_version
+  create_namespace = false
+  wait             = true
+  timeout          = 600
+  atomic           = true
+  cleanup_on_fail  = true
+
+  values = [yamlencode({
+    # EKS has two baseline nodes, so two replicas keep the metrics API
+    # available while a node is replaced. The chart maintains its own PDB.
+    replicas = 2
+    podDisruptionBudget = {
+      enabled      = true
+      minAvailable = 1
+    }
+    resources = {
+      requests = {
+        cpu    = "25m"
+        memory = "64Mi"
+      }
+      limits = {
+        cpu    = "100m"
+        memory = "128Mi"
+      }
+    }
+  })]
+
+  depends_on = [aws_eks_node_group.spot]
+}
+
 # The AWS Load Balancer Controller creates and reconciles the application ALB
 # from Kubernetes Ingress objects. Keep its AWS permissions separate from the
 # node role, then bind them only to its kube-system service account through

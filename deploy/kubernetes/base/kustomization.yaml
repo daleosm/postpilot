@@ -9,6 +9,8 @@ resources:
   - api-migration-job.yaml
   - deployment.yaml
   - api-deployment.yaml
+  - hpa.yaml
+  - api-hpa.yaml
   - api-pod-disruption-budget.yaml
   - pod-disruption-budget.yaml
   - service.yaml

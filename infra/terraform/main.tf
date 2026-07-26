@@ -205,6 +205,10 @@ resource "aws_subnet" "private" {
     Name                                  = "${local.name}-private-${count.index + 1}"
     "kubernetes.io/role/internal-elb"     = "1"
     "kubernetes.io/cluster/${local.name}" = "shared"
+    # Karpenter discovers only these private node subnets. Database and public
+    # ALB subnets are deliberately not selectable by dynamically provisioned
+    # workers.
+    "karpenter.sh/discovery" = local.name
   }
 }
 
@@ -302,6 +306,15 @@ resource "aws_eks_cluster" "this" {
   }
 
   depends_on = [aws_iam_role_policy_attachment.cluster]
+}
+
+# Karpenter selects the EKS-created cluster security group through this tag.
+# Keeping the tag as a separate resource avoids taking ownership of EKS's
+# managed security-group configuration.
+resource "aws_ec2_tag" "karpenter_cluster_security_group" {
+  resource_id = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+  key         = "karpenter.sh/discovery"
+  value       = local.name
 }
 
 data "aws_iam_policy_document" "node_assume_role" {
