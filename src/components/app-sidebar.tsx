@@ -8,7 +8,6 @@ import {
   DollarSign,
   FileCheck2,
   House,
-  Layers3,
   Settings,
   Truck,
   UsersRound,
@@ -22,7 +21,6 @@ import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 const navigation = [
   { label: "Dashboard", icon: House, href: "/" },
   { label: "Shows", icon: Clapperboard, href: "/shows", permissions: ["manage_shows", "view_all_operations"] },
-  { label: "Episodes", icon: Layers3, href: "/episodes", permissions: ["manage_shows", "view_assigned", "view_all_operations"] },
   { label: "Bookings", icon: CalendarRange, href: "/bookings", permissions: ["manage_bookings", "view_all_operations"] },
   { label: "My time", icon: Clock3, href: "/my-time", permissions: ["update_assigned_work"] },
   { label: "Catering", icon: Coffee, href: "/catering", permissions: ["request_catering"] },

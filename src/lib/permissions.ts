@@ -103,5 +103,5 @@ export async function roleHome() {
   if (await can("view_all_operations")) return "/";
   if (await can("manage_catering")) return "/runner";
   if (await can("manage_budget")) return "/budget";
-  return "/episodes";
+  return "/";
 }

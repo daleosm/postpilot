@@ -13,7 +13,6 @@
     "test:auth": "playwright test --config playwright.auth.config.ts",
     "test:backend": "cd backend && pytest",
     "test:shows": "playwright test tests/ui/shows.spec.ts tests/ui/shows-detail.spec.ts",
-    "test:episodes": "playwright test tests/ui/episodes.spec.ts",
     "test:bookings": "playwright test tests/ui/bookings.spec.ts tests/ui/my-time.spec.ts",
     "test:approvals": "playwright test tests/ui/approvals.spec.ts",
     "test:deliveries": "playwright test tests/ui/deliveries.spec.ts tests/ui/delivery-profiles.spec.ts",

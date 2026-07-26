@@ -120,7 +120,7 @@ export default async function DashboardPage() {
     );
   }
   if (organizationContext?.organization?.role === "client") {
-    if (organizationContext.person) redirect("/episodes");
+    if (organizationContext.person) redirect("/review");
     return <div className="panel mx-auto mt-20 max-w-lg p-8 text-center"><h1 className="text-xl font-semibold tracking-[-0.03em]">No episodes shared</h1><p className="mt-2 text-sm leading-6 text-[#737776]">Ask the post-production team to add you to an episode before you can view its workspace.</p></div>;
   }
   if (!mayManageShows && mayManageCatering) redirect("/runner");
@@ -178,9 +178,9 @@ export default async function DashboardPage() {
 
       <section className="dashboard-signal-strip grid grid-cols-2 gap-x-3 gap-y-2 xl:grid-cols-5">
         <Metric href="/shows" label="Active shows" value={String(activeShows.length)} detail={`${showRows.length} total shows`} icon={<Film size={15} />} />
-        <Metric href="/episodes" label="Episodes due" value={String(dueThisWeek.length)} detail="Next 7 days" icon={<Clock3 size={15} />} alert={dueThisWeek.length > 0} />
+        <Metric href="/shows" label="Episodes due" value={String(dueThisWeek.length)} detail="Next 7 days" icon={<Clock3 size={15} />} alert={dueThisWeek.length > 0} />
         <Metric href="/review" label="Locks awaiting approval" value={String(lockedCuts.length)} detail="Picture lock stage" icon={<CheckCircle2 size={15} />} />
-        <Metric href="/episodes" label="QC failures" value={String(qcFailures.length)} detail="Need attention" icon={<CircleAlert size={15} />} alert={qcFailures.length > 0} />
+        <Metric href="/shows" label="QC failures" value={String(qcFailures.length)} detail="Need attention" icon={<CircleAlert size={15} />} alert={qcFailures.length > 0} />
         <Metric href="/budget" label="Budget burn" value={budgetBurn === null ? "—" : `${budgetBurn}%`} detail={budget ? `${formatMoney(budget.totals.actual, currency)} actual` : "Restricted"} icon={<DollarSign size={15} />} alert={budgetBurn !== null && budgetBurn > 90} />
       </section>
 

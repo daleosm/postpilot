@@ -13,7 +13,7 @@ test.describe("Workspace access and responsive UI", () => {
     await signInAs(context, "user_maya");
     await page.goto("/");
 
-    for (const item of ["Dashboard", "Shows", "Episodes", "Bookings", "My time", "Catering", "Runner desk", "Budget", "Deliveries", "Clients & vendors", "Team", "Approvals"]) {
+    for (const item of ["Dashboard", "Shows", "Bookings", "My time", "Catering", "Runner desk", "Budget", "Deliveries", "Clients & vendors", "Team", "Approvals"]) {
       await expect(page.getByRole("navigation").getByRole("link", { name: item, exact: true })).toBeVisible();
     }
     await expect(page.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
@@ -23,7 +23,7 @@ test.describe("Workspace access and responsive UI", () => {
     await signInAs(context, "user_copper_editor");
     await page.goto("/");
 
-    await expect(page.getByRole("link", { name: "Episodes", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Episodes", exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "My time", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Budget", exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Clients & vendors", exact: true })).toHaveCount(0);
@@ -60,7 +60,7 @@ test.describe("Workspace access and responsive UI", () => {
     await expect(page.getByRole("link", { name: "Clients & vendors", exact: true })).toHaveCount(0);
   });
 
-  for (const route of ["/episodes", "/bookings", "/deliveries", "/budget/purchase-orders"]) {
+  for (const route of ["/shows", "/bookings", "/deliveries", "/budget/purchase-orders"]) {
     test(`keeps ${route} usable without horizontal page overflow on a phone`, async ({ context, page }) => {
       await signInAs(context, "user_maya");
       await page.setViewportSize({ width: 390, height: 844 });
