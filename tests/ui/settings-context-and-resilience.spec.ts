@@ -89,6 +89,22 @@ test.describe("Debug context, error and responsive safeguards", () => {
     await expect(page.locator("div.max-h-\\[calc\\(100vh-9rem\\)\\]")).toHaveCSS("overflow-y", "auto");
   });
 
+  test("layers the debug-user switcher above My work panels", async ({ page }) => {
+    await page.goto("/review");
+    await page.getByRole("button", { name: "Switch debug user" }).click();
+
+    const menu = page.getByText("Debug user / role", { exact: true }).locator("..");
+    await expect(menu).toBeVisible();
+    await expect(page.locator(".pp-topbar")).toHaveCSS("z-index", "40");
+
+    const menuIsTopmost = await menu.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const target = document.elementFromPoint(bounds.left + 12, bounds.top + 12);
+      return Boolean(target?.closest(".pp-topbar"));
+    });
+    expect(menuIsTopmost).toBe(true);
+  });
+
   test("keeps tenant and debug controls usable at a tablet width", async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await page.goto("/");

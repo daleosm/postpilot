@@ -122,7 +122,7 @@ export function TopBar({ debugUser, debugUsers, debugMode, activeOrganization, o
   }
 
   return (
-    <header className="pp-topbar sticky top-0 z-10 flex h-[60px] items-center justify-between gap-2 border-b px-3 backdrop-blur-xl sm:gap-3 sm:px-6 lg:h-[66px] lg:px-8">
+    <header className="pp-topbar sticky top-0 z-40 flex h-[60px] items-center justify-between gap-2 border-b px-3 backdrop-blur-xl sm:gap-3 sm:px-6 lg:h-[66px] lg:px-8">
       <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <div className="relative min-w-0" ref={organizationRef}>
           {canSwitchOrganizations ? (
