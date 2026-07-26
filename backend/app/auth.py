@@ -91,11 +91,12 @@ async def _actor_permissions(
                 "manage_qc_delivery",
                 "manage_commercial",
                 "manage_catering",
+                "request_catering",
                 "view_all_operations",
             }
         )
     if membership.role == "client":
-        return frozenset({"sign_off_work"})
+        return frozenset({"sign_off_work", "request_catering"})
     if not person_role:
         return frozenset()
     policy = (

@@ -16,6 +16,7 @@ const permissionLabels: Record<string, string> = {
   sign_off_work: "Sign off assigned work",
   manage_qc_delivery: "QC & delivery",
   manage_commercial: "Commercial",
+  request_catering: "Request catering",
   manage_catering: "Runner desk",
   view_all_operations: "View all operations",
 };

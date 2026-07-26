@@ -1266,7 +1266,7 @@ def test_role_settings_cannot_remove_a_workflow_role_and_renaming_updates_its_la
         {"role": "editor", "label": "Editor", "permissions": ["do_assigned_work", "sign_off_work"]},
         {"role": "colourist", "label": "Colourist", "permissions": ["do_assigned_work", "sign_off_work"]},
         {"role": "approval_only", "label": "Final creative approver", "permissions": ["sign_off_work"]},
-        {"role": "client", "label": "Client", "permissions": ["sign_off_work"]},
+        {"role": "client", "label": "Client", "permissions": ["sign_off_work", "request_catering"]},
     ]
     renamed = production_lab.client.patch("/v1/settings/role-policies", json={"policies": base_policies})
     assert renamed.status_code == 200, renamed.text

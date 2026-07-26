@@ -15,6 +15,7 @@ PERMISSIONS: Final[frozenset[str]] = frozenset(
         "manage_qc_delivery",
         "manage_commercial",
         "manage_catering",
+        "request_catering",
         "view_all_operations",
     }
 )
@@ -41,7 +42,6 @@ LEGACY_PERMISSION_MAP: Final[dict[str, str]] = {
     "confirm_delivery_receipt": "manage_qc_delivery",
     "authorize_delivery_exceptions": "manage_qc_delivery",
     "manage_catering": "manage_catering",
-    "request_catering": "do_assigned_work",
     "update_assigned_work": "do_assigned_work",
     "update_assigned_workflow_work": "do_assigned_work",
     "submit_workflow_stages": "do_assigned_work",
@@ -65,5 +65,5 @@ def policy_grants(permission: str, membership_role: str, policy_permissions: lis
     if normalized is None:
         return False
     if membership_role == "client":
-        return normalized == "sign_off_work"
+        return normalized in {"sign_off_work", "request_catering"}
     return normalized in {item for item in (normalize_permission(value) for value in policy_permissions or []) if item}

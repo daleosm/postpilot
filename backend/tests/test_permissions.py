@@ -1,8 +1,9 @@
 from app.permissions import LEGACY_PERMISSION_MAP, PERMISSIONS, normalize_permission, policy_grants
 
 
-def test_client_permission_is_fixed_to_sign_off_work() -> None:
+def test_client_permission_is_fixed_to_sign_off_work_and_catering_requests() -> None:
     assert policy_grants("sign_off_work", "client", [])
+    assert policy_grants("request_catering", "client", [])
     assert not policy_grants("manage_production", "client", ["manage_production"])
 
 
@@ -20,6 +21,11 @@ def test_each_capability_grants_only_itself() -> None:
     for granted in PERMISSIONS:
         for requested in PERMISSIONS:
             assert policy_grants(requested, "member", [granted]) is (requested == granted)
+
+
+def test_request_catering_is_independent_from_assigned_work() -> None:
+    assert policy_grants("request_catering", "member", ["request_catering"])
+    assert not policy_grants("request_catering", "member", ["do_assigned_work"])
 
 
 def test_legacy_permissions_normalise_to_grouped_capabilities() -> None:
@@ -55,6 +61,8 @@ def test_unknown_and_duplicate_permissions_are_safe() -> None:
 
 def test_client_policy_is_fixed_and_internal_policy_remains_capability_based() -> None:
     assert policy_grants("sign_off_workflow_stages", "client", ["manage_production", "manage_commercial"])
+    assert policy_grants("request_catering", "client", [])
+    assert not policy_grants("manage_catering", "client", ["manage_catering"])
     assert not policy_grants("manage_shows", "client", ["manage_production"])
     assert policy_grants("manage_shows", "member", ["manage_production"])
     assert not policy_grants("manage_budget", "member", ["manage_production"])

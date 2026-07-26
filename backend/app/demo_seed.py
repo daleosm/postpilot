@@ -78,6 +78,12 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
     "vfx_supervisor": ["do_assigned_work", "sign_off_work"],
 }
 
+# Catering requests are normally available to the internal post team, but are
+# deliberately a separate tenant capability so a facility can remove it from
+# any role without also removing that role's production work access.
+for _permissions in ROLE_PERMISSIONS.values():
+    _permissions.append("request_catering")
+
 MASTER_RATES = (
     ("Edit bay", "Edit suite", "day", 760),
     ("Senior editor", "Editorial artists", "day", 690),

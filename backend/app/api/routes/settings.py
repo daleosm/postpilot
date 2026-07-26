@@ -60,7 +60,7 @@ router = APIRouter(tags=["settings"])
 
 CLIENT_ROLE = "client"
 CLIENT_LABEL = "Client"
-CLIENT_PERMISSIONS = ["sign_off_work"]
+CLIENT_PERMISSIONS = ["sign_off_work", "request_catering"]
 
 
 async def _audit(
