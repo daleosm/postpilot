@@ -10,6 +10,8 @@ const EPISODE_NOT_STARTED = "27500000-0000-4000-8000-000000000002";
 const EPISODE_BLOCKED = "27500000-0000-4000-8000-000000000004";
 const EPISODE_CLIENT_SIGN_OFF = "27500000-0000-4000-8000-000000000007";
 const TEST_APPROVAL_ID = "f5000000-0000-4000-8000-000000000001";
+const TEST_WORK_ORDER_ID = "f5000000-0000-4000-8000-000000000002";
+const TEST_WORK_ORDER_TITLE = "Workflow stage linked work";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required for workflow action UI tests.");
@@ -18,6 +20,7 @@ let approvalFixturePreviousState: { workflowStageId: string; workflowStatus: str
 
 test.afterEach(async () => {
   await sql`delete from episode_workflow_approvals where id = ${TEST_APPROVAL_ID}`;
+  await sql`delete from post_work_orders where id = ${TEST_WORK_ORDER_ID}`;
   if (approvalFixturePreviousState) {
     await sql`
       update episodes
@@ -81,6 +84,31 @@ test.describe("Workflow operational actions", () => {
     await page.getByRole("button", { name: /Submit for sign-off|Submit & advance/ }).click();
 
     await expect(page.getByRole("status").filter({ hasText: "A blocking work order must be completed first." })).toBeVisible();
+  });
+
+  test("shows active work orders against their linked workflow stage", async ({ page }) => {
+    const [episode] = await sql<{ workflow_stage_id: string }[]>`
+      select workflow_stage_id from episodes
+      where id = ${EPISODE_IN_PROGRESS} and organization_id = ${COPPERLINE_ORGANIZATION_ID}
+      limit 1
+    `;
+    if (!episode?.workflow_stage_id) throw new Error("Workflow-stage fixture is missing.");
+    await sql`
+      insert into post_work_orders (
+        id, organization_id, episode_id, workflow_stage_id, work_type, kind, title, priority,
+        is_blocking, status, billing_scope, billing_status, currency
+      ) values (
+        ${TEST_WORK_ORDER_ID}, ${COPPERLINE_ORGANIZATION_ID}, ${EPISODE_IN_PROGRESS}, ${episode.workflow_stage_id},
+        'internal', 'work_order', ${TEST_WORK_ORDER_TITLE}, 'normal', false, 'in_progress', 'included', 'not_billable', 'USD'
+      )
+    `;
+
+    await page.goto(`/episodes/${EPISODE_IN_PROGRESS}`);
+    await page.getByRole("button", { name: "Workflow", exact: true }).click();
+
+    await expect(page.getByText(/\d+ active work orders?/, { exact: false })).toBeVisible();
+    const activeWork = page.getByRole("region", { name: /Active work orders for/ });
+    await expect(activeWork.getByText(TEST_WORK_ORDER_TITLE, { exact: true })).toBeVisible();
   });
 });
 
