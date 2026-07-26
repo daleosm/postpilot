@@ -8,12 +8,14 @@ const COPPERLINE_ORGANIZATION_ID = "10000000-0000-4000-8000-000000000005";
 const EPISODE_ID = "27500000-0000-4000-8000-000000000001";
 const RUNNER_REQUEST_ID = "fa000000-0000-4000-8000-000000000010";
 const RUNNER_REQUEST_ITEM = "UI runner receipt cost · fa000000";
+const CATERING_BOOKING_ID = "fa000000-0000-4000-8000-000000000011";
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required for operational completion UI tests.");
 const sql = postgres(databaseUrl, { prepare: false });
 
 test.afterEach(async () => {
   await sql`delete from catering_requests where id = ${RUNNER_REQUEST_ID}`;
+  await sql`delete from bookings where id = ${CATERING_BOOKING_ID}`;
 });
 
 test.afterAll(async () => {
@@ -26,6 +28,27 @@ test.beforeEach(async ({ context }) => {
 
 test.describe("Operational completion journeys", () => {
   test("sends a practical catering request with room, quantity, timing, and notes", async ({ page }) => {
+    const [fixture] = await sql<{ room_id: string; person_id: string }[]>`
+      select rooms.id as room_id, people.id as person_id
+      from rooms
+      cross join people
+      where rooms.organization_id = ${COPPERLINE_ORGANIZATION_ID}
+        and people.organization_id = ${COPPERLINE_ORGANIZATION_ID}
+        and people.user_id = 'user_maya'
+      order by rooms.name
+      limit 1
+    `;
+    if (!fixture) throw new Error("Catering UI fixture needs a room and Maya person record.");
+    await sql`
+      insert into bookings (
+        id, organization_id, room_id, episode_id, person_id, title,
+        starts_at, ends_at, setup_minutes, handover_minutes,
+        approved_overtime_minutes, is_option, status, booking_type
+      ) values (
+        ${CATERING_BOOKING_ID}, ${COPPERLINE_ORGANIZATION_ID}, ${fixture.room_id}, ${EPISODE_ID}, ${fixture.person_id}, 'UI catering active booking',
+        now() - interval '1 hour', now() + interval '1 hour', 0, 0, 0, false, 'confirmed', 'client_review'
+      )
+    `;
     await page.goto("/catering");
     const room = page.getByLabel("Room");
     await room.selectOption({ index: 1 });
@@ -37,7 +60,7 @@ test.describe("Operational completion journeys", () => {
 
     await page.getByRole("button", { name: "Send request" }).click();
 
-    await expect.poll(body).toMatchObject({ request_type: "tea_coffee", item: "Four oat flat whites", quantity: 4, notes: "Please leave at reception." });
+    await expect.poll(body).toMatchObject({ booking_id: CATERING_BOOKING_ID, request_type: "tea_coffee", item: "Four oat flat whites", quantity: 4, notes: "Please leave at reception." });
     await expect(page.getByRole("status")).toContainText("Request sent to the runner desk.");
   });
 

@@ -470,6 +470,7 @@ catering_requests = Table(
     Column("id", UUID(as_uuid=False), primary_key=True),
     Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
     Column("booking_id", UUID(as_uuid=False), ForeignKey("bookings.id", ondelete="SET NULL")),
+    Column("work_order_id", UUID(as_uuid=False), ForeignKey("post_work_orders.id", ondelete="SET NULL")),
     Column("room_id", UUID(as_uuid=False), ForeignKey("rooms.id", ondelete="SET NULL")),
     Column("requested_by_person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
     Column("fulfilled_by_person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),

@@ -15,12 +15,12 @@ export default async function CateringPage() {
 async function load() {
   const context = await getActiveOrganizationContext();
   const [resources, requests] = await Promise.all([
-    postpilotApiServerFetch<{ rooms: Array<{ id: string; name: string; type: string }>; active_booking: { id: string; room_id: string; room_name: string } | null }>("/catering/resources"),
+    postpilotApiServerFetch<{ rooms: Array<{ id: string; name: string; type: string }>; active_booking: { id: string; room_id: string; room_name: string } | null; active_work_order: { id: string; episode_id: string; title: string } | null }>("/catering/resources"),
     postpilotApiServerFetch<Array<{ id: string; request_type: string; item: string; quantity: number; notes: string | null; requested_for: string | null; status: string; room_name: string | null }>>("/catering-requests"),
   ]);
   return {
     organizationName: context?.organization?.organizationName ?? "Post house",
-    resources: { rooms: resources.rooms, activeBooking: resources.active_booking ? { id: resources.active_booking.id, roomId: resources.active_booking.room_id, roomName: resources.active_booking.room_name } : null },
+    resources: { rooms: resources.rooms, activeBooking: resources.active_booking ? { id: resources.active_booking.id, roomId: resources.active_booking.room_id, roomName: resources.active_booking.room_name } : null, activeWorkOrder: resources.active_work_order ? { id: resources.active_work_order.id, episodeId: resources.active_work_order.episode_id, title: resources.active_work_order.title } : null },
     requests: requests.map((request) => ({ id: request.id, requestType: request.request_type, item: request.item, quantity: request.quantity, notes: request.notes, requestedFor: request.requested_for ? new Date(request.requested_for) : null, status: request.status, roomName: request.room_name })),
   };
 }

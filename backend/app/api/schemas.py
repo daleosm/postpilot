@@ -1018,7 +1018,8 @@ class RoomUpdateRequest(RoomCreateRequest):
 
 class CateringRequestCreateRequest(BaseModel):
     booking_id: str | None = None
-    room_id: str | None = None
+    work_order_id: str | None = None
+    room_id: str
     request_type: str = Field(pattern="^(lunch|tea_coffee|snack)$")
     item: str = Field(min_length=1, max_length=240)
     quantity: int = Field(default=1, ge=1, le=100)
