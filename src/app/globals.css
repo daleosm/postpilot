@@ -213,7 +213,6 @@ main :where(label, legend) { color: #4d5a54; }
   border-radius: var(--pp-radius-panel);
   background: var(--pp-surface);
   box-shadow: var(--pp-shadow-sm), inset 0 1px 0 rgb(255 255 255 / 0.82);
-  backdrop-filter: blur(12px);
 }
 
 /* A passive data surface does not lift when the pointer passes over it. Apply
