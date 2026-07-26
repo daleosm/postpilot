@@ -56,10 +56,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
 a, button, input, select, textarea { transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease, opacity 160ms ease; }
 
 /* HeroUI and legacy button variants both supply their own interaction state.
- * Do not animate the button shell itself: competing transform/background
- * transitions can paint as a flash when the pointer enters a control. */
+ * Keep feedback to colour, border, and shadow only: animating backgrounds or
+ * transforms on the shared button shell can paint as a flash on hover. */
 :where(button, [role="button"], .button) {
-  transition: none !important;
+  transition: color 120ms ease, border-color 140ms ease, box-shadow 160ms ease !important;
 }
 :where(button, [role="button"], .button):hover,
 :where(button, [role="button"], .button):active:not(:disabled):not([aria-disabled="true"]) {
