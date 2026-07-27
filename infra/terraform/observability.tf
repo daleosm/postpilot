@@ -8,9 +8,8 @@
 # retained signal is startup, warnings, and unexpected errors from PostPilot.
 data "aws_caller_identity" "current" {}
 
-# The AWS-managed CloudWatch Logs key avoids the fixed monthly charge of an
-# additional customer-managed KMS key while still encrypting this low-risk demo
-# log group at rest.
+# CloudWatch Logs keeps this group encrypted with its service-managed default.
+# No customer-managed KMS key is needed for the standard PostPilot deployment.
 #checkov:skip=CKV_AWS_338:Seven-day retention is an intentional low-cost demo baseline; facilities can raise it if policy requires.
 resource "aws_cloudwatch_log_group" "postpilot_application" {
   name              = "/${var.project_name}/application"
@@ -255,36 +254,11 @@ resource "aws_secretsmanager_secret" "postpilot_application" {
   name                    = "${var.project_name}/application"
   description             = "PostPilot runtime configuration for EKS workloads."
   recovery_window_in_days = 7
-  kms_key_id              = aws_kms_key.postpilot_application_secrets.arn
-}
 
-data "aws_iam_policy_document" "postpilot_application_secrets_kms" {
-  # This is AWS's standard root-account bootstrap statement. IAM policies grant
-  # the workload's narrowly scoped decrypt permission below.
-  statement {
-    sid       = "AllowAccountAdministration"
-    actions   = ["kms:*"]
-    resources = ["*"]
-
-    principals {
-      type        = "AWS"
-      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
-    }
-  }
-}
-
-# A dedicated customer-managed key keeps the application secret separately
-# encrypted while retaining an explicit, auditable key policy.
-resource "aws_kms_key" "postpilot_application_secrets" {
-  description             = "Encrypts the PostPilot EKS application secret."
-  deletion_window_in_days = 7
-  enable_key_rotation     = true
-  policy                  = data.aws_iam_policy_document.postpilot_application_secrets_kms.json
-}
-
-resource "aws_kms_alias" "postpilot_application_secrets" {
-  name          = "alias/${local.name}-application-secrets"
-  target_key_id = aws_kms_key.postpilot_application_secrets.key_id
+  # Omitting kms_key_id selects the AWS-managed Secrets Manager key. It keeps
+  # the secret encrypted at rest without the customer-managed-key fee or
+  # lifecycle overhead. Dedicated enterprise deployments can override this
+  # with a customer-managed key when a contract requires it.
 }
 
 data "aws_iam_policy_document" "postpilot_secrets_assume_role" {
@@ -307,10 +281,6 @@ data "aws_iam_policy_document" "postpilot_secrets_read" {
     resources = [aws_secretsmanager_secret.postpilot_application.arn]
   }
 
-  statement {
-    actions   = ["kms:Decrypt"]
-    resources = [aws_kms_key.postpilot_application_secrets.arn]
-  }
 }
 
 resource "aws_iam_role" "postpilot_secrets" {

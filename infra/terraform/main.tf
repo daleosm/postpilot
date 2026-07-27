@@ -496,11 +496,14 @@ resource "aws_security_group" "postgres" {
 }
 
 resource "aws_db_instance" "postgres" {
-  identifier                  = "${var.project_name}-postgres-private"
-  engine                      = "postgres"
-  instance_class              = var.rds_instance_class
-  allocated_storage           = var.rds_allocated_storage_gb
-  storage_type                = "gp3"
+  identifier        = "${var.project_name}-postgres-private"
+  engine            = "postgres"
+  instance_class    = var.rds_instance_class
+  allocated_storage = var.rds_allocated_storage_gb
+  storage_type      = "gp3"
+  # Encrypt storage with RDS's AWS-managed default key. This is the secure,
+  # no-customer-KMS-fee baseline for shared PostPilot deployments.
+  storage_encrypted           = true
   db_name                     = "postpilot"
   username                    = "postpilot"
   manage_master_user_password = true
