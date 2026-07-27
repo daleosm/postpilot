@@ -346,6 +346,12 @@ Application Signals, OTel metrics, GPU metrics, or logs from Argo CD and
 Kubernetes system components. FastAPI access logging remains off; the intended
 application-log signal is PostPilot startup output and unexpected errors.
 
+A single lightweight Event Exporter also watches Kubernetes Events and writes
+only `Warning` events to `/postpilot/kubernetes-events`. This preserves useful
+failure evidence—such as image-pull, scheduling, volume-mount, eviction, and
+restart events—without forwarding normal scheduling chatter. It uses a
+seven-day retention period and is separate from application logs.
+
 ~~~bash
 # Live application logs in Kubernetes
 kubectl -n postpilot logs -f deployment/postpilot
@@ -354,6 +360,10 @@ kubectl -n postpilot logs -f deployment/postpilot-api
 # Confirm the narrow forwarder is healthy after Terraform applies
 kubectl -n kube-system get pods -l app.kubernetes.io/instance=postpilot-log-forwarder
 kubectl -n kube-system logs daemonset/postpilot-log-forwarder --tail=100
+
+# Kubernetes Warning Events, retained in CloudWatch by the Event Exporter
+kubectl -n postpilot logs deployment/postpilot-event-exporter --tail=100
+aws logs tail /postpilot/kubernetes-events --region eu-west-1 --since 1h
 ~~~
 
 Keep `application_log_retention_days = 7` for the demo unless a facility's

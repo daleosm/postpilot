@@ -42,7 +42,10 @@ data "aws_iam_policy_document" "postpilot_log_forwarder_write" {
       "logs:DescribeLogStreams",
       "logs:PutLogEvents",
     ]
-    resources = ["${aws_cloudwatch_log_group.postpilot_application.arn}:*"]
+    resources = [
+      "${aws_cloudwatch_log_group.postpilot_application.arn}:*",
+      "${aws_cloudwatch_log_group.postpilot_kubernetes_events.arn}:*",
+    ]
   }
 
 }
@@ -85,6 +88,15 @@ resource "aws_iam_role_policy_attachment" "cloudwatch_standard_insights_agent" {
 #checkov:skip=CKV_AWS_338:Seven-day retention is intentional for a small demo cluster.
 resource "aws_cloudwatch_log_group" "postpilot_performance" {
   name              = "/aws/containerinsights/${local.name}/performance"
+  retention_in_days = var.application_log_retention_days
+}
+
+# Kubernetes Events are not container logs. A compact in-cluster exporter below
+# forwards Warning Events here so scheduling, image-pull, mount, eviction, and
+# restart failures remain searchable after Kubernetes has discarded them.
+#checkov:skip=CKV_AWS_338:Seven-day retention is intentional for a small demo cluster.
+resource "aws_cloudwatch_log_group" "postpilot_kubernetes_events" {
+  name              = "/${var.project_name}/kubernetes-events"
   retention_in_days = var.application_log_retention_days
 }
 
@@ -436,15 +448,28 @@ resource "helm_release" "postpilot_log_forwarder" {
       name   = "postpilot-log-forwarder"
     }
     input = {
-      enabled         = true
-      tag             = "postpilot.*"
-      path            = "/var/log/containers/*_postpilot_*.log"
+      enabled = true
+      tag     = "postpilot.*"
+      # Event Exporter has its own input/output below. All ordinary PostPilot
+      # containers share this input, including migration and secret-sync Jobs.
+      path            = "/var/log/containers/*_postpilot_postpilot-*.log,/var/log/containers/*_postpilot_api-*.log,/var/log/containers/*_postpilot_migrate-*.log,/var/log/containers/*_postpilot_sync-*.log"
       db              = "/var/log/postpilot-fluent-bit.db"
       multilineParser = "docker, cri"
       memBufLimit     = "5MB"
       skipLongLines   = "On"
       refreshInterval = 10
     }
+    additionalInputs = <<-EOT
+      [INPUT]
+          Name                tail
+          Tag                 kubernetes-events.*
+          Path                /var/log/containers/*_postpilot_event-exporter-*.log
+          DB                  /var/log/kubernetes-events-fluent-bit.db
+          multiline.parser    docker, cri
+          Mem_Buf_Limit       1MB
+          Skip_Long_Lines     On
+          Refresh_Interval    10
+    EOT
     # The namespace is enforced by the host file pattern above. Skipping the
     # Kubernetes metadata filter avoids cluster-wide API reads and extra data.
     filter = {
@@ -461,6 +486,16 @@ resource "helm_release" "postpilot_log_forwarder" {
       logStreamPrefix   = "postpilot-"
       autoCreateGroup   = false
       autoRetryRequests = true
+      extraOutputs      = <<-EOT
+        [OUTPUT]
+            Name                cloudwatch_logs
+            Match               kubernetes-events.*
+            region              ${var.aws_region}
+            log_group_name      ${aws_cloudwatch_log_group.postpilot_kubernetes_events.name}
+            log_stream_prefix   kubernetes-events-
+            auto_create_group   false
+            auto_retry_requests true
+      EOT
     }
     resources = {
       requests = {
@@ -478,6 +513,7 @@ resource "helm_release" "postpilot_log_forwarder" {
     aws_eks_node_group.spot,
     aws_eks_pod_identity_association.postpilot_log_forwarder,
     aws_cloudwatch_log_group.postpilot_application,
+    aws_cloudwatch_log_group.postpilot_kubernetes_events,
   ]
 }
 

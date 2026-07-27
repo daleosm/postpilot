@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postpilot-event-exporter
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: postpilot-event-exporter
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: postpilot-event-exporter
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: postpilot-event-exporter
+subjects:
+  - kind: ServiceAccount
+    name: postpilot-event-exporter
+    namespace: postpilot
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postpilot-event-exporter
+data:
+  config.yaml: |
+    # Kubernetes itself retains Events only briefly. Retain Warning Events in
+    # CloudWatch instead, omitting normal scheduling chatter to control cost.
+    logLevel: error
+    logFormat: json
+    maxEventAgeSeconds: 60
+    kubeQPS: 5
+    kubeBurst: 10
+    route:
+      routes:
+        - drop:
+            - type: Normal
+          match:
+            - receiver: cloudwatch-log
+    receivers:
+      - name: cloudwatch-log
+        stdout:
+          deDot: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postpilot-event-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: kubernetes-event-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: kubernetes-event-exporter
+    spec:
+      serviceAccountName: postpilot-event-exporter
+      containers:
+        - name: event-exporter
+          image: ghcr.io/resmoio/kubernetes-event-exporter:v1.7
+          imagePullPolicy: IfNotPresent
+          args: ["-conf=/data/config.yaml"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /data
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: postpilot-event-exporter

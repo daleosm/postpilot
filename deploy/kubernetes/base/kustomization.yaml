@@ -13,6 +13,7 @@ resources:
   - api-hpa.yaml
   - api-pod-disruption-budget.yaml
   - pod-disruption-budget.yaml
+  - kubernetes-event-exporter.yaml
   - service.yaml
   - api-service.yaml
 
