@@ -327,6 +327,41 @@ kubectl get nodeclaims.karpenter.sh
 kubectl -n kube-system logs deployment/karpenter --tail=100
 ~~~
 
+### Lean CloudWatch logging
+
+This stack deliberately enables **Standard Container Insights**, not Enhanced
+Container Insights. Standard mode retains CloudWatch history for cluster and
+node CPU, memory, network, disk, Pod health, and restarts. Enhanced mode
+collects high-cardinality observations for every node, Pod, and container and
+is deliberately disabled because it is disproportionally expensive for this
+small deployment.
+
+Instead, the pinned `aws-for-fluent-bit` DaemonSet runs as cluster
+infrastructure in `kube-system`, but tails only container log files from the
+`postpilot` namespace and writes them to the seven-day
+`/postpilot/application` log group. The supported CloudWatch agent writes only
+the short-retention standard performance group required for resource history.
+It does not collect container logs, host logs, dataplane logs, traces,
+Application Signals, OTel metrics, GPU metrics, or logs from Argo CD and
+Kubernetes system components. FastAPI access logging remains off; the intended
+application-log signal is PostPilot startup output and unexpected errors.
+
+~~~bash
+# Live application logs in Kubernetes
+kubectl -n postpilot logs -f deployment/postpilot
+kubectl -n postpilot logs -f deployment/postpilot-api
+
+# Confirm the narrow forwarder is healthy after Terraform applies
+kubectl -n kube-system get pods -l app.kubernetes.io/instance=postpilot-log-forwarder
+kubectl -n kube-system logs daemonset/postpilot-log-forwarder --tail=100
+~~~
+
+Keep `application_log_retention_days = 7` for the demo unless a facility's
+retention policy requires longer. The remaining CloudWatch alarms cover
+PostPilot server errors and optional ALB health. Watch Cost Explorer for the
+absence of `ObservationUsage`; Standard Container Insights is billed through
+embedded-metric and data-processing usage instead.
+
 The migration Job is an Argo CD PreSync hook. If a migration fails, the release does not advance to the new deployment. Fix the migration or restore from a tested backup; do not delete migration history to force a sync.
 
 ### Autoscaling behaviour

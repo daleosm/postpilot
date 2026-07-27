@@ -1,66 +1,23 @@
-# The AWS-supported EKS add-on forwards container stdout/stderr to CloudWatch.
-# PostPilot writes only unexpected errors to stderr; routine request access logs
-# intentionally remain disabled to control noise and log-ingestion cost.
+# Lean, application-only CloudWatch logging.  This intentionally does not use
+# the amazon-cloudwatch-observability add-on: its Enhanced Container Insights
+# pipeline collects cluster-wide performance observations and logs from every
+# Kubernetes workload, which is disproportionate for this small deployment.
+#
+# A small aws-for-fluent-bit DaemonSet below tails *only* files from the
+# postpilot namespace.  FastAPI routine access logs remain disabled, so the
+# retained signal is startup, warnings, and unexpected errors from PostPilot.
 data "aws_caller_identity" "current" {}
 
-data "aws_iam_policy_document" "cloudwatch_logs_kms" {
-  statement {
-    sid       = "AllowAccountAdministration"
-    actions   = ["kms:*"]
-    resources = ["*"]
-
-    principals {
-      type        = "AWS"
-      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
-    }
-  }
-
-  # CloudWatch Logs requires the regional service principal in the key policy.
-  # The encryption-context condition restricts it to PostPilot's one log group.
-  statement {
-    sid = "AllowPostPilotCloudWatchLogs"
-    actions = [
-      "kms:Decrypt*",
-      "kms:Describe*",
-      "kms:Encrypt*",
-      "kms:GenerateDataKey*",
-      "kms:ReEncrypt*",
-    ]
-    resources = ["*"]
-
-    principals {
-      type        = "Service"
-      identifiers = ["logs.${var.aws_region}.amazonaws.com"]
-    }
-
-    condition {
-      test     = "ArnEquals"
-      variable = "kms:EncryptionContext:aws:logs:arn"
-      values   = ["arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/containerinsights/${local.name}/application"]
-    }
-  }
-}
-
-resource "aws_kms_key" "cloudwatch_logs" {
-  description             = "Encrypts PostPilot CloudWatch application logs."
-  deletion_window_in_days = 7
-  enable_key_rotation     = true
-  policy                  = data.aws_iam_policy_document.cloudwatch_logs_kms.json
-}
-
-resource "aws_kms_alias" "cloudwatch_logs" {
-  name          = "alias/${local.name}-cloudwatch-logs"
-  target_key_id = aws_kms_key.cloudwatch_logs.key_id
-}
-
-#checkov:skip=CKV_AWS_338:Thirty-day retention is an intentional low-cost demo baseline; production operators can set application_log_retention_days to 365.
+# The AWS-managed CloudWatch Logs key avoids the fixed monthly charge of an
+# additional customer-managed KMS key while still encrypting this low-risk demo
+# log group at rest.
+#checkov:skip=CKV_AWS_338:Seven-day retention is an intentional low-cost demo baseline; facilities can raise it if policy requires.
 resource "aws_cloudwatch_log_group" "postpilot_application" {
-  name              = "/aws/containerinsights/${local.name}/application"
+  name              = "/${var.project_name}/application"
   retention_in_days = var.application_log_retention_days
-  kms_key_id        = aws_kms_key.cloudwatch_logs.arn
 }
 
-data "aws_iam_policy_document" "cloudwatch_observability_assume_role" {
+data "aws_iam_policy_document" "postpilot_log_forwarder_assume_role" {
   statement {
     actions = ["sts:AssumeRole", "sts:TagSession"]
 
@@ -71,21 +28,64 @@ data "aws_iam_policy_document" "cloudwatch_observability_assume_role" {
   }
 }
 
-# This role is usable only by the CloudWatch agent service account through EKS
-# Pod Identity. Application pods and worker nodes do not receive these rights.
-resource "aws_iam_role" "cloudwatch_observability" {
-  name               = "${local.name}-cloudwatch-observability"
-  assume_role_policy = data.aws_iam_policy_document.cloudwatch_observability_assume_role.json
+# This service account may write only to the one PostPilot application group.
+# It cannot create groups, emit CloudWatch metrics, use X-Ray, or read logs.
+resource "aws_iam_role" "postpilot_log_forwarder" {
+  name               = "${local.name}-application-log-forwarder"
+  assume_role_policy = data.aws_iam_policy_document.postpilot_log_forwarder_assume_role.json
 }
 
-resource "aws_iam_role_policy_attachment" "cloudwatch_observability_agent" {
-  role       = aws_iam_role.cloudwatch_observability.name
+data "aws_iam_policy_document" "postpilot_log_forwarder_write" {
+  statement {
+    actions = [
+      "logs:CreateLogStream",
+      "logs:DescribeLogStreams",
+      "logs:PutLogEvents",
+    ]
+    resources = ["${aws_cloudwatch_log_group.postpilot_application.arn}:*"]
+  }
+
+}
+
+resource "aws_iam_role_policy" "postpilot_log_forwarder_write" {
+  name   = "write-postpilot-application-logs"
+  role   = aws_iam_role.postpilot_log_forwarder.id
+  policy = data.aws_iam_policy_document.postpilot_log_forwarder_write.json
+}
+
+# Standard Container Insights retains historical cluster and node resource
+# metrics in CloudWatch without the high-cardinality, per-observation Enhanced
+# mode. The AWS-managed policy is required by the supported agent for the
+# performance-log/embedded-metric pipeline; application logging remains on the
+# separate, narrow forwarder role above.
+data "aws_iam_policy_document" "cloudwatch_standard_insights_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole", "sts:TagSession"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["pods.eks.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "cloudwatch_standard_insights" {
+  name               = "${local.name}-standard-container-insights"
+  assume_role_policy = data.aws_iam_policy_document.cloudwatch_standard_insights_assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch_standard_insights_agent" {
+  role       = aws_iam_role.cloudwatch_standard_insights.name
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 
-resource "aws_iam_role_policy_attachment" "cloudwatch_observability_xray" {
-  role       = aws_iam_role.cloudwatch_observability.name
-  policy_arn = "arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess"
+# Standard Container Insights writes its aggregated, queryable performance
+# events here. The same short retention prevents low-value historic telemetry
+# from quietly accumulating storage cost.
+#checkov:skip=CKV_AWS_338:Seven-day retention is intentional for a small demo cluster.
+resource "aws_cloudwatch_log_group" "postpilot_performance" {
+  name              = "/aws/containerinsights/${local.name}/performance"
+  retention_in_days = var.application_log_retention_days
 }
 
 resource "aws_eks_addon" "pod_identity_agent" {
@@ -325,23 +325,83 @@ resource "aws_eks_pod_identity_association" "postpilot_secrets" {
   ]
 }
 
-resource "aws_eks_addon" "cloudwatch_observability" {
+resource "aws_eks_pod_identity_association" "postpilot_log_forwarder" {
+  cluster_name = aws_eks_cluster.this.name
+  # This DaemonSet is cluster infrastructure, so it runs in the namespace that
+  # Terraform already owns. It only tails files belonging to postpilot.
+  namespace       = "kube-system"
+  service_account = "postpilot-log-forwarder"
+  role_arn        = aws_iam_role.postpilot_log_forwarder.arn
+
+  depends_on = [
+    aws_eks_addon.pod_identity_agent,
+    aws_iam_role_policy.postpilot_log_forwarder_write,
+  ]
+}
+
+# Keep CloudWatch resource history, but deliberately select Standard Container
+# Insights. Enhanced mode is the source of the costly ObservationUsage line
+# item, so it must remain explicitly false. The add-on's own log, trace, OTel,
+# GPU, and exporter features remain disabled; PostPilot logs use the scoped
+# Fluent Bit release below instead.
+resource "aws_eks_addon" "cloudwatch_standard_insights" {
   cluster_name                = aws_eks_cluster.this.name
   addon_name                  = "amazon-cloudwatch-observability"
   resolve_conflicts_on_create = "OVERWRITE"
 
   pod_identity_association {
-    role_arn        = aws_iam_role.cloudwatch_observability.arn
+    role_arn        = aws_iam_role.cloudwatch_standard_insights.arn
     service_account = "cloudwatch-agent"
   }
 
-  # Do not automatically instrument every application. This baseline keeps
-  # Container Insights and logs, without generating Application Signals data.
   configuration_values = jsonencode({
-    manager = {
-      applicationSignals = {
-        autoMonitor = {
-          monitorAllServices = false
+    containerInsights = {
+      enabled = true
+    }
+    containerLogs = {
+      enabled = false
+    }
+    applicationSignals = {
+      enabled = false
+    }
+    otelContainerInsights = {
+      enabled = false
+    }
+    admissionWebhooks = {
+      create = false
+    }
+    dcgmExporter = {
+      enabled = false
+    }
+    neuronMonitor = {
+      enabled = false
+    }
+    nodeExporter = {
+      enabled = false
+    }
+    kubeStateMetrics = {
+      enabled = false
+    }
+    agent = {
+      resources = {
+        requests = {
+          cpu    = "50m"
+          memory = "64Mi"
+        }
+        limits = {
+          cpu    = "150m"
+          memory = "192Mi"
+        }
+      }
+      config = {
+        logs = {
+          metrics_collected = {
+            kubernetes = {
+              cluster_name                = local.name
+              enhanced_container_insights = false
+              accelerated_compute_metrics = false
+            }
+          }
         }
       }
     }
@@ -349,8 +409,74 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 
   depends_on = [
     aws_eks_addon.pod_identity_agent,
-    aws_iam_role_policy_attachment.cloudwatch_observability_agent,
-    aws_iam_role_policy_attachment.cloudwatch_observability_xray,
+    aws_iam_role_policy_attachment.cloudwatch_standard_insights_agent,
+    aws_cloudwatch_log_group.postpilot_performance,
+  ]
+}
+
+# The collector only tails container log files whose Kubernetes namespace is
+# postpilot. It does not run Container Insights, collect host/dataplane logs,
+# scrape metrics, create log groups, or forward logs from Kubernetes system
+# components. Chart values are pinned for predictable GitOps rebuilds.
+resource "helm_release" "postpilot_log_forwarder" {
+  name             = "postpilot-log-forwarder"
+  namespace        = "kube-system"
+  repository       = "https://aws.github.io/eks-charts"
+  chart            = "aws-for-fluent-bit"
+  version          = var.aws_for_fluent_bit_chart_version
+  create_namespace = false
+  wait             = true
+  timeout          = 600
+  atomic           = true
+  cleanup_on_fail  = true
+
+  values = [yamlencode({
+    serviceAccount = {
+      create = true
+      name   = "postpilot-log-forwarder"
+    }
+    input = {
+      enabled         = true
+      tag             = "postpilot.*"
+      path            = "/var/log/containers/*_postpilot_*.log"
+      db              = "/var/log/postpilot-fluent-bit.db"
+      multilineParser = "docker, cri"
+      memBufLimit     = "5MB"
+      skipLongLines   = "On"
+      refreshInterval = 10
+    }
+    # The namespace is enforced by the host file pattern above. Skipping the
+    # Kubernetes metadata filter avoids cluster-wide API reads and extra data.
+    filter = {
+      enabled = false
+    }
+    cloudWatch = {
+      enabled = false
+    }
+    cloudWatchLogs = {
+      enabled           = true
+      match             = "postpilot.*"
+      region            = var.aws_region
+      logGroupName      = aws_cloudwatch_log_group.postpilot_application.name
+      logStreamPrefix   = "postpilot-"
+      autoCreateGroup   = false
+      autoRetryRequests = true
+    }
+    resources = {
+      requests = {
+        cpu    = "25m"
+        memory = "32Mi"
+      }
+      limits = {
+        cpu    = "100m"
+        memory = "96Mi"
+      }
+    }
+  })]
+
+  depends_on = [
+    aws_eks_node_group.spot,
+    aws_eks_pod_identity_association.postpilot_log_forwarder,
     aws_cloudwatch_log_group.postpilot_application,
   ]
 }

@@ -93,6 +93,12 @@ variable "metrics_server_chart_version" {
   default     = "3.13.1"
 }
 
+variable "aws_for_fluent_bit_chart_version" {
+  description = "Pinned AWS for Fluent Bit chart used for PostPilot-only CloudWatch log forwarding. This intentionally replaces the broad CloudWatch Observability add-on."
+  type        = string
+  default     = "0.2.0"
+}
+
 variable "karpenter_chart_version" {
   description = "Pinned Karpenter Helm chart version. Upgrade deliberately after reviewing Karpenter's EKS and Kubernetes compatibility guidance."
   type        = string
@@ -118,9 +124,9 @@ variable "karpenter_max_memory" {
 }
 
 variable "application_log_retention_days" {
-  description = "How long to retain EKS application logs in CloudWatch Logs. Thirty days is the low-cost production baseline."
+  description = "How long to retain PostPilot application logs in CloudWatch Logs. Seven days is the low-cost demo baseline."
   type        = number
-  default     = 30
+  default     = 7
 
   validation {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365], var.application_log_retention_days)
