@@ -10,6 +10,7 @@ loading operational records. Feature modules add their own narrow table maps.
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -21,9 +22,10 @@ from sqlalchemy import (
     Table,
     Text,
     TypeDecorator,
+    UniqueConstraint,
     cast,
 )
-from sqlalchemy.dialects.postgresql import ENUM, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, ENUM, UUID
 from sqlalchemy.sql import func
 
 metadata = MetaData()
@@ -81,6 +83,51 @@ organizations = Table(
     Column("name", Text, nullable=False),
     Column("slug", Text, nullable=False),
     Column("currency", Text, nullable=False),
+)
+
+# SSO connections are configured per post house.  They deliberately do not
+# participate in session resolution yet: the Microsoft token-verification and
+# account-linking steps will use this contract without changing local users,
+# passwords, or organization memberships.
+sso_connections = Table(
+    "sso_connections",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True, server_default=func.gen_random_uuid()),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("provider", Text, nullable=False, server_default="microsoft_entra"),
+    Column("entra_tenant_id", UUID(as_uuid=False), nullable=False),
+    Column("enabled", Boolean, nullable=False, server_default="false"),
+    Column("allowed_email_domains", ARRAY(Text)),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    CheckConstraint("provider = 'microsoft_entra'", name="sso_connections_provider_check"),
+    UniqueConstraint("organization_id", "provider", name="sso_connections_organization_provider_unique"),
+)
+
+# A linked external identity belongs to one global PostPilot user, rather than
+# to a tenant.  That lets the same verified Microsoft identity sign into more
+# than one organization through its normal organization memberships.
+external_identities = Table(
+    "external_identities",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True, server_default=func.gen_random_uuid()),
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("provider", Text, nullable=False, server_default="microsoft_entra"),
+    Column("issuer", Text, nullable=False),
+    Column("entra_tenant_id", UUID(as_uuid=False), nullable=False),
+    Column("entra_object_id", UUID(as_uuid=False), nullable=False),
+    Column("subject", Text, nullable=False),
+    Column("verified_email", Text),
+    Column("linked_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("last_used_at", DateTime(timezone=True)),
+    CheckConstraint("provider = 'microsoft_entra'", name="external_identities_provider_check"),
+    UniqueConstraint("provider", "issuer", "subject", name="external_identities_provider_issuer_subject_unique"),
+    UniqueConstraint(
+        "provider",
+        "entra_tenant_id",
+        "entra_object_id",
+        name="external_identities_provider_entra_object_unique",
+    ),
 )
 
 organization_members = Table(

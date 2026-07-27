@@ -11,6 +11,9 @@ importers:
 
   .:
     dependencies:
+      '@azure/msal-browser':
+        specifier: ^5.17.1
+        version: 5.17.1
       '@heroui/react':
         specifier: ^3.2.2
         version: 3.2.2(@react-spectrum/provider@3.11.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(tailwindcss@4.3.2)
@@ -42,6 +45,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@next/env':
+        specifier: 16.2.11
+        version: 16.2.11
       '@playwright/test':
         specifier: ^1.61.1
         version: 1.61.1
@@ -96,6 +102,14 @@ packages:
   '@alloc/quick-lru@5.2.0':
     resolution: {integrity: sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw==}
     engines: {node: '>=10'}
+
+  '@azure/msal-browser@5.17.1':
+    resolution: {integrity: sha512-zBhRGzABKSI7hfWh5EaZmril5ybZ7imBN1qEZl5sDTaelr+l8SnPjZO50Q4dnKnm347YPIlBMSnXKZyh3Yu5DQ==}
+    engines: {node: '>=0.8.0'}
+
+  '@azure/msal-common@16.11.2':
+    resolution: {integrity: sha512-yDhtBOGDCdK9ipQ9g3+wmlMEPnZx2pXaDicDd9jYyR1L+7lEbvEohTDmF5qejZDutZY3m9pWPxeYxzNC701A2w==}
+    engines: {node: '>=0.8.0'}
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -2437,6 +2451,12 @@ snapshots:
       use-sync-external-store: 1.6.0(react@19.2.4)
 
   '@alloc/quick-lru@5.2.0': {}
+
+  '@azure/msal-browser@5.17.1':
+    dependencies:
+      '@azure/msal-common': 16.11.2
+
+  '@azure/msal-common@16.11.2': {}
 
   '@babel/code-frame@7.29.7':
     dependencies:

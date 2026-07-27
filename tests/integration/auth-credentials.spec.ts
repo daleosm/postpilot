@@ -62,6 +62,7 @@ test.describe("FastAPI credentials authentication", () => {
     await page.goto("/episodes");
     await expect(page).toHaveURL(/\/sign-in\?callbackUrl=%2Fepisodes/);
     await expect(page.getByRole("button", { name: "Open demo workspace" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Continue with Microsoft" })).toHaveCount(0);
 
     const unauthenticatedApi = await page.request.post("/v1/organizations/active", {
       data: { organization_id: organizationAId, pathname: "/shows" },

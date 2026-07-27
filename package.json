@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:all": "pnpm test:e2e",
-    "test:e2e": "playwright test && playwright test --config playwright.auth.config.ts",
+    "test:e2e": "pnpm test:client && playwright test && playwright test --config playwright.auth.config.ts && playwright test --config playwright.microsoft-sso.config.ts",
+    "test:client": "node --experimental-strip-types --test tests/client/microsoft-sso.test.ts",
     "test:ui": "playwright test",
     "test:auth": "playwright test --config playwright.auth.config.ts",
     "test:backend": "cd backend && pytest",
@@ -19,6 +20,7 @@
     "test:delivery-lifecycle": "cd backend && pytest tests/test_delivery_lifecycle.py tests/test_delivery_register_state.py"
   },
   "dependencies": {
+    "@azure/msal-browser": "^5.17.1",
     "@heroui/react": "^3.2.2",
     "@heroui/theme": "^2.4.26",
     "@hookform/resolvers": "^5.4.0",
@@ -31,6 +33,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@next/env": "16.2.11",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
@@ -38,8 +41,8 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
-    "tailwindcss": "^4",
     "postgres": "^3.4.9",
+    "tailwindcss": "^4",
     "typescript": "^5"
   }
 }

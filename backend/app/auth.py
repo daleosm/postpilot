@@ -12,13 +12,16 @@ from app.config import Settings, get_settings
 from app.db.tables import (
     api_sessions,
     auth_login_attempts,
+    external_identities,
     organization_members,
     organization_role_policies,
     organizations,
     people,
     shows,
+    sso_connections,
     users,
 )
+from app.microsoft_sso import MICROSOFT_PROVIDER, MicrosoftAccessToken
 from app.permissions import policy_grants
 from app.security import hash_session_token, new_session_token, verify_node_scrypt_password
 
@@ -184,7 +187,13 @@ async def authenticate_password(session: AsyncSession, email: str, password: str
     return user.id, user.name
 
 
-async def create_session(session: AsyncSession, user_id: str, settings: Settings | None = None) -> str:
+async def create_session(
+    session: AsyncSession,
+    user_id: str,
+    settings: Settings | None = None,
+    *,
+    active_organization_id: str | None = None,
+) -> str:
     settings = settings or get_settings()
     token = new_session_token()
     now = datetime.now(UTC)
@@ -192,6 +201,7 @@ async def create_session(session: AsyncSession, user_id: str, settings: Settings
         insert(api_sessions).values(
             token_hash=hash_session_token(token, settings.session_secret),
             user_id=user_id,
+            active_organization_id=active_organization_id,
             expires_at=now + timedelta(days=settings.session_ttl_days),
             created_at=now,
             last_seen_at=now,
@@ -199,6 +209,146 @@ async def create_session(session: AsyncSession, user_id: str, settings: Settings
     )
     await session.commit()
     return token
+
+
+def _sso_connection_allows_email(allowed_domains: list[str] | None, email: str) -> bool:
+    if not allowed_domains:
+        return True
+    domain = email.rsplit("@", 1)[-1].lower()
+    return domain in {value.lower().removeprefix("@") for value in allowed_domains}
+
+
+async def resolve_microsoft_user(session: AsyncSession, identity: MicrosoftAccessToken) -> tuple[str, str]:
+    """Resolve one existing user and one tenant-enabled SSO connection.
+
+    An Entra token may link to a global PostPilot user by its immutable claims,
+    or link once through the signed work-email snapshot. It never creates a
+    user, membership, person, or cross-tenant relationship.
+    """
+    linked = (
+        await session.execute(
+            select(external_identities.c.id, external_identities.c.user_id).where(
+                and_(
+                    external_identities.c.provider == MICROSOFT_PROVIDER,
+                    external_identities.c.issuer == identity.issuer,
+                    external_identities.c.subject == identity.subject,
+                )
+            )
+        )
+    ).first()
+    if linked:
+        user_id = linked.user_id
+    else:
+        matched_users = (
+            await session.execute(
+                select(users.c.id)
+                .where(func.lower(users.c.email) == identity.verified_email.lower())
+                .order_by(users.c.id)
+            )
+        ).all()
+        if not matched_users:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No matching PostPilot account.")
+        if len(matched_users) != 1:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Microsoft work email matches multiple PostPilot accounts.",
+            )
+        user_id = matched_users[0].id
+
+    connections = (
+        await session.execute(
+            select(sso_connections.c.organization_id, sso_connections.c.allowed_email_domains)
+            .join(organization_members, organization_members.c.organization_id == sso_connections.c.organization_id)
+            .where(
+                and_(
+                    organization_members.c.user_id == user_id,
+                    sso_connections.c.provider == MICROSOFT_PROVIDER,
+                    sso_connections.c.enabled.is_(True),
+                    sso_connections.c.entra_tenant_id == identity.tenant_id,
+                )
+            )
+            .order_by(sso_connections.c.organization_id)
+        )
+    ).all()
+    connection = next(
+        (
+            candidate
+            for candidate in connections
+            if _sso_connection_allows_email(candidate.allowed_email_domains, identity.verified_email)
+        ),
+        None,
+    )
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Microsoft sign-in is not enabled for this PostPilot membership.",
+        )
+
+    if linked:
+        await session.execute(
+            update(external_identities)
+            .where(external_identities.c.id == linked.id)
+            .values(verified_email=identity.verified_email, last_used_at=datetime.now(UTC))
+        )
+    else:
+        # The database also guards the provider+tenant+object combination.
+        # Refuse a conflicting relationship instead of moving an Entra account
+        # between PostPilot users.
+        object_link = (
+            await session.execute(
+                select(external_identities.c.user_id).where(
+                    and_(
+                        external_identities.c.provider == MICROSOFT_PROVIDER,
+                        external_identities.c.entra_tenant_id == identity.tenant_id,
+                        external_identities.c.entra_object_id == identity.object_id,
+                    )
+                )
+            )
+        ).first()
+        if object_link and object_link.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Microsoft identity is linked to another account."
+            )
+        # Do not permit a concurrent first-time sign-in to create two links.
+        # The immutable Entra identity is the authority after this transaction.
+        created = await session.execute(
+            insert(external_identities)
+            .values(
+                user_id=user_id,
+                provider=MICROSOFT_PROVIDER,
+                issuer=identity.issuer,
+                entra_tenant_id=identity.tenant_id,
+                entra_object_id=identity.object_id,
+                subject=identity.subject,
+                verified_email=identity.verified_email,
+                last_used_at=datetime.now(UTC),
+            )
+            .on_conflict_do_nothing()
+        )
+        if not created.rowcount:
+            raced_link = (
+                await session.execute(
+                    select(external_identities.c.id, external_identities.c.user_id).where(
+                        and_(
+                            external_identities.c.provider == MICROSOFT_PROVIDER,
+                            external_identities.c.issuer == identity.issuer,
+                            external_identities.c.subject == identity.subject,
+                        )
+                    )
+                )
+            ).first()
+            if not raced_link or raced_link.user_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Microsoft identity is linked to another account.",
+                )
+            await session.execute(
+                update(external_identities)
+                .where(external_identities.c.id == raced_link.id)
+                .values(verified_email=identity.verified_email, last_used_at=datetime.now(UTC))
+            )
+    await session.commit()
+    return user_id, connection.organization_id
 
 
 async def revoke_session(session: AsyncSession, token: str | None) -> None:

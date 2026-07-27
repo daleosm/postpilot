@@ -1060,6 +1060,19 @@ class InvoiceSettingsUpdateRequest(BaseModel):
     payment_instructions: str | None = Field(default=None, max_length=2000)
 
 
+class SsoConnectionEnabledUpdateRequest(BaseModel):
+    """Only toggles a tenant's preconfigured Entra connection.
+
+    Directory identifiers and immutable user identity links are deliberately
+    outside this settings form to prevent an administrator from remapping a
+    user's Microsoft account.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+
+
 class RolePolicyRequest(BaseModel):
     role: str = Field(pattern="^[a-z0-9_]+$")
     label: str = Field(min_length=1, max_length=120)

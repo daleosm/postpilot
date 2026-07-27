@@ -12,7 +12,7 @@ from typing import Annotated, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, HTTPException, status
-from sqlalchemy import and_, delete, insert, select, update
+from sqlalchemy import and_, delete, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
@@ -26,8 +26,10 @@ from app.api.schemas import (
     RolePoliciesUpdateRequest,
     RoomCreateRequest,
     RoomUpdateRequest,
+    SsoConnectionEnabledUpdateRequest,
 )
 from app.auth import require_permission
+from app.config import get_settings
 from app.db.tables import (
     activity_log,
     billables,
@@ -37,6 +39,7 @@ from app.db.tables import (
     crm_companies,
     episode_workflow_approvals,
     episodes,
+    external_identities,
     invoice_settings,
     organization_members,
     organization_role_policies,
@@ -47,6 +50,7 @@ from app.db.tables import (
     rate_cards,
     rooms,
     service_rates,
+    sso_connections,
     users,
     vendor_invoices,
     workflow_stage_approval_rules,
@@ -332,6 +336,124 @@ async def settings_bootstrap(actor: CurrentActor, session: DbSession) -> dict[st
         },
         "catering": {"markup_percent": float(catering_row.markup_percent) if catering_row else 0},
     }
+
+
+@router.get("/settings/sso")
+async def get_sso_settings(actor: CurrentActor, session: DbSession) -> dict[str, object]:
+    """Return the active tenant's safe Entra configuration and link status."""
+    await require_permission(session, actor, "manage_settings")
+    connection = (
+        await session.execute(
+            select(sso_connections)
+            .where(
+                and_(
+                    sso_connections.c.organization_id == actor.organization_id,
+                    sso_connections.c.provider == "microsoft_entra",
+                )
+            )
+            .limit(1)
+        )
+    ).first()
+    linked_user_count = (
+        await session.execute(
+            select(func.count(func.distinct(external_identities.c.user_id)))
+            .select_from(
+                organization_members.join(
+                    external_identities,
+                    and_(
+                        external_identities.c.user_id == organization_members.c.user_id,
+                        external_identities.c.provider == "microsoft_entra",
+                    ),
+                )
+            )
+            .where(organization_members.c.organization_id == actor.organization_id)
+        )
+    ).scalar_one()
+    members = (
+        await session.execute(
+            select(
+                users.c.id.label("user_id"),
+                users.c.name.label("user_name"),
+                users.c.email,
+                organization_members.c.role.label("membership_role"),
+                func.max(external_identities.c.linked_at).label("linked_at"),
+            )
+            .select_from(
+                organization_members.join(users, users.c.id == organization_members.c.user_id).outerjoin(
+                    external_identities,
+                    and_(
+                        external_identities.c.user_id == organization_members.c.user_id,
+                        external_identities.c.provider == "microsoft_entra",
+                    ),
+                )
+            )
+            .where(organization_members.c.organization_id == actor.organization_id)
+            .group_by(users.c.id, users.c.name, users.c.email, organization_members.c.role)
+            .order_by(users.c.name, users.c.email, users.c.id)
+        )
+    ).all()
+    return {
+        "runtime_enabled": get_settings().microsoft_sso_enabled,
+        "connection": None
+        if not connection
+        else {
+            "enabled": connection.enabled,
+            "entra_tenant_id": str(connection.entra_tenant_id),
+            "allowed_email_domains": connection.allowed_email_domains or [],
+            "updated_at": connection.updated_at,
+        },
+        "linked_user_count": linked_user_count,
+        "users": [
+            {
+                "user_id": row.user_id,
+                "user_name": row.user_name,
+                "email": row.email,
+                "membership_role": row.membership_role,
+                "microsoft_linked": row.linked_at is not None,
+                "microsoft_linked_at": row.linked_at,
+            }
+            for row in members
+        ],
+    }
+
+
+@router.patch("/settings/sso/connection")
+async def set_sso_connection_enabled(
+    payload: SsoConnectionEnabledUpdateRequest, actor: CurrentActor, session: DbSession
+) -> dict[str, object]:
+    """Enable or disable only the active tenant's existing Entra connection."""
+    await require_permission(session, actor, "manage_settings")
+    if payload.enabled and not get_settings().microsoft_sso_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Microsoft SSO is not enabled in this deployment.",
+        )
+    row = (
+        await session.execute(
+            update(sso_connections)
+            .where(
+                and_(
+                    sso_connections.c.organization_id == actor.organization_id,
+                    sso_connections.c.provider == "microsoft_entra",
+                )
+            )
+            .values(enabled=payload.enabled, updated_at=datetime.now(UTC))
+            .returning(sso_connections.c.id, sso_connections.c.enabled)
+        )
+    ).first()
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Microsoft SSO is not configured for this post house."
+        )
+    await _audit(
+        session,
+        actor,
+        "sso.connection_enabled" if payload.enabled else "sso.connection_disabled",
+        "sso_connection",
+        str(row.id),
+    )
+    await session.commit()
+    return {"enabled": row.enabled}
 
 
 @router.patch("/settings/catering")
@@ -738,7 +860,9 @@ async def update_workflow(
         )
     valid_delivery_gates = {"none", "facility_dispatch", "client_acceptance"}
     if any(str(item.get("delivery_gate") or "none") not in valid_delivery_gates for item in stages_input):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow contains an invalid delivery gate.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow contains an invalid delivery gate."
+        )
     existing = (
         await session.execute(
             select(workflow_stages).where(

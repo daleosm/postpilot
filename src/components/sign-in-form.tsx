@@ -6,6 +6,7 @@ import { FormEvent, useState } from "react";
 
 import { safeCallbackPath } from "@/lib/auth-redirect";
 import { postpilotApiFetch } from "@/lib/postpilot-api-client";
+import { MicrosoftSignInButton } from "@/components/microsoft-sign-in-button";
 
 export function SignInForm({ debugMode }: { debugMode: boolean }) {
   const [email, setEmail] = useState("");
@@ -56,6 +57,7 @@ export function SignInForm({ debugMode }: { debugMode: boolean }) {
           {error && <p role="alert" className="text-xs text-[#a05f43]">{error}</p>}
           <Button type="submit" variant="primary" isDisabled={busy} className="w-full bg-[#283131] text-white"><LockKeyhole size={16} /> {busy ? "Signing in…" : "Sign in"}</Button>
         </form>
+        <MicrosoftSignInButton />
       </section>
     </main>
   );

@@ -61,6 +61,12 @@ application records even when future SSO providers are configured; identity
 providers map to application users rather than replacing tenant membership,
 person, role, or episode access records.
 
+Microsoft Entra SSO is opt-in and uses a SPA authorization-code-with-PKCE
+flow. Entra client IDs and token-validation identifiers are configuration, not
+secrets; application sessions remain opaque HTTP-only PostPilot cookies. See
+[Microsoft Entra SSO configuration](microsoft-entra-sso.md) for the
+registration and deployment contract.
+
 Production requires `POSTPILOT_SESSION_SECRET`. Secure cookies are enabled for
 HTTPS canonical URLs. The explicit `http://localhost` development/port-forward
 URL uses non-secure cookies because browsers reject Secure cookies over HTTP.

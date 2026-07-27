@@ -57,6 +57,28 @@ At minimum, runtime deployment needs:
 
 Changing a Kubernetes secret does not necessarily update environment variables in an already-running container. Restart or roll out the workload after changing a secret that is injected as environment variables.
 
+## Optional Microsoft Entra SSO
+
+Email/password remains the default authentication method. Microsoft Entra SSO
+is disabled by default and must remain disabled until the selected post house's
+Entra tenant configuration, existing PostPilot users, and membership records
+are ready. It is opt-in per post house: enabling one facility connection does
+not enable another. The browser flow is
+authorization-code with PKCE: it uses public client IDs, an API audience,
+tenant allow-list, exact redirect URIs, and a delegated API scope—**not** an
+Azure client secret.
+
+First Microsoft sign-in only links a verified work email to one existing
+PostPilot user with a live membership in that enabled facility. It does not
+provision users, map Entra groups to roles, enforce SSO, or disable password
+login. Those enterprise lifecycle features, including SCIM provisioning, are
+intentionally deferred.
+
+See [Microsoft Entra SSO configuration](microsoft-entra-sso.md) for the
+app-registration contract, all FastAPI and browser variables, and the
+important build-time behaviour of `NEXT_PUBLIC_*` values, plus the staged
+rollout and rollback procedure.
+
 ## Security notes
 
 - Restrict PostgreSQL access to application workloads and authorised operators.

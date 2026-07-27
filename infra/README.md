@@ -129,6 +129,14 @@ From the **Actions** tab, run **Build and publish PostPilot** manually, or push 
 
 Terraform creates the empty `postpilot/application` Secrets Manager record, and the EKS Secrets Store CSI add-on retrieves it using a Pod Identity role limited to that one secret. Its values are synchronised to the runtime `postpilot-secrets` Kubernetes Secret only for containers that need environment variables. Use `POSTPILOT_SESSION_SECRET` and `POSTPILOT_FRONTEND_ORIGINS` for new installations. The current Kubernetes secret mapping also accepts the historical `NEXTAUTH_SECRET`/`NEXTAUTH_URL` keys so an existing deployment can move to FastAPI without a secret-rotation outage.
 
+Microsoft Entra SSO remains disabled by default. Its Entra client ID, API
+audience, authority, allowed directory IDs, redirect URI, and delegated scope
+are configuration identifiers rather than secrets. The browser-facing
+`NEXT_PUBLIC_POSTPILOT_MSAL_*` values are compiled into the Next.js image, so
+they belong in the image-build configuration rather than AWS Secrets Manager.
+See [the Entra SSO guide](../docs/microsoft-entra-sso.md) before enabling it;
+do not add an Azure client secret for the SPA PKCE flow.
+
 ~~~bash
 aws eks update-kubeconfig --region us-east-1 --name postpilot-eks
 RDS_SECRET_ARN=$(terraform output -raw rds_master_user_secret_arn)

@@ -16,6 +16,8 @@ def test_api_exposes_core_tenant_scoped_routes(monkeypatch) -> None:
     paths = create_app().openapi()["paths"]
 
     assert "/v1/auth/sign-in" in paths
+    assert "/v1/auth/microsoft/exchange" in paths
+    assert "/v1/auth/microsoft/link" in paths
     assert "/v1/auth/change-password" in paths
     assert not any("otp" in path.lower() or "magic" in path.lower() for path in paths)
     assert "/v1/organizations/active" in paths
@@ -90,7 +92,26 @@ def test_api_exposes_core_tenant_scoped_routes(monkeypatch) -> None:
     assert "/v1/catering-requests" in paths
     assert "/v1/catering/resources" in paths
     assert "/v1/settings/bootstrap" in paths
+    assert "/v1/settings/sso" in paths
+    assert "/v1/settings/sso/connection" in paths
 
+    get_settings.cache_clear()
+
+
+def test_microsoft_exchange_is_disabled_by_default(monkeypatch) -> None:
+    monkeypatch.setenv("POSTPILOT_DATABASE_URL", "postgresql://postpilot:postpilot@localhost:5432/postpilot")
+    monkeypatch.setenv("POSTPILOT_SESSION_SECRET", "a-long-enough-test-session-secret-value")
+    monkeypatch.delenv("POSTPILOT_MICROSOFT_SSO_ENABLED", raising=False)
+    get_settings.cache_clear()
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    with TestClient(create_app()) as client:
+        response = client.post("/v1/auth/microsoft/exchange", headers={"Authorization": "Bearer untrusted"})
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Microsoft SSO is not enabled."}
     get_settings.cache_clear()
 
 

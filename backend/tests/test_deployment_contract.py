@@ -35,6 +35,32 @@ def test_fastapi_accepts_the_legacy_local_secret_names_during_rollout(monkeypatc
     assert settings.frontend_origins == ["https://existing-demo.example.test"]
 
 
+def test_fastapi_parses_the_opt_in_microsoft_sso_registration_contract(monkeypatch) -> None:
+    monkeypatch.setenv("POSTPILOT_DATABASE_URL", "postgresql://postpilot:postpilot@localhost:5432/postpilot")
+    monkeypatch.setenv("POSTPILOT_SESSION_SECRET", "a-long-enough-fastapi-session-secret-value")
+    monkeypatch.setenv("POSTPILOT_MICROSOFT_SSO_ENABLED", "false")
+    monkeypatch.setenv("POSTPILOT_MICROSOFT_SSO_SPA_CLIENT_ID", "postpilot-spa")
+    monkeypatch.setenv("POSTPILOT_MICROSOFT_SSO_API_AUDIENCE", "api://postpilot-api")
+    monkeypatch.setenv("POSTPILOT_MICROSOFT_SSO_ALLOWED_TENANT_IDS", "tenant-a, tenant-b")
+    monkeypatch.setenv(
+        "POSTPILOT_MICROSOFT_SSO_REDIRECT_URIS",
+        "https://postpilot.example.test/sign-in/,http://localhost:5000/sign-in",
+    )
+    monkeypatch.setenv("POSTPILOT_MICROSOFT_SSO_REQUIRED_SCOPE", "api://postpilot-api/access_as_user")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.microsoft_sso_enabled is False
+    assert settings.microsoft_sso_spa_client_id == "postpilot-spa"
+    assert settings.microsoft_sso_api_audience == "api://postpilot-api"
+    assert settings.microsoft_sso_allowed_tenant_ids == ["tenant-a", "tenant-b"]
+    assert settings.microsoft_sso_redirect_uris == [
+        "https://postpilot.example.test/sign-in/",
+        "http://localhost:5000/sign-in",
+    ]
+    assert settings.microsoft_sso_required_scope == "api://postpilot-api/access_as_user"
+
+
 def test_kubernetes_maps_legacy_secret_source_keys_to_fastapi_runtime_keys() -> None:
     manifest = (ROOT / "deploy/kubernetes/base/secret-provider-class.yaml").read_text()
 
