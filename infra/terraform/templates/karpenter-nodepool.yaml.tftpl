@@ -8,6 +8,9 @@ spec:
   role: ${node_role_name}
   amiSelectorTerms:
     - alias: al2023@latest
+  # Dynamic demo capacity uses public subnets too, so it has outbound access
+  # without a NAT Gateway. The application is still reached through the ALB.
+  associatePublicIPAddress: true
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: ${cluster_name}

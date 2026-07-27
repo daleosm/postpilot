@@ -151,6 +151,9 @@ resource "aws_subnet" "public" {
     Name                                  = "${local.name}-public-${count.index + 1}"
     "kubernetes.io/role/elb"              = "1"
     "kubernetes.io/cluster/${local.name}" = "shared"
+    # The low-cost demo deliberately runs workers here so they can reach ECR
+    # and AWS APIs through the Internet Gateway without a NAT Gateway.
+    "karpenter.sh/discovery" = local.name
   }
 }
 
@@ -170,29 +173,6 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Application nodes do not receive public addresses. A single NAT Gateway is a
-# deliberate low-cost compromise for this pilot: both AZs use it for ECR,
-# package, and AWS API egress. A high-availability facility deployment should
-# use one NAT Gateway and private route table per AZ instead.
-resource "aws_eip" "nat" {
-  domain = "vpc"
-
-  tags = {
-    Name = "${local.name}-nat"
-  }
-}
-
-resource "aws_nat_gateway" "this" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public[0].id
-
-  tags = {
-    Name = "${local.name}-nat"
-  }
-
-  depends_on = [aws_internet_gateway.this]
-}
-
 resource "aws_subnet" "private" {
   count = 2
 
@@ -205,35 +185,13 @@ resource "aws_subnet" "private" {
     Name                                  = "${local.name}-private-${count.index + 1}"
     "kubernetes.io/role/internal-elb"     = "1"
     "kubernetes.io/cluster/${local.name}" = "shared"
-    # Karpenter discovers only these private node subnets. Database and public
-    # ALB subnets are deliberately not selectable by dynamically provisioned
-    # workers.
-    "karpenter.sh/discovery" = local.name
   }
 }
 
-resource "aws_route_table" "private" {
-  vpc_id = aws_vpc.this.id
-
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.this.id
-  }
-
-  tags = {
-    Name = "${local.name}-private"
-  }
-}
-
-resource "aws_route_table_association" "private" {
-  count = length(aws_subnet.private)
-
-  subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = aws_route_table.private.id
-}
-
-# Database subnets deliberately have no default route. RDS is non-public and
-# accepts PostgreSQL only from the EKS cluster security group.
+# Private subnets have no default route. They host only EKS control-plane ENIs;
+# worker nodes use the public subnets for low-cost outbound internet access.
+# Database subnets below are also isolated and RDS accepts PostgreSQL only from
+# the EKS cluster security group.
 resource "aws_subnet" "database" {
   count = 2
 
@@ -294,8 +252,9 @@ resource "aws_eks_cluster" "this" {
   }
 
   vpc_config {
-    # EKS control-plane ENIs and all worker nodes use private subnets. The
-    # public subnets are reserved for the ALB and NAT Gateway.
+    # Keep EKS control-plane ENIs private. Worker nodes use the public subnets
+    # and reach this endpoint privately inside the VPC, avoiding NAT Gateway
+    # hourly and data-processing charges for this non-essential demo.
     subnet_ids = aws_subnet.private[*].id
     # Worker nodes use the private endpoint inside the VPC. Operator kubectl
     # access remains on the public endpoint and is restricted by the CIDR
@@ -418,12 +377,13 @@ resource "aws_launch_template" "spot" {
 
 resource "aws_eks_node_group" "spot" {
   cluster_name    = aws_eks_cluster.this.name
-  node_group_name = "spot-small-private"
+  node_group_name = "spot-small-public"
   node_role_arn   = aws_iam_role.node.arn
-  subnet_ids      = aws_subnet.private[*].id
+  subnet_ids      = aws_subnet.public[*].id
 
-  # This is a non-essential pilot workload. Use multiple same-sized Spot
-  # pools so EKS can choose capacity-optimised availability across them.
+  # This is a non-essential pilot workload. Public node IPs provide outbound
+  # access to ECR and AWS APIs without a NAT Gateway. The ALB remains the only
+  # normal public entry point to the application.
   capacity_type  = "SPOT"
   instance_types = var.node_instance_types
   ami_type       = "AL2023_x86_64_STANDARD"
@@ -451,7 +411,7 @@ resource "aws_eks_node_group" "spot" {
   }
 
   depends_on = [
-    aws_route_table_association.private,
+    aws_route_table_association.public,
     aws_iam_role_policy_attachment.node_worker,
     aws_iam_role_policy_attachment.node_cni,
     aws_iam_role_policy_attachment.node_ecr,

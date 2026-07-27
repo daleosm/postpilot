@@ -46,9 +46,9 @@ variable "cluster_endpoint_public_access_cidrs" {
 }
 
 variable "node_instance_types" {
-  description = "Compatible x86_64 Spot small instances for the fixed two-node managed group. VPC CNI prefix delegation provides extra pod IP capacity."
+  description = "x86_64 Spot instance type for the fixed two-node public demo group. VPC CNI prefix delegation provides extra pod IP capacity."
   type        = list(string)
-  default     = ["t3.small", "t3a.small"]
+  default     = ["t3a.small"]
 }
 
 variable "node_min_size" {
