@@ -1,7 +1,7 @@
-# Copy to terraform.tfvars. Do not commit the real file.
+# Copy to terraform.tfvars. Do not commit the real file. This Terraform root
+# is permanently the low-cost demo topology.
 aws_region      = "us-east-1"
-project_name    = "postpilot"
-deployment_profile = "demo"
+project_name    = "postpilot-demo"
 gitops_repo_url = "https://github.com/YOUR-ORG/postpilot.git"
 github_repository = "YOUR-ORG/postpilot"
 
@@ -19,8 +19,21 @@ github_oidc_subjects = [
 # Lock this down to the public egress IP ranges of your office/VPN/CI runner.
 cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
 
+# Two small Spot nodes have no availability guarantee. Public networking avoids
+# NAT Gateway cost for this learning/demo path.
+node_instance_types = ["t3.small", "t3a.small"]
+node_min_size       = 2
+node_desired_size   = 2
+node_max_size       = 2
+
+rds_instance_class        = "db.t3.micro"
+rds_allocated_storage_gb  = 20
+rds_multi_az              = false
+rds_deletion_protection   = false
+rds_backup_retention_days = 1
+rds_skip_final_snapshot   = true
+
 # Optional: confirm the resulting SNS subscription email in your inbox after
-# Terraform applies. Set the Classic Load Balancer name once Kubernetes creates
-# it (the name is the first hostname segment in `kubectl get svc -n postpilot`).
+# Terraform applies. Set the ALB ARN suffix after Kubernetes creates it.
 # observability_alarm_email = "ops@example.com"
 # public_application_load_balancer_arn_suffix = "app/postpilot/abc123"

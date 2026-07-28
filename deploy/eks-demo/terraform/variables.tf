@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "project_name" {
   description = "Short, lower-case identifier used to name AWS resources."
   type        = string
-  default     = "postpilot"
+  default     = "postpilot-demo"
 
   validation {
     condition     = can(regex("^[a-z][a-z0-9-]{1,22}$", var.project_name))
@@ -15,14 +15,16 @@ variable "project_name" {
   }
 }
 
+# This is deliberately fixed by the root validation. It remains a declared
+# variable solely so a prior demo tfvars file can move here without a rewrite.
 variable "deployment_profile" {
-  description = "Deployment topology. demo uses public Spot workers and single-AZ RDS; ha uses private On-Demand workers, one NAT Gateway per AZ, and Multi-AZ RDS. Use a separate Terraform state for each profile."
+  description = "Fixed deployment topology for this Terraform root."
   type        = string
   default     = "demo"
 
   validation {
-    condition     = contains(["demo", "ha"], var.deployment_profile)
-    error_message = "deployment_profile must be either demo or ha."
+    condition     = var.deployment_profile == "demo"
+    error_message = "This root is permanently the demo topology. Use deploy/eks-ha/terraform for the two-AZ deployment."
   }
 }
 
@@ -236,13 +238,6 @@ variable "gitops_target_revision" {
   description = "Git branch, tag, or commit Argo CD should reconcile."
   type        = string
   default     = "main"
-}
-
-variable "gitops_manifest_path" {
-  description = "Optional explicit Kustomize path within gitops_repo_url used by the Argo CD Application. Leave null to select the demo or ha overlay from deployment_profile."
-  type        = string
-  default     = null
-  nullable    = true
 }
 
 variable "tags" {

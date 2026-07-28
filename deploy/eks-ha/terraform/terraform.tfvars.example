@@ -1,0 +1,47 @@
+# Copy to terraform.tfvars. Do not commit the real file. This Terraform root
+# is permanently the private two-AZ HA topology.
+aws_region      = "eu-west-1"
+project_name    = "cutluma-production"
+gitops_repo_url = "https://github.com/YOUR-ORG/postpilot.git"
+github_repository = "YOUR-ORG/postpilot"
+
+# GitHub's standard OIDC subject formats. If your GitHub organisation has a
+# custom OIDC subject template, copy the exact `sub` claim from an Actions run.
+github_oidc_subjects = [
+  "repo:YOUR-ORG/postpilot:environment:production",
+  "repo:YOUR-ORG/postpilot:ref:refs/heads/main",
+]
+
+# Set this only if the AWS account already has a GitHub OIDC provider managed
+# outside this Terraform state.
+# github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+
+# Lock this down to the public egress IP ranges of your office/VPN/CI runner.
+cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
+
+# Two baseline On-Demand nodes run in private subnets. Choose sizes from an
+# observed capacity plan; these are conservative starting values only.
+node_instance_types = ["m6a.large", "m6i.large"]
+node_min_size       = 2
+node_desired_size   = 2
+node_max_size       = 4
+
+# Multi-AZ RDS provides database failover. Set an appropriate size after a
+# capacity test and retain enough backup history for the facility's policy.
+rds_instance_class        = "db.m6g.large"
+rds_allocated_storage_gb  = 100
+rds_multi_az              = true
+rds_deletion_protection   = true
+rds_backup_retention_days = 14
+rds_skip_final_snapshot   = false
+
+# Must be unique within the region/account and changed for a replacement DB.
+rds_final_snapshot_identifier = "cutluma-production-final-snapshot"
+
+# Retain enough application/event logs for operational investigation.
+application_log_retention_days = 30
+
+# Optional: confirm the resulting SNS subscription email in your inbox after
+# Terraform applies. Set the ALB ARN suffix after Kubernetes creates it.
+# observability_alarm_email = "ops@example.com"
+# public_application_load_balancer_arn_suffix = "app/postpilot/abc123"

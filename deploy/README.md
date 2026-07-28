@@ -13,13 +13,14 @@ All three run the same Next.js frontend, FastAPI API, and PostgreSQL schema.
 They differ only in how the containers, database, networking, secrets, backups,
 and operational controls are managed.
 
-The two EKS options also have fully separate Kubernetes YAML folders:
+The two EKS options also have fully separate Kubernetes and Terraform folders:
 
-- `deploy/eks-demo/kubernetes` provides the disposable HTTP ALB demo;
-- `deploy/eks-ha/kubernetes` enables secure cookies and intentionally
+- `deploy/eks-demo/terraform` and `deploy/eks-demo/kubernetes` provide the
+  disposable HTTP ALB demo;
+- `deploy/eks-ha/terraform` and `deploy/eks-ha/kubernetes` enable secure
+  cookies and intentionally
   requires an ACM-backed HTTPS ingress to be configured before it is public.
 
-Do not change `deployment_profile` in an existing Terraform state to switch
-between demo and two-AZ EKS. Create a separate state and use a different
-`project_name`; the change replaces fundamental networking and database
-resources.
+Each Terraform directory permanently selects its own topology. Never reuse a
+state key or `project_name` between them: create a separate state for every
+deployment.

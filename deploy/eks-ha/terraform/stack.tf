@@ -1,0 +1,550 @@
+locals {
+  name                 = coalesce(var.cluster_name, "${var.project_name}-eks")
+  is_ha_profile        = var.deployment_profile == "ha"
+  worker_subnet_ids    = local.is_ha_profile ? aws_subnet.private[*].id : aws_subnet.public[*].id
+  worker_capacity_type = local.is_ha_profile ? "ON_DEMAND" : "SPOT"
+  nat_gateway_count    = local.is_ha_profile ? length(aws_subnet.private) : 0
+  gitops_manifest_path = "deploy/eks-ha/kubernetes"
+
+  github_oidc_provider_arn = coalesce(
+    var.github_oidc_provider_arn,
+    try(aws_iam_openid_connect_provider.github[0].arn, null),
+  )
+
+  github_oidc_subjects = coalesce(var.github_oidc_subjects, [
+    "repo:${var.github_repository}:environment:production",
+    "repo:${var.github_repository}:ref:refs/heads/main",
+  ])
+
+  tags = merge({
+    Project   = var.project_name
+    ManagedBy = "terraform"
+  }, var.tags)
+}
+
+# A private ECR repository keeps application images in the same AWS account as
+# the EKS nodes. Image tags are immutable so the GitOps commit always resolves
+# to the exact image that Actions built.
+resource "aws_ecr_repository" "postpilot" {
+  name                 = var.project_name
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+# Keep registry scanning in ECR's Basic mode: every newly pushed image is
+# scanned once, without Amazon Inspector's paid continuous re-scanning. This
+# applies at registry level, so any future repositories in this demo account
+# get the same predictable, no-extra-cost baseline.
+resource "aws_ecr_registry_scanning_configuration" "basic" {
+  scan_type = "BASIC"
+
+  rule {
+    scan_frequency = "SCAN_ON_PUSH"
+
+    repository_filter {
+      filter      = "*"
+      filter_type = "WILDCARD"
+    }
+  }
+}
+
+resource "aws_ecr_lifecycle_policy" "postpilot" {
+  repository = aws_ecr_repository.postpilot.name
+
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "Keep the 40 newest immutable PostPilot images"
+      selection = {
+        tagStatus   = "any"
+        countType   = "imageCountMoreThan"
+        countNumber = 40
+      }
+      action = { type = "expire" }
+    }]
+  })
+}
+
+# The role is used only by the GitHub Actions publish job. If this AWS account
+# already has the GitHub OIDC provider, pass its ARN in github_oidc_provider_arn
+# instead of having this stack create a duplicate provider.
+resource "aws_iam_openid_connect_provider" "github" {
+  count = var.github_oidc_provider_arn == null ? 1 : 0
+
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+}
+
+data "aws_iam_policy_document" "github_ecr_publish_assume_role" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [local.github_oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      # Allow only the GitHub OIDC subjects explicitly configured for this
+      # repository. GitHub supports customised OIDC subjects, so deriving
+      # these values from the owner/repository slug is not always safe.
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = local.github_oidc_subjects
+    }
+  }
+}
+
+resource "aws_iam_role" "github_ecr_publish" {
+  name               = "${local.name}-github-ecr-publish"
+  assume_role_policy = data.aws_iam_policy_document.github_ecr_publish_assume_role.json
+}
+
+data "aws_iam_policy_document" "github_ecr_publish" {
+  statement {
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:BatchGetImage",
+      "ecr:CompleteLayerUpload",
+      "ecr:InitiateLayerUpload",
+      "ecr:PutImage",
+      "ecr:UploadLayerPart",
+    ]
+    resources = [aws_ecr_repository.postpilot.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "github_ecr_publish" {
+  name   = "${local.name}-ecr-publish"
+  role   = aws_iam_role.github_ecr_publish.id
+  policy = data.aws_iam_policy_document.github_ecr_publish.json
+}
+
+resource "aws_vpc" "this" {
+  cidr_block           = var.vpc_cidr
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+}
+
+resource "aws_internet_gateway" "this" {
+  vpc_id = aws_vpc.this.id
+}
+
+resource "aws_subnet" "public" {
+  count = 2
+
+  vpc_id                  = aws_vpc.this.id
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  cidr_block              = cidrsubnet(var.vpc_cidr, 4, count.index)
+  map_public_ip_on_launch = true
+
+  tags = merge({
+    Name                                  = "${local.name}-public-${count.index + 1}"
+    "kubernetes.io/role/elb"              = "1"
+    "kubernetes.io/cluster/${local.name}" = "shared"
+    }, local.is_ha_profile ? {} : {
+    # The low-cost demo deliberately runs workers here so they can reach ECR
+    # and AWS APIs through the Internet Gateway without a NAT Gateway.
+    "karpenter.sh/discovery" = local.name
+  })
+}
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.this.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.this.id
+  }
+}
+
+resource "aws_route_table_association" "public" {
+  count = length(aws_subnet.public)
+
+  subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_subnet" "private" {
+  count = 2
+
+  vpc_id                  = aws_vpc.this.id
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  cidr_block              = cidrsubnet(var.vpc_cidr, 4, count.index + 2)
+  map_public_ip_on_launch = false
+
+  tags = merge({
+    Name                                  = "${local.name}-private-${count.index + 1}"
+    "kubernetes.io/role/internal-elb"     = "1"
+    "kubernetes.io/cluster/${local.name}" = "shared"
+    }, local.is_ha_profile ? {
+    "karpenter.sh/discovery" = local.name
+  } : {})
+}
+
+# The demo profile keeps private subnets isolated because workers run publicly
+# and do not need a NAT Gateway. The ha profile creates one NAT Gateway and one
+# private route table per AZ so a single NAT/AZ outage does not remove egress
+# from every worker node.
+resource "aws_eip" "private_nat" {
+  count  = local.nat_gateway_count
+  domain = "vpc"
+
+  tags = {
+    Name = "${local.name}-nat-${count.index + 1}"
+  }
+}
+
+resource "aws_nat_gateway" "private" {
+  count         = local.nat_gateway_count
+  allocation_id = aws_eip.private_nat[count.index].id
+  subnet_id     = aws_subnet.public[count.index].id
+
+  tags = {
+    Name = "${local.name}-nat-${count.index + 1}"
+  }
+
+  depends_on = [aws_internet_gateway.this]
+}
+
+resource "aws_route_table" "private" {
+  count  = local.nat_gateway_count
+  vpc_id = aws_vpc.this.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.private[count.index].id
+  }
+
+  tags = {
+    Name = "${local.name}-private-${count.index + 1}"
+  }
+}
+
+resource "aws_route_table_association" "private" {
+  count          = local.nat_gateway_count
+  subnet_id      = aws_subnet.private[count.index].id
+  route_table_id = aws_route_table.private[count.index].id
+}
+
+# Database subnets always remain isolated. RDS accepts PostgreSQL only from the
+# EKS cluster security group.
+resource "aws_subnet" "database" {
+  count = 2
+
+  vpc_id                  = aws_vpc.this.id
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  cidr_block              = cidrsubnet(var.vpc_cidr, 4, count.index + 4)
+  map_public_ip_on_launch = false
+
+  tags = {
+    Name = "${local.name}-database-${count.index + 1}"
+  }
+}
+
+resource "aws_route_table" "database" {
+  vpc_id = aws_vpc.this.id
+
+  tags = {
+    Name = "${local.name}-database"
+  }
+}
+
+resource "aws_route_table_association" "database" {
+  count = length(aws_subnet.database)
+
+  subnet_id      = aws_subnet.database[count.index].id
+  route_table_id = aws_route_table.database.id
+}
+
+data "aws_iam_policy_document" "cluster_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["eks.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "cluster" {
+  name               = "${local.name}-cluster"
+  assume_role_policy = data.aws_iam_policy_document.cluster_assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "cluster" {
+  role       = aws_iam_role.cluster.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
+resource "aws_eks_cluster" "this" {
+  name     = local.name
+  role_arn = aws_iam_role.cluster.arn
+  version  = var.kubernetes_version
+
+  access_config {
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = true
+  }
+
+  vpc_config {
+    # Keep EKS control-plane ENIs private. Worker nodes use the public subnets
+    # and reach this endpoint privately inside the VPC, avoiding NAT Gateway
+    # hourly and data-processing charges for this non-essential demo.
+    subnet_ids = aws_subnet.private[*].id
+    # Worker nodes use the private endpoint inside the VPC. Operator kubectl
+    # access remains on the public endpoint and is restricted by the CIDR
+    # allow-list below.
+    endpoint_private_access = true
+    endpoint_public_access  = true
+    public_access_cidrs     = var.cluster_endpoint_public_access_cidrs
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.cluster]
+}
+
+# Karpenter selects the EKS-created cluster security group through this tag.
+# Keeping the tag as a separate resource avoids taking ownership of EKS's
+# managed security-group configuration.
+resource "aws_ec2_tag" "karpenter_cluster_security_group" {
+  resource_id = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+  key         = "karpenter.sh/discovery"
+  value       = local.name
+}
+
+data "aws_iam_policy_document" "node_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "node" {
+  name               = "${local.name}-node"
+  assume_role_policy = data.aws_iam_policy_document.node_assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "node_worker" {
+  role       = aws_iam_role.node.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "node_cni" {
+  role       = aws_iam_role.node.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
+
+resource "aws_iam_role_policy_attachment" "node_ecr" {
+  role       = aws_iam_role.node.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_eks_addon" "vpc_cni" {
+  cluster_name                = aws_eks_cluster.this.name
+  addon_name                  = "vpc-cni"
+  resolve_conflicts_on_create = "OVERWRITE"
+
+  # Prefix delegation gives each Nitro ENI a /28 IP prefix instead of only a
+  # few secondary addresses. It is required before raising kubelet maxPods on
+  # the small Spot nodes below.
+  configuration_values = jsonencode({
+    env = {
+      ENABLE_PREFIX_DELEGATION = "true"
+      WARM_PREFIX_TARGET       = "1"
+    }
+  })
+
+  # The initial managed node group must exist before Terraform waits for an
+  # add-on's Kubernetes pods to become healthy.
+  depends_on = [aws_eks_node_group.spot]
+}
+
+resource "aws_eks_addon" "kube_proxy" {
+  cluster_name                = aws_eks_cluster.this.name
+  addon_name                  = "kube-proxy"
+  resolve_conflicts_on_create = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.spot]
+}
+
+resource "aws_eks_addon" "coredns" {
+  cluster_name                = aws_eks_cluster.this.name
+  addon_name                  = "coredns"
+  resolve_conflicts_on_create = "OVERWRITE"
+
+  depends_on = [aws_eks_node_group.spot]
+}
+
+# EKS's default t3.small pod limit is deliberately conservative. This custom
+# launch template raises it only after VPC CNI prefix delegation is enabled,
+# so the scheduler never assigns more Pods than the CNI can network.
+resource "aws_launch_template" "spot" {
+  name_prefix            = "${local.name}-spot-small-"
+  update_default_version = true
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+
+  user_data = base64encode(<<-EOT
+    MIME-Version: 1.0
+    Content-Type: multipart/mixed; boundary="NODEADM"
+
+    --NODEADM
+    Content-Type: application/node.eks.aws
+
+    ---
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      kubelet:
+        config:
+          maxPods: 16
+    --NODEADM--
+  EOT
+  )
+}
+
+resource "aws_eks_node_group" "spot" {
+  cluster_name    = aws_eks_cluster.this.name
+  node_group_name = local.is_ha_profile ? "on-demand-private" : "spot-small-public"
+  node_role_arn   = aws_iam_role.node.arn
+  subnet_ids      = local.worker_subnet_ids
+
+  # Demo workers are public Spot capacity to avoid NAT cost. The ha profile
+  # keeps the managed baseline private and On-Demand; its per-AZ NAT routes
+  # provide outbound access without exposing worker public IPs.
+  capacity_type  = local.worker_capacity_type
+  instance_types = var.node_instance_types
+  ami_type       = "AL2023_x86_64_STANDARD"
+
+  launch_template {
+    id      = aws_launch_template.spot.id
+    version = tostring(aws_launch_template.spot.latest_version)
+  }
+
+  scaling_config {
+    min_size     = var.node_min_size
+    desired_size = var.node_desired_size
+    max_size     = var.node_max_size
+  }
+
+  update_config {
+    max_unavailable = 1
+  }
+
+  # Instance-family changes force EKS node-group replacement. Use a distinct
+  # name and create the new two-node group first so Kubernetes can reschedule
+  # PostPilot before the previous Spot nodes are drained.
+  lifecycle {
+    precondition {
+      condition     = !local.is_ha_profile || (var.node_min_size >= 2 && var.node_desired_size >= 2)
+      error_message = "The ha profile requires at least two managed baseline nodes so application replicas can be spread across availability zones."
+    }
+
+    create_before_destroy = true
+  }
+
+  depends_on = [
+    aws_route_table_association.public,
+    aws_route_table_association.private,
+    aws_iam_role_policy_attachment.node_worker,
+    aws_iam_role_policy_attachment.node_cni,
+    aws_iam_role_policy_attachment.node_ecr,
+  ]
+}
+
+# Preserve the existing managed-node-group state address while replacing the
+# original On-Demand micro group with the Spot small group above.
+moved {
+  from = aws_eks_node_group.on_demand
+  to   = aws_eks_node_group.spot
+}
+
+resource "aws_db_subnet_group" "postgres_isolated" {
+  name       = "${local.name}-postgres-isolated"
+  subnet_ids = aws_subnet.database[*].id
+
+  tags = {
+    Name = "${local.name}-postgres-isolated"
+  }
+}
+
+resource "aws_security_group" "postgres" {
+  name        = "${local.name}-postgres"
+  description = "PostgreSQL access from the PostPilot EKS cluster only"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description     = "PostgreSQL from EKS cluster security group"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_eks_cluster.this.vpc_config[0].cluster_security_group_id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_db_instance" "postgres" {
+  identifier        = "${var.project_name}-postgres-private"
+  engine            = "postgres"
+  instance_class    = var.rds_instance_class
+  allocated_storage = var.rds_allocated_storage_gb
+  storage_type      = "gp3"
+  # Encrypt storage with RDS's AWS-managed default key. This is the secure,
+  # no-customer-KMS-fee baseline for shared PostPilot deployments.
+  storage_encrypted           = true
+  db_name                     = "postpilot"
+  username                    = "postpilot"
+  manage_master_user_password = true
+
+  db_subnet_group_name   = aws_db_subnet_group.postgres_isolated.name
+  vpc_security_group_ids = [aws_security_group.postgres.id]
+  publicly_accessible    = false
+  multi_az               = var.rds_multi_az
+
+  backup_retention_period   = var.rds_backup_retention_days
+  copy_tags_to_snapshot     = true
+  deletion_protection       = var.rds_deletion_protection
+  skip_final_snapshot       = var.rds_skip_final_snapshot
+  final_snapshot_identifier = var.rds_skip_final_snapshot ? null : var.rds_final_snapshot_identifier
+  apply_immediately         = true
+
+  tags = {
+    Name = "${local.name}-postgres-private"
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !local.is_ha_profile || (var.rds_multi_az && var.rds_deletion_protection && !var.rds_skip_final_snapshot)
+      error_message = "The ha profile requires Multi-AZ RDS, deletion protection, and a final snapshot on deletion."
+    }
+  }
+}

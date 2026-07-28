@@ -39,10 +39,9 @@ Choose one of the three supplied paths:
 | [Low-cost EKS demo](../deploy/eks-demo/README.md) | Disposable public demos and EKS learning | Facility production data or an availability commitment |
 | [Two-AZ EKS](../deploy/eks-ha/README.md) | Production-oriented AWS operation with a tested runbook | A substitute for backups, recovery testing, or operational ownership |
 
-The EKS paths share Terraform, Kubernetes manifests, Argo CD, and ECR image
-publishing. Keep each profile in a different Terraform state and use a
-different `project_name`; never switch an existing demo state into the two-AZ
-profile.
+Each EKS path has its own complete Terraform configuration and Kubernetes
+manifests. Keep each deployment in a different Terraform state and use a
+different `project_name`; never reuse one profile's state for the other.
 
 ## EKS shared delivery path
 

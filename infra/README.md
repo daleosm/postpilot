@@ -1,12 +1,13 @@
 # PostPilot EKS deployment
 
-This directory contains the shared Terraform, EKS, Argo CD, ECR, and Kubernetes
-implementation used by two separately documented profiles:
+This directory contains the AWS/EKS operational documentation. The two
+independent Terraform configurations, EKS, Argo CD, ECR, and Kubernetes
+deployment paths are:
 
 | Profile | Configuration | Intended use |
 | --- | --- | --- |
-| [Low-cost demo](../deploy/eks-demo/README.md) | `deployment_profile = "demo"` | Disposable demos and EKS learning |
-| [Two-AZ EKS](../deploy/eks-ha/README.md) | `deployment_profile = "ha"` | Production-oriented facility deployment |
+| [Low-cost demo](../deploy/eks-demo/README.md) | `deploy/eks-demo/terraform` | Disposable demos and EKS learning |
+| [Two-AZ EKS](../deploy/eks-ha/README.md) | `deploy/eks-ha/terraform` | Production-oriented facility deployment |
 
 The `demo` default is deliberately compact:
 
@@ -95,10 +96,14 @@ terraform apply
 
 ### 4. Configure and create EKS, RDS, Argo CD, and ECR
 
-Use your current public IP for the initial EKS API allow-list. Replace it with an office/VPN CIDR if appropriate. In `infra/terraform/terraform.tfvars`, set both `gitops_repo_url` and `github_repository` to your GitHub repository, then set `cluster_endpoint_public_access_cidrs` to the resulting `/32` value.
+Choose either the demo or two-AZ root before continuing. Use your current public
+IP for the initial EKS API allow-list. Replace it with an office/VPN CIDR if
+appropriate. In that root's `terraform.tfvars`, set both `gitops_repo_url` and
+`github_repository` to your GitHub repository, then set
+`cluster_endpoint_public_access_cidrs` to the resulting `/32` value.
 
 ~~~bash
-cd ../terraform
+cd ../../deploy/eks-demo/terraform
 cp terraform.tfvars.example terraform.tfvars
 MY_IP=$(curl -fsSL https://checkip.amazonaws.com | tr -d '\n')
 # Edit terraform.tfvars before continuing.
@@ -163,9 +168,10 @@ jq -n \
   | aws secretsmanager put-secret-value --secret-id "$APP_SECRET_NAME" --secret-string file:///dev/stdin
 ~~~
 
-Argo CD selects `deploy/eks-demo/kubernetes` or `deploy/eks-ha/kubernetes`
-from `deployment_profile`. Each profile owns a complete Kubernetes manifest
-set and its own immutable image references. Argo CD first runs a PreSync
+Each Terraform root has a fixed Kubernetes manifest path:
+`deploy/eks-demo/kubernetes` or `deploy/eks-ha/kubernetes`. Each profile owns
+a complete Kubernetes manifest set and its own immutable image references.
+Argo CD first runs a PreSync
 secret-sync Job, which mounts the AWS secret and creates `postpilot-secrets`;
 it then runs the migration Job. Check both complete before proceeding:
 
@@ -247,8 +253,8 @@ The concise version below is retained as a reference for experienced operators. 
    terraform init
    terraform apply
 
-   # Then configure the actual cluster.
-   cd infra/terraform
+   # Then configure either the demo or HA cluster (demo shown).
+   cd deploy/eks-demo/terraform
    cp terraform.tfvars.example terraform.tfvars
    ~~~
 
@@ -304,7 +310,7 @@ The concise version below is retained as a reference for experienced operators. 
 
 The **Build and publish PostPilot** workflow publishes private images to Amazon ECR, using GitHub's short-lived OIDC identity. It needs `contents: write` to commit immutable image references for Argo CD and the three `production` environment variables described in step 5. The managed EKS node group already has `AmazonEC2ContainerRegistryReadOnly`, so it can pull from the private repository without an image-pull secret.
 
-For the optional **Terraform EKS** workflow, create a protected GitHub environment named **production** and set these environment variables:
+For the optional **Terraform EKS** workflow, create a protected GitHub environment named **production** and set these environment variables. The workflow asks which independent root (`demo` or `ha`) to operate on and uses a separate state key for it.
 
 | Variable | Purpose |
 | --- | --- |
@@ -312,16 +318,19 @@ For the optional **Terraform EKS** workflow, create a protected GitHub environme
 | AWS_TERRAFORM_ROLE_ARN | Short-lived OIDC-assumed role for Terraform |
 | TF_STATE_BUCKET | Existing versioned, encrypted S3 state bucket |
 | GITOPS_REPO_URL | HTTPS URL for the repository Argo CD should reconcile |
+| EKS_API_ALLOWED_CIDRS | Terraform list literal of restricted EKS API CIDRs, e.g. `["203.0.113.10/32"]` |
 
 The AWS IAM trust policy must limit GitHub OIDC to this repository and the protected **production** environment. GitHub recommends OIDC instead of long-lived AWS keys and AWS requires a condition on the GitHub subject claim. See [GitHub's OIDC guide](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws) and the [AWS IAM guidance](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html).
 
 ## Operations
 
 ~~~bash
-# Validate the infrastructure locally
-terraform -chdir=infra/terraform fmt -check -recursive
-terraform -chdir=infra/terraform init -backend=false
-terraform -chdir=infra/terraform validate
+# Validate both independent Terraform roots locally
+terraform -chdir=deploy/eks-demo/terraform fmt -check -recursive
+terraform -chdir=deploy/eks-demo/terraform init -backend=false
+terraform -chdir=deploy/eks-demo/terraform validate
+terraform -chdir=deploy/eks-ha/terraform init -backend=false
+terraform -chdir=deploy/eks-ha/terraform validate
 
 # Check the delivery state
 kubectl -n argocd get applications.argoproj.io postpilot

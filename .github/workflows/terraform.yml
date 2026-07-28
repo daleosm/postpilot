@@ -9,13 +9,19 @@ on:
         type: choice
         options: [plan, apply, destroy]
         default: plan
+      profile:
+        description: Independent EKS topology to operate on
+        required: true
+        type: choice
+        options: [demo, ha]
+        default: demo
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: terraform-production
+  group: terraform-${{ inputs.profile }}
   cancel-in-progress: false
 
 jobs:
@@ -27,9 +33,11 @@ jobs:
     env:
       TF_VAR_aws_region: ${{ vars.AWS_REGION }}
       TF_VAR_gitops_repo_url: ${{ vars.GITOPS_REPO_URL }}
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_cluster_endpoint_public_access_cidrs: ${{ vars.EKS_API_ALLOWED_CIDRS }}
     defaults:
       run:
-        working-directory: infra/terraform
+        working-directory: deploy/eks-${{ inputs.profile }}/terraform
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v5
@@ -41,7 +49,7 @@ jobs:
         run: >-
           terraform init
           -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
-          -backend-config="key=postpilot/terraform.tfstate"
+          -backend-config="key=postpilot/${{ inputs.profile }}/terraform.tfstate"
           -backend-config="region=${{ vars.AWS_REGION }}"
           -backend-config="encrypt=true"
           -backend-config="use_lockfile=true"
@@ -52,12 +60,12 @@ jobs:
           docker run --rm
           -v "$GITHUB_WORKSPACE:/repo:ro"
           bridgecrew/checkov@sha256:c64ffb6d6fc8087c896341a2c697770a04a1cf558db04fa7b8129d8ca6bce336
-          -d /repo/infra/terraform
+          -d /repo/deploy/eks-${{ inputs.profile }}/terraform
           --framework terraform
           --compact
           --quiet
-          --config-file /repo/infra/terraform/.checkov.yaml
-          --var-file /repo/infra/terraform/terraform.tfvars.example
+          --config-file /repo/deploy/eks-${{ inputs.profile }}/terraform/.checkov.yaml
+          --var-file /repo/deploy/eks-${{ inputs.profile }}/terraform/terraform.tfvars.example
       - run: terraform plan -out=tfplan
       - if: ${{ inputs.command == 'apply' }}
         run: terraform apply -auto-approve tfplan

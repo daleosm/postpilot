@@ -43,24 +43,28 @@ jobs:
           skip-dirs: node_modules,.next,.next-playwright,test-results
       - uses: hashicorp/setup-terraform@v3
       - name: Check Terraform formatting
-        working-directory: infra/terraform
-        run: terraform fmt -check -recursive
-      - name: Validate Terraform
-        working-directory: infra/terraform
         run: |
-          terraform init -backend=false
-          terraform validate
+          terraform fmt -check -recursive deploy/eks-demo/terraform
+          terraform fmt -check -recursive deploy/eks-ha/terraform
+      - name: Validate EKS Terraform roots
+        run: |
+          terraform -chdir=deploy/eks-demo/terraform init -backend=false
+          terraform -chdir=deploy/eks-demo/terraform validate
+          terraform -chdir=deploy/eks-ha/terraform init -backend=false
+          terraform -chdir=deploy/eks-ha/terraform validate
       - name: Scan Terraform policy with Checkov
-        run: >-
-          docker run --rm
-          -v "$GITHUB_WORKSPACE:/repo:ro"
-          bridgecrew/checkov@sha256:c64ffb6d6fc8087c896341a2c697770a04a1cf558db04fa7b8129d8ca6bce336
-          -d /repo/infra/terraform
-          --framework terraform
-          --compact
-          --quiet
-          --config-file /repo/infra/terraform/.checkov.yaml
-          --var-file /repo/infra/terraform/terraform.tfvars.example
+        run: |
+          for root in deploy/eks-demo/terraform deploy/eks-ha/terraform; do
+            docker run --rm \
+              -v "$GITHUB_WORKSPACE:/repo:ro" \
+              bridgecrew/checkov@sha256:c64ffb6d6fc8087c896341a2c697770a04a1cf558db04fa7b8129d8ca6bce336 \
+              -d "/repo/$root" \
+              --framework terraform \
+              --compact \
+              --quiet \
+              --config-file "/repo/$root/.checkov.yaml" \
+              --var-file "/repo/$root/terraform.tfvars.example"
+          done
 
   validate:
     name: App test suite

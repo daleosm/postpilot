@@ -4,6 +4,10 @@
 /node_modules
 **/node_modules/
 deploy/docker/.env
+**/terraform.tfvars
+**/.terraform/
+*.tfstate
+*.tfstate.*
 **/.venv/
 .pytest_cache/
 .ruff_cache/
@@ -47,6 +51,7 @@ yarn-error.log*
 .env*
 !.env.example
 !backend/.env.example
+!**/terraform.tfvars.example
 
 # vercel
 .vercel

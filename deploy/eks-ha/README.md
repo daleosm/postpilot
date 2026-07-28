@@ -24,13 +24,13 @@ real DNS name, and choose node/database sizes from observed load.
 1. Create remote Terraform state as described in [../../infra/README.md](../../infra/README.md).
 2. Create a **new** state key and project name. Never switch an existing demo
    state to this profile.
-3. Copy this file to `infra/terraform/terraform.tfvars`, replacing all
+3. Copy `terraform/terraform.tfvars.example` to `terraform/terraform.tfvars`, replacing all
    placeholders and choosing realistic sizes, retention, and CIDRs.
-4. Apply from `infra/terraform`:
+4. Apply from `terraform/`:
 
 ```bash
-cd infra/terraform
-cp ../../deploy/eks-ha/terraform.tfvars.example terraform.tfvars
+cd deploy/eks-ha/terraform
+cp terraform.tfvars.example terraform.tfvars
 terraform init ... # use a dedicated production state key
 terraform plan
 terraform apply

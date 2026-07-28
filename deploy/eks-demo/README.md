@@ -9,8 +9,7 @@ It uses:
 - public ALB ingress;
 - a private, single-AZ RDS PostgreSQL instance;
 - no NAT Gateway; and
-- its own `deploy/eks-demo/kubernetes` Kubernetes YAML, selected automatically
-  by Terraform/Argo CD.
+- its own `terraform/` root and `kubernetes/` manifests.
 
 Spot capacity can be reclaimed and the database does not fail over across AZs.
 Treat the whole environment as disposable.
@@ -18,14 +17,12 @@ Treat the whole environment as disposable.
 ## Use it
 
 1. Follow the state-bootstrap instructions in [../../infra/README.md](../../infra/README.md).
-2. Copy this profile to `infra/terraform/terraform.tfvars` and replace every
-   placeholder.
-3. Keep `deployment_profile = "demo"`.
-4. Run Terraform from `infra/terraform` using a state dedicated to this demo.
+2. Copy the Terraform example in this folder and replace every placeholder.
+3. Run Terraform from `terraform/` using a state dedicated to this demo.
 
 ```bash
-cd infra/terraform
-cp ../../deploy/eks-demo/terraform.tfvars.example terraform.tfvars
+cd deploy/eks-demo/terraform
+cp terraform.tfvars.example terraform.tfvars
 terraform init ...
 terraform plan
 terraform apply

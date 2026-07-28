@@ -1,7 +1,7 @@
 terraform {
   required_version = ">= 1.7.0"
 
-  # Values are supplied at init time, never committed. See infra/README.md.
+  # Values are supplied at init time and must never be committed.
   backend "s3" {}
 
   required_providers {
