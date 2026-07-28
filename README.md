@@ -6,6 +6,8 @@
 
 PostPilot is a workflow-first operating system for post houses. It brings programme structure, episode workflow, sign-off, suites, people, QC, delivery, commercial controls, and facility services into one tenant-safe application.
 
+> **Brand transition:** the public-facing product brand is becoming **Cutluma**. The existing application, source repository, and technical documentation retain the PostPilot name until the product rebrand is completed deliberately.
+
 It is deliberately **not** a media-hosting platform. Facilities retain masters, cuts, project files, and review media in the MAM, storage, transfer, and review systems they already trust. PostPilot records the operational work around them and can store external references where useful.
 
 ## Why self-hosted and open source?
@@ -114,6 +116,7 @@ Open [http://localhost:5000](http://localhost:5000). Demo accounts use the passw
 | [Contributing](docs/contributing.md) | Scope, standards, and contribution expectations |
 | [Infrastructure README](infra/README.md) | GitHub Actions, ECR, Terraform, EKS, and Argo CD details |
 | [Test guide](tests/README.md) | Test-suite conventions and coverage map |
+| [Cutluma static site](site/README.md) | Separate static sales-site development and build instructions |
 
 ## Stack
 

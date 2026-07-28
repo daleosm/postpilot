@@ -11,10 +11,14 @@ export default async function proxy(request: NextRequest) {
     return response;
   };
 
-  if (
-    request.nextUrl.pathname.startsWith("/v1/")
-    || request.nextUrl.pathname === "/sign-in"
-  ) {
+  if (request.nextUrl.pathname.startsWith("/v1/")) {
+    const apiOrigin = process.env.POSTPILOT_API_ORIGIN;
+    if (apiOrigin) {
+      return NextResponse.rewrite(new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, apiOrigin));
+    }
+    return passThrough();
+  }
+  if (request.nextUrl.pathname === "/sign-in") {
     return passThrough();
   }
   // FastAPI owns the opaque session. The API also validates it for every

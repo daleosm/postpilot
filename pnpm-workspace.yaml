@@ -1,8 +1,11 @@
+packages:
+  - "site"
+
 allowBuilds:
-  '@heroui/shared-utils': set this to true or false
-  esbuild: set this to true or false
-  sharp: set this to true or false
-  unrs-resolver: set this to true or false
+  '@heroui/shared-utils': false
+  esbuild: true
+  sharp: false
+  unrs-resolver: false
 overrides:
   sharp: 0.35.0
 ignoredBuiltDependencies:
