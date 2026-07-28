@@ -9,8 +9,8 @@ It uses:
 - public ALB ingress;
 - a private, single-AZ RDS PostgreSQL instance;
 - no NAT Gateway; and
-- the shared Kubernetes/Argo CD/ECR infrastructure in `infra/` and
-  `deploy/kubernetes/`.
+- the `deploy/kubernetes/overlays/demo` Kubernetes YAML, selected
+  automatically by Terraform/Argo CD.
 
 Spot capacity can be reclaimed and the database does not fail over across AZs.
 Treat the whole environment as disposable.
@@ -33,6 +33,10 @@ terraform apply
 
 The rest of the GitHub Actions, ECR, Argo CD, Secrets Manager, migration, and
 optional demo-seed process is documented in [../../infra/README.md](../../infra/README.md).
+
+The demo overlay deliberately creates an HTTP ALB and sets non-secure cookies
+so the generated AWS hostname works without a domain or certificate. Do not
+copy that ingress or cookie configuration into a facility deployment.
 
 For a resilient facility environment, use [`../eks-ha/`](../eks-ha/README.md)
 with a different Terraform state and `project_name`.

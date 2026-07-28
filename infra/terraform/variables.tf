@@ -239,9 +239,10 @@ variable "gitops_target_revision" {
 }
 
 variable "gitops_manifest_path" {
-  description = "Kustomize path within gitops_repo_url used by the Argo CD Application."
+  description = "Optional explicit Kustomize path within gitops_repo_url used by the Argo CD Application. Leave null to select the demo or ha overlay from deployment_profile."
   type        = string
-  default     = "deploy/kubernetes/base"
+  default     = null
+  nullable    = true
 }
 
 variable "tags" {

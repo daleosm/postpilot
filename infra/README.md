@@ -36,6 +36,7 @@ GitHub Actions
   │     migrations:     ACCOUNT.dkr.ecr.REGION.amazonaws.com/postpilot:migrations-<commit-sha>
   │     demo seed:      ACCOUNT.dkr.ecr.REGION.amazonaws.com/postpilot:api-seed-<commit-sha> (manual only)
   └── commits those image references into deploy/kubernetes/base
+      (the selected demo or HA overlay inherits those shared images)
                                       │
                                       ▼
                       Argo CD watches this Git repository
@@ -163,7 +164,12 @@ jq -n \
   | aws secretsmanager put-secret-value --secret-id "$APP_SECRET_NAME" --secret-string file:///dev/stdin
 ~~~
 
-Argo CD first runs a PreSync secret-sync Job, which mounts the AWS secret and creates `postpilot-secrets`; it then runs the migration Job. Check both complete before proceeding:
+Argo CD selects `deploy/kubernetes/overlays/demo` or
+`deploy/kubernetes/overlays/ha` from `deployment_profile`. Both overlays inherit
+the shared application manifests and immutable image references in
+`deploy/kubernetes/base`. Argo CD first runs a PreSync secret-sync Job, which
+mounts the AWS secret and creates `postpilot-secrets`; it then runs the
+migration Job. Check both complete before proceeding:
 
 ~~~bash
 kubectl -n postpilot get jobs,pods,svc
@@ -191,18 +197,20 @@ For a real facility, leave `POSTPILOT_DEBUG_DEMO` set to `false`, do not use thi
 
 ### 8. Open PostPilot and Argo CD
 
-Argo CD remains private. The default GitOps path is the public overlay, which
-creates an internet-facing HTTP Application Load Balancer for PostPilot. Get
-its generated AWS hostname with:
+Argo CD remains private. The demo overlay creates an internet-facing HTTP
+Application Load Balancer for PostPilot. Get its generated AWS hostname with:
 
 ~~~bash
 kubectl -n postpilot get ingress postpilot
 ~~~
 
-Until a domain and ACM certificate are configured, use that hostname with
-`http://`. Update `POSTPILOT_FRONTEND_ORIGINS` in `postpilot/application` to
-exactly that origin and restart the deployment. Keep two terminals open if you also want
-local service access or private Argo CD access:
+Until a domain and ACM certificate are configured, the **demo** profile can use
+that hostname with `http://`. Update `POSTPILOT_FRONTEND_ORIGINS` in
+`postpilot/application` to exactly that origin and restart the deployment. The
+HA overlay intentionally creates no public listener until its ACM-backed HTTPS
+ingress example is completed; see [the HA instructions](../deploy/eks-ha/README.md).
+Keep two terminals open if you also want local service access or private Argo
+CD access:
 
 ~~~bash
 # Terminal 1: PostPilot
@@ -282,7 +290,7 @@ The concise version below is retained as a reference for experienced operators. 
      | aws secretsmanager put-secret-value --secret-id "$APP_SECRET_NAME" --secret-string file:///dev/stdin
    ~~~
 
-   Argo CD will first synchronise the AWS secret, then retry the migration and application. The default Service is ClusterIP; the **public** Kustomize overlay adds an ALB Ingress and therefore increases cost. Use the base manifests for a private/VPN-only installation.
+   Argo CD will first synchronise the AWS secret, then retry the migration and application. The default Service is ClusterIP. The demo overlay adds an HTTP ALB Ingress; the HA overlay requires an explicitly configured ACM-backed HTTPS ingress. Use the base manifests directly only for a private/VPN-only installation.
 
 5. Get the initial Argo CD password and access it without exposing a public service:
 

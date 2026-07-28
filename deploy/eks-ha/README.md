@@ -13,7 +13,7 @@ It configures:
 - deletion protection, retained backups, and a final snapshot on database
   deletion; and
 - the existing replica, PodDisruptionBudget, and zone spread rules in the
-  Kubernetes manifests.
+  `deploy/kubernetes/overlays/ha` Kubernetes YAML.
 
 This improves availability but does not replace an operations plan. Test an
 RDS failover, restore a backup, rehearse an image rollback, use HTTPS and a
@@ -38,6 +38,21 @@ terraform apply
 
 Then follow the shared ECR, GitHub Actions, Argo CD, AWS Secrets Manager,
 migration, and HTTPS ingress instructions in [../../infra/README.md](../../infra/README.md).
+
+## Enable the public HTTPS ingress
+
+The HA overlay does not create a public listener until a real ACM certificate
+and DNS host are ready. This prevents an accidental HTTP production endpoint.
+
+1. Copy `deploy/kubernetes/overlays/ha/ingress.example.yaml` to
+   `deploy/kubernetes/overlays/ha/ingress.yaml`.
+2. Replace `REPLACE_WITH_ACM_CERTIFICATE_ARN` and `app.example.com`.
+3. Add `- ingress.yaml` under `resources` in the HA `kustomization.yaml`.
+4. Set `POSTPILOT_FRONTEND_ORIGINS` in AWS Secrets Manager to the exact
+   `https://app.example.com` origin and restart the API deployment.
+
+The HA API patch requires secure cookies, so sign-in will intentionally fail
+until traffic reaches it over HTTPS.
 
 The profile only controls the AWS topology. Before live use, set
 `POSTPILOT_DEBUG_DEMO=false`, do not run the demo seed, use a real certificate,

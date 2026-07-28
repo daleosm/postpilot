@@ -45,15 +45,6 @@ spec:
           envFrom:
             - secretRef:
                 name: postpilot-secrets
-          env:
-            # Do not permit the local debug bootstrap endpoint in the public
-            # cluster, even if the demo switcher itself is enabled.
-            - name: POSTPILOT_ENVIRONMENT
-              value: production
-            # The current public demo is HTTP-only. Switch this to true at
-            # the same time as adding an HTTPS listener and certificate.
-            - name: POSTPILOT_COOKIE_SECURE
-              value: "false"
           resources:
             requests:
               cpu: 100m

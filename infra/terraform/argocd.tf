@@ -2,7 +2,7 @@ locals {
   postpilot_argocd_application = templatefile("${path.module}/templates/postpilot-application.yaml.tftpl", {
     repo_url        = var.gitops_repo_url
     target_revision = var.gitops_target_revision
-    manifest_path   = var.gitops_manifest_path
+    manifest_path   = local.gitops_manifest_path
   })
 }
 

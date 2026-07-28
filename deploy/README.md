@@ -13,6 +13,12 @@ All three run the same Next.js frontend, FastAPI API, and PostgreSQL schema.
 They differ only in how the containers, database, networking, secrets, backups,
 and operational controls are managed.
 
+The two EKS options also use separate Kustomize overlays:
+
+- `deploy/kubernetes/overlays/demo` provides the disposable HTTP ALB demo;
+- `deploy/kubernetes/overlays/ha` enables secure cookies and intentionally
+  requires an ACM-backed HTTPS ingress to be configured before it is public.
+
 Do not change `deployment_profile` in an existing Terraform state to switch
 between demo and two-AZ EKS. Create a separate state and use a different
 `project_name`; the change replaces fundamental networking and database

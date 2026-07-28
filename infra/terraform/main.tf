@@ -4,6 +4,10 @@ locals {
   worker_subnet_ids    = local.is_ha_profile ? aws_subnet.private[*].id : aws_subnet.public[*].id
   worker_capacity_type = local.is_ha_profile ? "ON_DEMAND" : "SPOT"
   nat_gateway_count    = local.is_ha_profile ? length(aws_subnet.private) : 0
+  gitops_manifest_path = coalesce(
+    var.gitops_manifest_path,
+    local.is_ha_profile ? "deploy/kubernetes/overlays/ha" : "deploy/kubernetes/overlays/demo",
+  )
 
   github_oidc_provider_arn = coalesce(
     var.github_oidc_provider_arn,
