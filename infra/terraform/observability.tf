@@ -108,7 +108,7 @@ resource "aws_eks_addon" "pod_identity_agent" {
 }
 
 # Metrics Server is the Kubernetes resource-metrics API used by the two HPAs
-# in deploy/kubernetes/base and by kubectl top. It is intentionally separate
+# in both profile-specific Kubernetes folders and by kubectl top. It is intentionally separate
 # from CloudWatch observability, which is not an autoscaling metrics source.
 resource "helm_release" "metrics_server" {
   name             = "metrics-server"

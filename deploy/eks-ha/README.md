@@ -13,7 +13,7 @@ It configures:
 - deletion protection, retained backups, and a final snapshot on database
   deletion; and
 - the existing replica, PodDisruptionBudget, and zone spread rules in the
-  `deploy/kubernetes/overlays/ha` Kubernetes YAML.
+  independent `deploy/eks-ha/kubernetes` Kubernetes YAML.
 
 This improves availability but does not replace an operations plan. Test an
 RDS failover, restore a backup, rehearse an image rollback, use HTTPS and a
@@ -44,8 +44,8 @@ migration, and HTTPS ingress instructions in [../../infra/README.md](../../infra
 The HA overlay does not create a public listener until a real ACM certificate
 and DNS host are ready. This prevents an accidental HTTP production endpoint.
 
-1. Copy `deploy/kubernetes/overlays/ha/ingress.example.yaml` to
-   `deploy/kubernetes/overlays/ha/ingress.yaml`.
+1. Copy `deploy/eks-ha/kubernetes/ingress.example.yaml` to
+   `deploy/eks-ha/kubernetes/ingress.yaml`.
 2. Replace `REPLACE_WITH_ACM_CERTIFICATE_ARN` and `app.example.com`.
 3. Add `- ingress.yaml` under `resources` in the HA `kustomization.yaml`.
 4. Set `POSTPILOT_FRONTEND_ORIGINS` in AWS Secrets Manager to the exact

@@ -6,7 +6,7 @@ locals {
   nat_gateway_count    = local.is_ha_profile ? length(aws_subnet.private) : 0
   gitops_manifest_path = coalesce(
     var.gitops_manifest_path,
-    local.is_ha_profile ? "deploy/kubernetes/overlays/ha" : "deploy/kubernetes/overlays/demo",
+    local.is_ha_profile ? "deploy/eks-ha/kubernetes" : "deploy/eks-demo/kubernetes",
   )
 
   github_oidc_provider_arn = coalesce(

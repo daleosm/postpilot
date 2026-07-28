@@ -1,5 +1,5 @@
 # Copy this file to ingress.yaml, replace both placeholders, and add it to the
-# ha kustomization resources only after ACM has issued the certificate.
+# Kubernetes kustomization resources only after ACM has issued the certificate.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

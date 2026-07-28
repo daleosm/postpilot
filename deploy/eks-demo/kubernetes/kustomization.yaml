@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - service-account.yaml
+  - secret-provider-class.yaml
+  - secrets-sync-job.yaml
+  - api-migration-job.yaml
+  - deployment.yaml
+  - api-deployment.yaml
+  - hpa.yaml
+  - api-hpa.yaml
+  - api-pod-disruption-budget.yaml
+  - pod-disruption-budget.yaml
+  - kubernetes-event-exporter.yaml
+  - service.yaml
+  - api-service.yaml
+  - ingress.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: postpilot
+      app.kubernetes.io/part-of: postpilot

@@ -62,11 +62,15 @@ def test_fastapi_parses_the_opt_in_microsoft_sso_registration_contract(monkeypat
 
 
 def test_kubernetes_maps_legacy_secret_source_keys_to_fastapi_runtime_keys() -> None:
-    manifest = (ROOT / "deploy/kubernetes/base/secret-provider-class.yaml").read_text()
+    manifests = [
+        (ROOT / "deploy/eks-demo/kubernetes/secret-provider-class.yaml").read_text(),
+        (ROOT / "deploy/eks-ha/kubernetes/secret-provider-class.yaml").read_text(),
+    ]
 
-    assert "objectName: POSTPILOT_SESSION_SECRET" in manifest
-    assert "key: POSTPILOT_SESSION_SECRET" in manifest
-    assert "objectName: POSTPILOT_FRONTEND_ORIGINS" in manifest
-    assert "key: POSTPILOT_FRONTEND_ORIGINS" in manifest
-    assert 'path: "POSTPILOT_SESSION_SECRET || NEXTAUTH_SECRET"' in manifest
-    assert 'path: "POSTPILOT_FRONTEND_ORIGINS || NEXTAUTH_URL"' in manifest
+    for manifest in manifests:
+        assert "objectName: POSTPILOT_SESSION_SECRET" in manifest
+        assert "key: POSTPILOT_SESSION_SECRET" in manifest
+        assert "objectName: POSTPILOT_FRONTEND_ORIGINS" in manifest
+        assert "key: POSTPILOT_FRONTEND_ORIGINS" in manifest
+        assert 'path: "POSTPILOT_SESSION_SECRET || NEXTAUTH_SECRET"' in manifest
+        assert 'path: "POSTPILOT_FRONTEND_ORIGINS || NEXTAUTH_URL"' in manifest

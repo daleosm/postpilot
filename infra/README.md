@@ -35,8 +35,7 @@ GitHub Actions
   │     runtime:        ACCOUNT.dkr.ecr.REGION.amazonaws.com/postpilot:<commit-sha>
   │     migrations:     ACCOUNT.dkr.ecr.REGION.amazonaws.com/postpilot:migrations-<commit-sha>
   │     demo seed:      ACCOUNT.dkr.ecr.REGION.amazonaws.com/postpilot:api-seed-<commit-sha> (manual only)
-  └── commits those image references into deploy/kubernetes/base
-      (the selected demo or HA overlay inherits those shared images)
+  └── commits those image references into both profile-specific Kubernetes folders
                                       │
                                       ▼
                       Argo CD watches this Git repository
@@ -164,12 +163,11 @@ jq -n \
   | aws secretsmanager put-secret-value --secret-id "$APP_SECRET_NAME" --secret-string file:///dev/stdin
 ~~~
 
-Argo CD selects `deploy/kubernetes/overlays/demo` or
-`deploy/kubernetes/overlays/ha` from `deployment_profile`. Both overlays inherit
-the shared application manifests and immutable image references in
-`deploy/kubernetes/base`. Argo CD first runs a PreSync secret-sync Job, which
-mounts the AWS secret and creates `postpilot-secrets`; it then runs the
-migration Job. Check both complete before proceeding:
+Argo CD selects `deploy/eks-demo/kubernetes` or `deploy/eks-ha/kubernetes`
+from `deployment_profile`. Each profile owns a complete Kubernetes manifest
+set and its own immutable image references. Argo CD first runs a PreSync
+secret-sync Job, which mounts the AWS secret and creates `postpilot-secrets`;
+it then runs the migration Job. Check both complete before proceeding:
 
 ~~~bash
 kubectl -n postpilot get jobs,pods,svc
@@ -182,7 +180,7 @@ kubectl -n postpilot logs job/postpilot-migrations
 The seed Job is deliberately not part of Argo CD. Run it only to create the disposable example workspace:
 
 ~~~bash
-kubectl -n postpilot apply -f deploy/kubernetes/jobs/demo-seed.yaml
+kubectl -n postpilot apply -f deploy/eks-demo/kubernetes/demo-seed.yaml
 kubectl -n postpilot logs -f job/postpilot-demo-seed
 ~~~
 
@@ -190,7 +188,7 @@ The demo credentials are defined by `backend/app/demo_seed.py` and use the passw
 
 ~~~bash
 kubectl -n postpilot delete job postpilot-demo-seed
-kubectl -n postpilot apply -f deploy/kubernetes/jobs/demo-seed.yaml
+kubectl -n postpilot apply -f deploy/eks-demo/kubernetes/demo-seed.yaml
 ~~~
 
 For a real facility, leave `POSTPILOT_DEBUG_DEMO` set to `false`, do not use this Job, and provision the first organization and administrator through an approved onboarding/bootstrap process. That production bootstrap flow is not included in this initial infrastructure package.

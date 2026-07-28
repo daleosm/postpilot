@@ -7,10 +7,13 @@ on:
     # The publish job writes only these immutable image references. Argo CD
     # reconciles that GitOps commit, so it does not need another test/build run.
     paths-ignore:
-      - deploy/kubernetes/base/deployment.yaml
-      - deploy/kubernetes/base/api-deployment.yaml
-      - deploy/kubernetes/base/api-migration-job.yaml
-      - deploy/kubernetes/jobs/demo-seed.yaml
+      - deploy/eks-demo/kubernetes/deployment.yaml
+      - deploy/eks-demo/kubernetes/api-deployment.yaml
+      - deploy/eks-demo/kubernetes/api-migration-job.yaml
+      - deploy/eks-demo/kubernetes/demo-seed.yaml
+      - deploy/eks-ha/kubernetes/deployment.yaml
+      - deploy/eks-ha/kubernetes/api-deployment.yaml
+      - deploy/eks-ha/kubernetes/api-migration-job.yaml
   workflow_dispatch:
 
 permissions:
@@ -228,12 +231,18 @@ jobs:
         run: |
           # Replace the value of each image field, whether it is still the
           # local placeholder or an immutable ECR reference from a prior run.
-          sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:${IMAGE_TAG}|" deploy/kubernetes/base/deployment.yaml
-          sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:api-${IMAGE_TAG}|" deploy/kubernetes/base/api-deployment.yaml
-          sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:api-migrations-${IMAGE_TAG}|" deploy/kubernetes/base/api-migration-job.yaml
-          sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:api-seed-${IMAGE_TAG}|" deploy/kubernetes/jobs/demo-seed.yaml
+          for manifest in deploy/eks-demo/kubernetes/deployment.yaml deploy/eks-ha/kubernetes/deployment.yaml; do
+            sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:${IMAGE_TAG}|" "$manifest"
+          done
+          for manifest in deploy/eks-demo/kubernetes/api-deployment.yaml deploy/eks-ha/kubernetes/api-deployment.yaml; do
+            sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:api-${IMAGE_TAG}|" "$manifest"
+          done
+          for manifest in deploy/eks-demo/kubernetes/api-migration-job.yaml deploy/eks-ha/kubernetes/api-migration-job.yaml; do
+            sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:api-migrations-${IMAGE_TAG}|" "$manifest"
+          done
+          sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:api-seed-${IMAGE_TAG}|" deploy/eks-demo/kubernetes/demo-seed.yaml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add deploy/kubernetes/base/deployment.yaml deploy/kubernetes/base/api-deployment.yaml deploy/kubernetes/base/api-migration-job.yaml deploy/kubernetes/jobs/demo-seed.yaml
+          git add deploy/eks-demo/kubernetes/deployment.yaml deploy/eks-demo/kubernetes/api-deployment.yaml deploy/eks-demo/kubernetes/api-migration-job.yaml deploy/eks-demo/kubernetes/demo-seed.yaml deploy/eks-ha/kubernetes/deployment.yaml deploy/eks-ha/kubernetes/api-deployment.yaml deploy/eks-ha/kubernetes/api-migration-job.yaml
           git diff --cached --quiet || git commit -m "chore(deploy): postpilot ${IMAGE_TAG}"
           git push

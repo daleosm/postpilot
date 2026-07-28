@@ -45,6 +45,13 @@ spec:
           envFrom:
             - secretRef:
                 name: postpilot-secrets
+          env:
+            # HA is intentionally HTTPS-only once its ACM-backed ingress is
+            # configured, so browser sessions must use a secure cookie.
+            - name: POSTPILOT_ENVIRONMENT
+              value: production
+            - name: POSTPILOT_COOKIE_SECURE
+              value: "true"
           resources:
             requests:
               cpu: 100m

@@ -9,8 +9,8 @@ It uses:
 - public ALB ingress;
 - a private, single-AZ RDS PostgreSQL instance;
 - no NAT Gateway; and
-- the `deploy/kubernetes/overlays/demo` Kubernetes YAML, selected
-  automatically by Terraform/Argo CD.
+- its own `deploy/eks-demo/kubernetes` Kubernetes YAML, selected automatically
+  by Terraform/Argo CD.
 
 Spot capacity can be reclaimed and the database does not fail over across AZs.
 Treat the whole environment as disposable.
