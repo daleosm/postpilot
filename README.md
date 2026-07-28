@@ -21,6 +21,19 @@ Facilities cannot afford to be blocked by a vendor outage or a slow support queu
 
 Self-hosting still needs backups, monitoring, secure credentials, tested upgrades, and an accountable operator. It gives the facility control; it does not remove operational responsibility.
 
+## Deployment options
+
+Choose the deployment path that matches the installation rather than treating
+every environment as production infrastructure:
+
+| Path | Intended use |
+| --- | --- |
+| [Docker Compose](deploy/docker/README.md) | Local development, internal pilots, or one managed host |
+| [Low-cost EKS demo](deploy/eks-demo/README.md) | Disposable demos and EKS learning; not live facility work |
+| [Two-AZ EKS](deploy/eks-ha/README.md) | Production-oriented AWS deployment with private workers, per-AZ NAT, and Multi-AZ RDS |
+
+See [all deployment options](deploy/README.md) before creating infrastructure.
+
 ## Features
 
 | Area | Operational coverage |
@@ -112,7 +125,7 @@ Open [http://localhost:5000](http://localhost:5000). Demo accounts use the passw
 | [Product and operations](docs/product-and-operations.md) | Modules, workflow model, delivery/QC, commercial controls, and demo data |
 | [Architecture](docs/architecture.md) | Request flow, tenancy, authentication, codebase layout, and database model |
 | [Development and testing](docs/development.md) | Migrations, validation, test suites, debugging, and contribution workflow |
-| [Self-hosting and operations](docs/self-hosting.md) | Production configuration, deployment, backups, security, and the supplied AWS/EKS/Argo path |
+| [Self-hosting and operations](docs/self-hosting.md) | Production configuration, deployment choices, backups, and security |
 | [Contributing](docs/contributing.md) | Scope, standards, and contribution expectations |
 | [Infrastructure README](infra/README.md) | GitHub Actions, ECR, Terraform, EKS, and Argo CD details |
 | [Test guide](tests/README.md) | Test-suite conventions and coverage map |

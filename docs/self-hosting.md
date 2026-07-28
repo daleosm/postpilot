@@ -29,9 +29,24 @@ pnpm build
 pnpm start
 ~~~
 
-## Supplied AWS/EKS delivery path
+## Supplied deployment paths
 
-The repository includes a low-cost pilot deployment path using:
+Choose one of the three supplied paths:
+
+| Path | Use it for | Do not use it for |
+| --- | --- | --- |
+| [Docker Compose](../deploy/docker/README.md) | Local development, an internal proof of concept, or a backed-up single-host installation | Automatic host or availability-zone failover |
+| [Low-cost EKS demo](../deploy/eks-demo/README.md) | Disposable public demos and EKS learning | Facility production data or an availability commitment |
+| [Two-AZ EKS](../deploy/eks-ha/README.md) | Production-oriented AWS operation with a tested runbook | A substitute for backups, recovery testing, or operational ownership |
+
+The EKS paths share Terraform, Kubernetes manifests, Argo CD, and ECR image
+publishing. Keep each profile in a different Terraform state and use a
+different `project_name`; never switch an existing demo state into the two-AZ
+profile.
+
+## EKS shared delivery path
+
+The repository includes an EKS delivery path using:
 
 - GitHub Actions to type-check, lint, build, and publish immutable images to ECR;
 - Terraform to provision AWS infrastructure;
@@ -42,7 +57,11 @@ The repository includes a low-cost pilot deployment path using:
 
 Read [infra/README.md](../infra/README.md) before using it. It documents Terraform state bootstrap, AWS prerequisites, ECR/GitHub OIDC, Argo CD, RDS, secrets, image publishing, migrations, seeding, access, and teardown.
 
-The pilot configuration is intentionally cost-conscious. Review its resilience, access-control, private networking, backup, monitoring, and scaling choices before treating it as a production design.
+The demo EKS profile is intentionally cost-conscious. Review its resilience,
+access-control, private networking, backup, monitoring, and scaling choices
+before treating it as a production design. The two-AZ profile is more resilient
+but still requires normal facility operations, backup/recovery testing, and
+capacity planning.
 
 ## Secrets
 

@@ -1,5 +1,9 @@
 locals {
-  name = coalesce(var.cluster_name, "${var.project_name}-eks")
+  name                 = coalesce(var.cluster_name, "${var.project_name}-eks")
+  is_ha_profile        = var.deployment_profile == "ha"
+  worker_subnet_ids    = local.is_ha_profile ? aws_subnet.private[*].id : aws_subnet.public[*].id
+  worker_capacity_type = local.is_ha_profile ? "ON_DEMAND" : "SPOT"
+  nat_gateway_count    = local.is_ha_profile ? length(aws_subnet.private) : 0
 
   github_oidc_provider_arn = coalesce(
     var.github_oidc_provider_arn,
@@ -147,14 +151,15 @@ resource "aws_subnet" "public" {
   cidr_block              = cidrsubnet(var.vpc_cidr, 4, count.index)
   map_public_ip_on_launch = true
 
-  tags = {
+  tags = merge({
     Name                                  = "${local.name}-public-${count.index + 1}"
     "kubernetes.io/role/elb"              = "1"
     "kubernetes.io/cluster/${local.name}" = "shared"
+    }, local.is_ha_profile ? {} : {
     # The low-cost demo deliberately runs workers here so they can reach ECR
     # and AWS APIs through the Internet Gateway without a NAT Gateway.
     "karpenter.sh/discovery" = local.name
-  }
+  })
 }
 
 resource "aws_route_table" "public" {
@@ -181,17 +186,62 @@ resource "aws_subnet" "private" {
   cidr_block              = cidrsubnet(var.vpc_cidr, 4, count.index + 2)
   map_public_ip_on_launch = false
 
-  tags = {
+  tags = merge({
     Name                                  = "${local.name}-private-${count.index + 1}"
     "kubernetes.io/role/internal-elb"     = "1"
     "kubernetes.io/cluster/${local.name}" = "shared"
+    }, local.is_ha_profile ? {
+    "karpenter.sh/discovery" = local.name
+  } : {})
+}
+
+# The demo profile keeps private subnets isolated because workers run publicly
+# and do not need a NAT Gateway. The ha profile creates one NAT Gateway and one
+# private route table per AZ so a single NAT/AZ outage does not remove egress
+# from every worker node.
+resource "aws_eip" "private_nat" {
+  count  = local.nat_gateway_count
+  domain = "vpc"
+
+  tags = {
+    Name = "${local.name}-nat-${count.index + 1}"
   }
 }
 
-# Private subnets have no default route. They host only EKS control-plane ENIs;
-# worker nodes use the public subnets for low-cost outbound internet access.
-# Database subnets below are also isolated and RDS accepts PostgreSQL only from
-# the EKS cluster security group.
+resource "aws_nat_gateway" "private" {
+  count         = local.nat_gateway_count
+  allocation_id = aws_eip.private_nat[count.index].id
+  subnet_id     = aws_subnet.public[count.index].id
+
+  tags = {
+    Name = "${local.name}-nat-${count.index + 1}"
+  }
+
+  depends_on = [aws_internet_gateway.this]
+}
+
+resource "aws_route_table" "private" {
+  count  = local.nat_gateway_count
+  vpc_id = aws_vpc.this.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.private[count.index].id
+  }
+
+  tags = {
+    Name = "${local.name}-private-${count.index + 1}"
+  }
+}
+
+resource "aws_route_table_association" "private" {
+  count          = local.nat_gateway_count
+  subnet_id      = aws_subnet.private[count.index].id
+  route_table_id = aws_route_table.private[count.index].id
+}
+
+# Database subnets always remain isolated. RDS accepts PostgreSQL only from the
+# EKS cluster security group.
 resource "aws_subnet" "database" {
   count = 2
 
@@ -377,14 +427,14 @@ resource "aws_launch_template" "spot" {
 
 resource "aws_eks_node_group" "spot" {
   cluster_name    = aws_eks_cluster.this.name
-  node_group_name = "spot-small-public"
+  node_group_name = local.is_ha_profile ? "on-demand-private" : "spot-small-public"
   node_role_arn   = aws_iam_role.node.arn
-  subnet_ids      = aws_subnet.public[*].id
+  subnet_ids      = local.worker_subnet_ids
 
-  # This is a non-essential pilot workload. Public node IPs provide outbound
-  # access to ECR and AWS APIs without a NAT Gateway. The ALB remains the only
-  # normal public entry point to the application.
-  capacity_type  = "SPOT"
+  # Demo workers are public Spot capacity to avoid NAT cost. The ha profile
+  # keeps the managed baseline private and On-Demand; its per-AZ NAT routes
+  # provide outbound access without exposing worker public IPs.
+  capacity_type  = local.worker_capacity_type
   instance_types = var.node_instance_types
   ami_type       = "AL2023_x86_64_STANDARD"
 
@@ -407,11 +457,17 @@ resource "aws_eks_node_group" "spot" {
   # name and create the new two-node group first so Kubernetes can reschedule
   # PostPilot before the previous Spot nodes are drained.
   lifecycle {
+    precondition {
+      condition     = !local.is_ha_profile || (var.node_min_size >= 2 && var.node_desired_size >= 2)
+      error_message = "The ha profile requires at least two managed baseline nodes so application replicas can be spread across availability zones."
+    }
+
     create_before_destroy = true
   }
 
   depends_on = [
     aws_route_table_association.public,
+    aws_route_table_association.private,
     aws_iam_role_policy_attachment.node_worker,
     aws_iam_role_policy_attachment.node_cni,
     aws_iam_role_policy_attachment.node_ecr,
@@ -471,15 +527,23 @@ resource "aws_db_instance" "postgres" {
   db_subnet_group_name   = aws_db_subnet_group.postgres_isolated.name
   vpc_security_group_ids = [aws_security_group.postgres.id]
   publicly_accessible    = false
-  multi_az               = false
+  multi_az               = var.rds_multi_az
 
-  backup_retention_period = 1
-  copy_tags_to_snapshot   = true
-  deletion_protection     = false
-  skip_final_snapshot     = true
-  apply_immediately       = true
+  backup_retention_period   = var.rds_backup_retention_days
+  copy_tags_to_snapshot     = true
+  deletion_protection       = var.rds_deletion_protection
+  skip_final_snapshot       = var.rds_skip_final_snapshot
+  final_snapshot_identifier = var.rds_skip_final_snapshot ? null : var.rds_final_snapshot_identifier
+  apply_immediately         = true
 
   tags = {
     Name = "${local.name}-postgres-private"
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !local.is_ha_profile || (var.rds_multi_az && var.rds_deletion_protection && !var.rds_skip_final_snapshot)
+      error_message = "The ha profile requires Multi-AZ RDS, deletion protection, and a final snapshot on deletion."
+    }
   }
 }

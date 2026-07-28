@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-postpilot}
+      POSTGRES_USER: ${POSTGRES_USER:-postpilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - postpilot-postgres:/var/lib/postgresql/data
+
+  migrate:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+      target: migrations
+    restart: "no"
+    environment:
+      POSTPILOT_DATABASE_URL: postgresql://${POSTGRES_USER:-postpilot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-postpilot}
+      POSTPILOT_SESSION_SECRET: ${POSTPILOT_SESSION_SECRET:?Set POSTPILOT_SESSION_SECRET in .env}
+      POSTPILOT_FRONTEND_ORIGINS: ${POSTPILOT_FRONTEND_ORIGINS:-http://localhost:5000}
+      POSTPILOT_DEBUG_DEMO: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+      target: runtime
+    restart: unless-stopped
+    environment:
+      POSTPILOT_DATABASE_URL: postgresql://${POSTGRES_USER:-postpilot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-postpilot}
+      POSTPILOT_SESSION_SECRET: ${POSTPILOT_SESSION_SECRET:?Set POSTPILOT_SESSION_SECRET in .env}
+      POSTPILOT_FRONTEND_ORIGINS: ${POSTPILOT_FRONTEND_ORIGINS:-http://localhost:5000}
+      POSTPILOT_DEBUG_DEMO: ${POSTPILOT_DEBUG_DEMO:-false}
+      POSTPILOT_ENVIRONMENT: production
+      POSTPILOT_COOKIE_SECURE: "false"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    ports:
+      - "5000:3000"
+    environment:
+      POSTPILOT_API_ORIGIN: http://api:8000
+      POSTPILOT_API_INTERNAL_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_started
+
+  demo-seed:
+    profiles: ["demo"]
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+      target: seed
+    restart: "no"
+    environment:
+      POSTPILOT_DATABASE_URL: postgresql://${POSTGRES_USER:-postpilot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-postpilot}
+      POSTPILOT_SESSION_SECRET: ${POSTPILOT_SESSION_SECRET:?Set POSTPILOT_SESSION_SECRET in .env}
+      POSTPILOT_FRONTEND_ORIGINS: ${POSTPILOT_FRONTEND_ORIGINS:-http://localhost:5000}
+      POSTPILOT_DEBUG_DEMO: "true"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postpilot-postgres:

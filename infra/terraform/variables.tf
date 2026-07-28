@@ -15,6 +15,17 @@ variable "project_name" {
   }
 }
 
+variable "deployment_profile" {
+  description = "Deployment topology. demo uses public Spot workers and single-AZ RDS; ha uses private On-Demand workers, one NAT Gateway per AZ, and Multi-AZ RDS. Use a separate Terraform state for each profile."
+  type        = string
+  default     = "demo"
+
+  validation {
+    condition     = contains(["demo", "ha"], var.deployment_profile)
+    error_message = "deployment_profile must be either demo or ha."
+  }
+}
+
 variable "cluster_name" {
   description = "Optional explicit EKS cluster name."
   type        = string
@@ -46,25 +57,25 @@ variable "cluster_endpoint_public_access_cidrs" {
 }
 
 variable "node_instance_types" {
-  description = "x86_64 Spot instance type for the fixed two-node public demo group. VPC CNI prefix delegation provides extra pod IP capacity."
+  description = "x86_64 managed-node instance types. The demo profile uses Spot capacity; the ha profile uses On-Demand capacity in private subnets."
   type        = list(string)
   default     = ["t3a.small"]
 }
 
 variable "node_min_size" {
-  description = "Minimum Spot nodes. Two is the fixed baseline for this non-essential pilot configuration."
+  description = "Minimum managed-node baseline. Keep at least two for a two-AZ application deployment."
   type        = number
   default     = 2
 }
 
 variable "node_desired_size" {
-  description = "Desired Spot nodes."
+  description = "Desired managed-node baseline."
   type        = number
   default     = 2
 }
 
 variable "node_max_size" {
-  description = "Maximum Spot nodes. Keep this at two for the fixed small-node baseline."
+  description = "Maximum managed-node baseline."
   type        = number
   default     = 2
 }
@@ -79,6 +90,47 @@ variable "rds_allocated_storage_gb" {
   description = "Allocated gp3 storage for the PostgreSQL instance. RDS requires at least 20 GiB for this configuration."
   type        = number
   default     = 20
+}
+
+variable "rds_multi_az" {
+  description = "Enable RDS Multi-AZ failover. The demo profile keeps this false; the ha profile must set it true."
+  type        = bool
+  default     = false
+}
+
+variable "rds_deletion_protection" {
+  description = "Prevent accidental RDS deletion. Set true for a live facility database."
+  type        = bool
+  default     = false
+}
+
+variable "rds_backup_retention_days" {
+  description = "Number of days of RDS automated backups to retain."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.rds_backup_retention_days >= 1 && var.rds_backup_retention_days <= 35
+    error_message = "rds_backup_retention_days must be between 1 and 35."
+  }
+}
+
+variable "rds_skip_final_snapshot" {
+  description = "Whether Terraform skips a final RDS snapshot on deletion. This must be false for a live facility database."
+  type        = bool
+  default     = true
+}
+
+variable "rds_final_snapshot_identifier" {
+  description = "Unique final snapshot identifier used when rds_skip_final_snapshot is false."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.rds_skip_final_snapshot || var.rds_final_snapshot_identifier != null
+    error_message = "rds_final_snapshot_identifier is required when rds_skip_final_snapshot is false."
+  }
 }
 
 variable "argocd_chart_version" {

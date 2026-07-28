@@ -1,12 +1,20 @@
 # PostPilot EKS deployment
 
-This directory supplies a deliberately compact EKS and Argo CD footprint for a pilot or small self-hosted PostPilot installation:
+This directory contains the shared Terraform, EKS, Argo CD, ECR, and Kubernetes
+implementation used by two separately documented profiles:
+
+| Profile | Configuration | Intended use |
+| --- | --- | --- |
+| [Low-cost demo](../deploy/eks-demo/README.md) | `deployment_profile = "demo"` | Disposable demos and EKS learning |
+| [Two-AZ EKS](../deploy/eks-ha/README.md) | `deployment_profile = "ha"` | Production-oriented facility deployment |
+
+The `demo` default is deliberately compact:
 
 - one EKS control plane;
-- two fixed x86 Spot small nodes (t3.small/t3a.small);
+- two fixed x86 Spot small nodes (t3.small/t3a.small) in public subnets;
 - one private, single-AZ RDS PostgreSQL db.t3.micro instance with 20 GiB gp3 storage;
-- public ALB/NAT subnets, private worker-node subnets, and isolated database subnets across two AZs;
-- one public NAT Gateway for low-cost private-node egress;
+- public ALB subnets, private EKS control-plane subnets, and isolated database subnets across two AZs;
+- no NAT Gateway, so demo workers use public IPs for ECR and AWS API egress;
 - Argo CD exposed only as a ClusterIP service;
 - a GitOps Application that reconciles this repository's Kubernetes manifests;
 - an AWS Load Balancer Controller with a Pod Identity role; and
@@ -14,7 +22,7 @@ This directory supplies a deliberately compact EKS and Argo CD footprint for a p
   Karpenter Spot scale-out pool with interruption handling; and
 - a public-overlay ALB Ingress for PostPilot. The base manifests remain internal.
 
-This is a low-cost **two-node EKS pilot with capped Spot scale-out**, not a high-availability production topology. It uses Spot nodes, which can be interrupted or temporarily unavailable, and must not be used for essential workloads. The single NAT Gateway is also an intentional cost/reliability compromise: an AZ failure can interrupt private-node egress. Use one NAT Gateway per AZ for a high-availability facility deployment. EKS also charges for the control plane independently of EC2 nodes, and EC2, RDS, storage, network, public-IP, NAT, SQS, and Secrets Manager charges remain separate. Read the current [Amazon EKS pricing](https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html#eks-pricing) before creating the cluster.
+This is a low-cost **two-node EKS pilot with capped Spot scale-out**, not a high-availability production topology. It uses Spot nodes, which can be interrupted or temporarily unavailable, and must not be used for essential workloads. Use the [two-AZ profile](../deploy/eks-ha/README.md) for private On-Demand workers, one NAT Gateway per AZ, and Multi-AZ RDS. EKS also charges for the control plane independently of EC2 nodes, and EC2, RDS, storage, network, public-IP, NAT, SQS, and Secrets Manager charges remain separate. Read the current [Amazon EKS pricing](https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html#eks-pricing) before creating the cluster.
 
 For a live facility, start with this only as a pilot. Use one NAT Gateway per AZ, larger nodes with headroom, RDS deletion protection and Multi-AZ, a restrictive API CIDR allow-list, and stronger backup/monitoring policies.
 
@@ -383,14 +391,15 @@ memory reaches 80% of their declared requests, and wait five minutes before
 scaling down. The HPAs do not replace the deployment resource requests; those
 requests are the baseline that makes utilisation meaningful.
 
-Karpenter does **not** replace the two managed Spot nodes. It watches for Pods
-that cannot be scheduled and may add only `t3.small` or `t3a.small` x86 Spot
-instances, with an aggregate dynamic-pool limit of 4 vCPUs and 8 GiB. It
-consolidates empty or under-used Karpenter nodes after five minutes and receives
-Spot interruption, rebalance, EC2 state-change, capacity-reservation, and AWS
-Health events through its dedicated SQS queue. Raise the Karpenter limits or
-expand `karpenter_instance_types` only after checking workload requests and
-regional Spot availability.
+Karpenter does **not** replace the two managed baseline nodes. In the demo
+profile it watches for Pods that cannot be scheduled and may add only
+`t3.small` or `t3a.small` x86 Spot instances, with an aggregate dynamic-pool
+limit of 4 vCPUs and 8 GiB. It consolidates empty or under-used Karpenter nodes
+after five minutes and receives Spot interruption, rebalance, EC2 state-change,
+capacity-reservation, and AWS Health events through its dedicated SQS queue.
+The two-AZ profile retains its two On-Demand baseline nodes in private subnets;
+review Karpenter's instance types and limits before allowing additional
+capacity in a live facility environment.
 
 ## Cost and resilience decisions
 
@@ -398,7 +407,8 @@ regional Spot availability.
 | --- | --- | --- |
 | Two baseline Spot small nodes plus capped Karpenter Spot scale-out | Keeps a predictable two-node floor while allowing short bursts to receive capacity | Spot capacity can be reclaimed or unavailable; Karpenter adds SQS/EventBridge and occasional dynamic-node cost, so this is unsuitable for essential facility operations. |
 | Single-AZ RDS db.t3.micro | Lowest RDS PostgreSQL class/storage baseline | No database failover; deletion protection is off and the final snapshot is skipped for low-cost iteration. |
-| One NAT Gateway, private worker nodes, isolated database subnets | A single NAT is cheaper than one NAT per AZ while retaining no-public-IP workers | A NAT/AZ failure interrupts egress for both worker subnets; use one NAT per AZ for high availability. |
+| Demo: public workers and no NAT Gateway | Avoids NAT Gateway and public-IP costs for a disposable learning environment | Worker nodes have public IPs and there is no private-node egress resilience; never use for a live facility deployment. |
+| Two-AZ: private On-Demand workers, one NAT Gateway per AZ, isolated database subnets | Keeps normal worker traffic private and preserves egress if one NAT/AZ fails | Higher fixed NAT and compute cost; use a separate state and capacity-test the node sizes. |
 | ClusterIP services with a deliberate public ALB overlay | Internal services do not each create a load balancer | The public overlay creates one ALB and needs normal HTTP/HTTPS edge hardening. |
 
 The application uses the RDS master user only as a bootstrap simplification. After the first migration, create a least-privilege application database user and update `postpilot/application` in AWS Secrets Manager; AWS recommends applications avoid using the RDS master user directly. [RDS PostgreSQL guidance](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.MasterAccounts.html) and [Argo CD automated sync guidance](https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/) explain the underlying platform behaviour.

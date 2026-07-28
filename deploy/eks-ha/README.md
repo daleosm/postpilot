@@ -1,0 +1,44 @@
+# EKS two-AZ deployment
+
+This is the production-oriented EKS profile for a facility that needs to
+survive a single availability-zone failure. It is intentionally more expensive
+than the demo profile.
+
+It configures:
+
+- private worker nodes with two On-Demand baseline nodes;
+- one NAT Gateway in each availability zone for independent private-node egress;
+- an internet-facing ALB in public subnets;
+- RDS PostgreSQL in isolated subnets with Multi-AZ failover;
+- deletion protection, retained backups, and a final snapshot on database
+  deletion; and
+- the existing replica, PodDisruptionBudget, and zone spread rules in the
+  Kubernetes manifests.
+
+This improves availability but does not replace an operations plan. Test an
+RDS failover, restore a backup, rehearse an image rollback, use HTTPS and a
+real DNS name, and choose node/database sizes from observed load.
+
+## Use it
+
+1. Create remote Terraform state as described in [../../infra/README.md](../../infra/README.md).
+2. Create a **new** state key and project name. Never switch an existing demo
+   state to this profile.
+3. Copy this file to `infra/terraform/terraform.tfvars`, replacing all
+   placeholders and choosing realistic sizes, retention, and CIDRs.
+4. Apply from `infra/terraform`:
+
+```bash
+cd infra/terraform
+cp ../../deploy/eks-ha/terraform.tfvars.example terraform.tfvars
+terraform init ... # use a dedicated production state key
+terraform plan
+terraform apply
+```
+
+Then follow the shared ECR, GitHub Actions, Argo CD, AWS Secrets Manager,
+migration, and HTTPS ingress instructions in [../../infra/README.md](../../infra/README.md).
+
+The profile only controls the AWS topology. Before live use, set
+`POSTPILOT_DEBUG_DEMO=false`, do not run the demo seed, use a real certificate,
+and complete the checklist in [../../docs/self-hosting.md](../../docs/self-hosting.md).

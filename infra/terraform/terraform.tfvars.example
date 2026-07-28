@@ -1,6 +1,7 @@
 # Copy to terraform.tfvars. Do not commit the real file.
 aws_region      = "us-east-1"
 project_name    = "postpilot"
+deployment_profile = "demo"
 gitops_repo_url = "https://github.com/YOUR-ORG/postpilot.git"
 github_repository = "YOUR-ORG/postpilot"
 

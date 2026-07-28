@@ -3,6 +3,7 @@
 # dependencies
 /node_modules
 **/node_modules/
+deploy/docker/.env
 **/.venv/
 .pytest_cache/
 .ruff_cache/

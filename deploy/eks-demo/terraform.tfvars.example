@@ -1,0 +1,23 @@
+# Low-cost, disposable EKS demo. Do not use this state or these values for a
+# facility's live workload.
+deployment_profile = "demo"
+aws_region         = "us-east-1"
+project_name       = "postpilot-demo"
+
+gitops_repo_url   = "https://github.com/YOUR-ORG/postpilot.git"
+github_repository = "YOUR-ORG/postpilot"
+cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
+
+# Two small Spot nodes have no availability guarantee. Public networking avoids
+# NAT Gateway cost for this learning/demo path.
+node_instance_types = ["t3.small", "t3a.small"]
+node_min_size       = 2
+node_desired_size   = 2
+node_max_size       = 2
+
+rds_instance_class          = "db.t3.micro"
+rds_allocated_storage_gb    = 20
+rds_multi_az                = false
+rds_deletion_protection     = false
+rds_backup_retention_days   = 1
+rds_skip_final_snapshot     = true
