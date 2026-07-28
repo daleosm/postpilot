@@ -6,8 +6,6 @@
 
 PostPilot is a workflow-first operating system for post houses. It brings programme structure, episode workflow, sign-off, suites, people, QC, delivery, commercial controls, and facility services into one tenant-safe application.
 
-> **Brand transition:** the public-facing product brand is becoming **Cutluma**. The existing application, source repository, and technical documentation retain the PostPilot name until the product rebrand is completed deliberately.
-
 It is deliberately **not** a media-hosting platform. Facilities retain masters, cuts, project files, and review media in the MAM, storage, transfer, and review systems they already trust. PostPilot records the operational work around them and can store external references where useful.
 
 ## Why self-hosted and open source?
@@ -29,10 +27,10 @@ every environment as production infrastructure:
 | Path | Intended use |
 | --- | --- |
 | [Docker Compose](deploy/docker/README.md) | Local development, internal pilots, or one managed host |
-| [Low-cost EKS demo](deploy/eks-demo/README.md) | Disposable demos and EKS learning; not live facility work |
 | [Two-AZ EKS](deploy/eks-ha/README.md) | Production-oriented AWS deployment with private workers, per-AZ NAT, and Multi-AZ RDS |
 
-See [all deployment options](deploy/README.md) before creating infrastructure.
+Choose the production EKS path only after reviewing its operational,
+backup, and capacity requirements.
 
 ## Features
 
