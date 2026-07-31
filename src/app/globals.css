@@ -644,7 +644,9 @@ select { color: #4d5853; }
 }
 
 @media (max-width: 767px) {
+  html, body { width: 100%; overflow-x: clip; }
   body { background: var(--pp-canvas); }
+  .app-shell, .pp-main { max-width: 100%; overflow-x: clip; }
   .panel { border-radius: 0.75rem; }
   .pp-page { gap: 1rem; }
   .pp-page-header { align-items: flex-start; padding-bottom: 1rem; }

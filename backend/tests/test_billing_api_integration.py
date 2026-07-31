@@ -53,10 +53,11 @@ def _active_client_po(lab: ProductionApiLab, *, amount: int = 500) -> str:
 
 
 def _completed_billable_change(lab: ProductionApiLab, *, client_po_id: str, quote: int = 125) -> str:
+    episode_id = _episode_id(lab)
     created = lab.client.post(
         "/v1/work-orders",
         json={
-            "episode_id": _episode_id(lab),
+            "episode_id": episode_id,
             "workflow_stage_id": lab.data.workflow_stage_id,
             "title": "Approved client colour correction",
             "work_type": "internal",
@@ -74,6 +75,35 @@ def _completed_billable_change(lab: ProductionApiLab, *, client_po_id: str, quot
     approved = lab.client.patch(
         f"/v1/work-orders/{work_order_id}",
         json={"status": "in_progress", "approval_note": "Commercial scope confirmed."},
+    )
+    # Internal work is a real facility activity: the current product rule
+    # requires a room reservation before it can be completed and invoiced.
+    booking_id = str(uuid4())
+    lab.execute(
+        """
+        INSERT INTO bookings (
+          id, organization_id, episode_id, room_id, person_id, title,
+          starts_at, ends_at, setup_minutes, handover_minutes,
+          approved_overtime_minutes, is_option, status, booking_type,
+          actual_starts_at, actual_ends_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, 'Approved client colour correction',
+          '2035-06-10 09:00:00+00', '2035-06-10 12:00:00+00',
+          0, 0, 0, false, 'confirmed', 'color',
+          '2035-06-10 09:00:00+00', '2035-06-10 12:00:00+00'
+        )
+        """,
+        booking_id,
+        lab.data.organization_id,
+        episode_id,
+        lab.data.room_id,
+        lab.data.colorist_person_id,
+    )
+    lab.execute(
+        "UPDATE post_work_orders SET booking_id = $1 WHERE organization_id = $2 AND id = $3",
+        booking_id,
+        lab.data.organization_id,
+        work_order_id,
     )
     completed = lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "complete"})
     assert approved.status_code == completed.status_code == 200

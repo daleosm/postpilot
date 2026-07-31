@@ -11,17 +11,17 @@ test.describe("Operational workspaces UI", () => {
   test("renders the live command center rather than a marketing or placeholder screen", async ({ page }) => {
     await page.goto("/");
 
-    await expect(page.getByRole("heading", { name: "Post-production command center" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Today in post" })).toBeVisible();
     await expect(page.getByText("Active shows", { exact: true })).toBeVisible();
     await expect(page.getByText("Suite utilization", { exact: true })).toBeVisible();
     await expect(page.getByText("Artist workload", { exact: true })).toBeVisible();
-    await expect(page.getByText("Recent activity", { exact: true })).toBeVisible();
+    await expect(page.getByText("Operational timeline", { exact: true })).toBeVisible();
   });
 
   test("opens commercial registers and keeps vendor and client PO records separate", async ({ page }) => {
     await page.goto("/crm");
     await expect(page.getByRole("heading", { name: "Clients & vendors" })).toBeVisible();
-    await expect(page.getByText("Accounts", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Accounts", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "New account" }).click();
     await page.getByRole("button", { name: "Create account" }).click();
     await expect(page.getByText("Enter an account name.", { exact: true })).toBeVisible();
@@ -44,8 +44,8 @@ test.describe("Operational workspaces UI", () => {
     await page.goto("/catering");
     await expect(page.getByRole("heading", { name: "Catering", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Request catering" })).toBeVisible();
-    await page.getByRole("button", { name: "Send request" }).click();
-    await expect(page.getByText("Choose a booking or room and describe the request.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send request" })).toBeDisabled();
+    await expect(page.getByText("Catering requests need an active booking or assigned work order", { exact: false })).toBeVisible();
 
     await page.goto("/runner");
     await expect(page.getByRole("heading", { name: "Runner desk" })).toBeVisible();

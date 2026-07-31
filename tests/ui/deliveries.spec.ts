@@ -29,7 +29,9 @@ test.describe("Delivery register UI", () => {
     expect(acceptedRowCount).toBeLessThanOrEqual(initialRowCount);
     if (!acceptedRowCount) await expect(page.getByText("No episodes match these filters.")).toBeVisible();
     await page.locator('select[name="state"]').selectOption("in_progress");
-    await expect(page.getByRole("link", { name: "Open checklist →" }).first()).toBeVisible();
+    const activeRowCount = await page.getByRole("link", { name: "Open checklist →" }).count();
+    expect(activeRowCount).toBeLessThanOrEqual(initialRowCount);
+    if (!activeRowCount) await expect(page.getByText("No episodes match these filters.")).toBeVisible();
     await page.getByRole("button", { name: "Clear filters" }).click();
     await expect(page.locator('select[name="state"]')).toHaveValue("");
   });

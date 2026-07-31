@@ -15,7 +15,7 @@ async function fillBookingBasics(page: Page, title: string) {
   await page.getByLabel("Booking title").fill(title);
   await page.getByLabel("Room / suite").selectOption({ index: 1 });
   await page.getByLabel("Assigned artist").selectOption({ index: 1 });
-  await page.getByLabel("Episode").selectOption({ index: 1 });
+  await page.locator('select[name="episodeId"]').selectOption({ index: 1 });
   await page.getByLabel("Client booking starts").fill("2034-08-15T09:00");
   await page.getByLabel("Client booking ends").fill("2034-08-15T12:00");
 }
@@ -108,7 +108,7 @@ test.describe("Booking creation and conflict UX", () => {
 
   test("creates a guest account in the booking flow and selects it for the episode", async ({ page }) => {
     await openBookingDialog(page);
-    await page.getByLabel("Episode").selectOption({ index: 1 });
+    await page.locator('select[name="episodeId"]').selectOption({ index: 1 });
     await page.getByRole("button", { name: "Create", exact: true }).click();
     await page.getByLabel("Name").fill("UI Guest Reviewer");
     await page.getByLabel("Email").fill("ui.guest@example.test");
@@ -130,7 +130,7 @@ test.describe("Booking creation and conflict UX", () => {
 
   test("keeps guest details but clears passwords after a rejected account request", async ({ page }) => {
     await openBookingDialog(page);
-    await page.getByLabel("Episode").selectOption({ index: 1 });
+    await page.locator('select[name="episodeId"]').selectOption({ index: 1 });
     await page.getByRole("button", { name: "Create", exact: true }).click();
     await page.getByLabel("Name").fill("Rejected Guest");
     await page.getByLabel("Email").fill("rejected.guest@example.test");
