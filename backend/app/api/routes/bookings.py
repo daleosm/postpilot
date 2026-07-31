@@ -25,6 +25,7 @@ from app.auth import has_permission, require_permission
 from app.booking_costs import BOOKING_RATE_DEFINITIONS, confirmed_hours, cost_for_hours
 from app.booking_logic import booking_conflicts, is_active_option, nearest_free_slot, resequence_options
 from app.budget_actuals import record_budget_actual
+from app.budget_logic import json_safe
 from app.db.tables import (
     activity_log,
     bookings,
@@ -100,7 +101,7 @@ def _booking_values(row: object, *, include_commercial_context: bool = False) ->
     if getattr(row, "budget_line_id", None) and getattr(row, "budget_item_label", None):
         value["budget_item"] = {
             "id": str(row.budget_line_id),
-            "label": getattr(row, "budget_item_label"),
+            "label": row.budget_item_label,
         }
     else:
         value["budget_item"] = None
@@ -1023,7 +1024,7 @@ async def submit_booking_actuals(
             action="booking.time_overrun_recorded" if time_overrun else "booking.time_confirmed",
             entity_type="booking",
             entity_id=booking_id,
-            metadata=metadata,
+            metadata=json_safe(metadata),
         )
     )
     if work_order:
@@ -1034,7 +1035,7 @@ async def submit_booking_actuals(
                 action="work_order.time_logged",
                 entity_type="post_work_order",
                 entity_id=str(work_order.id),
-                metadata=metadata,
+                metadata=json_safe(metadata),
             )
         )
     await session.commit()

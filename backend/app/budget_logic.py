@@ -3,16 +3,49 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
+
+MONEY = Decimal("0.01")
 
 
 def decimal_amount(value: object | None) -> Decimal:
     """Normalize PostgreSQL numerics and API values without float arithmetic."""
-    return Decimal(str(value or 0))
+    if value is None:
+        return Decimal("0")
+    if isinstance(value, bool):
+        raise ValueError("Boolean values are not monetary amounts.")
+    return Decimal(str(value))
 
 
-def monetary(value: Decimal) -> float:
-    return float(value.quantize(Decimal("0.01")))
+def money_amount(value: Decimal | object) -> Decimal:
+    """Round one saved or calculated amount at a defined money boundary."""
+    return decimal_amount(value).quantize(MONEY, rounding=ROUND_HALF_UP)
+
+
+def monetary(value: Decimal | object) -> float:
+    """Format a final Decimal value for an API response or audit display.
+
+    Business calculations and database writes use :func:`decimal_amount` and
+    :class:`Decimal`. This is the explicit outbound presentation boundary; a
+    browser must never post this display value back as an authoritative total.
+    """
+    return float(money_amount(value))
+
+
+def json_safe(value: object) -> object:
+    """Turn Decimal audit values into exact JSON strings at the audit boundary.
+
+    PostgreSQL JSON cannot serialise ``Decimal`` itself. Representing money as
+    a string in immutable audit metadata preserves every stored penny and
+    avoids reintroducing float conversion solely for logging.
+    """
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [json_safe(item) for item in value]
+    return value
 
 
 def cost_totals(lines: Iterable[object]) -> dict[str, Decimal]:

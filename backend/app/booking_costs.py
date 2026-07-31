@@ -20,6 +20,13 @@ BOOKING_RATE_DEFINITIONS: dict[str, tuple[str, str]] = {
 }
 
 
+def _duration_hours(start: datetime, end: datetime) -> Decimal:
+    """Convert a timedelta to Decimal hours without a float intermediate."""
+    duration = end - start
+    seconds = Decimal(duration.days * 86_400 + duration.seconds) + (Decimal(duration.microseconds) / Decimal(1_000_000))
+    return seconds / Decimal(3_600)
+
+
 def facility_hours(starts_at: datetime, ends_at: datetime) -> Decimal:
     """Use the facility's 09:00–18:00 day for multi-day actuals.
 
@@ -30,12 +37,12 @@ def facility_hours(starts_at: datetime, ends_at: datetime) -> Decimal:
     if ends_at <= starts_at:
         return Decimal(0)
     if starts_at.date() == ends_at.date():
-        return Decimal(str((ends_at - starts_at).total_seconds() / 3600))
+        return _duration_hours(starts_at, ends_at)
 
     first_day_end = starts_at.replace(hour=18, minute=0, second=0, microsecond=0)
     last_day_start = ends_at.replace(hour=9, minute=0, second=0, microsecond=0)
-    hours = max(Decimal(0), Decimal(str((first_day_end - starts_at).total_seconds() / 3600)))
-    hours += max(Decimal(0), Decimal(str((ends_at - last_day_start).total_seconds() / 3600)))
+    hours = max(Decimal(0), _duration_hours(starts_at, first_day_end))
+    hours += max(Decimal(0), _duration_hours(last_day_start, ends_at))
     cursor = starts_at.replace(hour=9, minute=0, second=0, microsecond=0)
     cursor += timedelta(days=1)
     while cursor < last_day_start:

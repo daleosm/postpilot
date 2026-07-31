@@ -539,7 +539,7 @@ def test_purchase_order_supplier_actual_creates_one_invoice_allocation_and_budge
     detail = actual.json()["purchase_order"]
     assert detail["actual_invoiced_amount"] == 312.45
     assert detail["committed_amount"] == 0
-    assert detail["remaining_amount"] == 900
+    assert detail["remaining_amount"] == 587.55
 
 
 def test_purchase_order_number_is_unique_inside_a_tenant_but_not_globally(

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+from math import isfinite
 from typing import Annotated
 
 from email_validator import EmailNotValidError, validate_email
@@ -25,6 +27,67 @@ def _normalize_email(value: object) -> str:
 
 
 PostPilotEmail = Annotated[str, BeforeValidator(_normalize_email)]
+
+
+MONEY_QUANTUM = Decimal("0.01")
+
+
+def _decimal_input(value: object) -> Decimal:
+    """Parse JSON numeric input without ever performing binary float arithmetic.
+
+    Browsers serialise form numbers as JSON numbers, which Python receives as
+    ``float`` values. Converting through ``str`` retains the submitted decimal
+    spelling (``0.1`` rather than the binary floating-point expansion) before
+    money is validated or written to PostgreSQL.
+    """
+    if isinstance(value, bool):
+        raise ValueError("Enter a numeric value.")
+    if isinstance(value, Decimal):
+        parsed = value
+    elif isinstance(value, (str, int, float)):
+        if isinstance(value, float) and not isfinite(value):
+            raise ValueError("Enter a finite numeric value.")
+        try:
+            parsed = Decimal(str(value).strip())
+        except (InvalidOperation, ValueError) as error:
+            raise ValueError("Enter a numeric value.") from error
+    else:
+        raise ValueError("Enter a numeric value.")
+    if not parsed.is_finite():
+        raise ValueError("Enter a finite numeric value.")
+    return parsed
+
+
+def _money_input(value: object) -> Decimal:
+    parsed = _decimal_input(value)
+    if parsed.as_tuple().exponent < -2:
+        raise ValueError("Enter money with no more than two decimal places.")
+    return parsed
+
+
+def _scaled_decimal_input(value: object, *, scale: int, label: str) -> Decimal:
+    parsed = _decimal_input(value)
+    if parsed.as_tuple().exponent < -scale:
+        raise ValueError(f"Enter {label} with no more than {scale} decimal places.")
+    return parsed
+
+
+def _quantity_input(value: object) -> Decimal:
+    return _scaled_decimal_input(value, scale=2, label="a quantity")
+
+
+def _percent_input(value: object) -> Decimal:
+    return _scaled_decimal_input(value, scale=3, label="a percentage")
+
+
+def _markup_percent_input(value: object) -> Decimal:
+    return _scaled_decimal_input(value, scale=2, label="a percentage")
+
+
+Money = Annotated[Decimal, BeforeValidator(_money_input)]
+Quantity = Annotated[Decimal, BeforeValidator(_quantity_input)]
+Percentage = Annotated[Decimal, BeforeValidator(_percent_input)]
+MarkupPercentage = Annotated[Decimal, BeforeValidator(_markup_percent_input)]
 
 
 class LoginRequest(BaseModel):
@@ -193,10 +256,10 @@ class BookingTimeSubmissionRequest(BaseModel):
 class WorkOrderItemRequest(BaseModel):
     type: str = Field(pattern="^(service|material|expense)$")
     description: str = Field(min_length=2, max_length=240)
-    quantity: float = Field(gt=0)
+    quantity: Quantity = Field(gt=0)
     unit: str = Field(pattern="^(hour|day|unit|fixed)$")
-    unit_rate: float = Field(ge=0)
-    discount_percent: float = Field(default=0, ge=0, le=100)
+    unit_rate: Money = Field(ge=0)
+    discount_percent: Percentage = Field(default=Decimal("0"), ge=0, le=100)
     notes: str | None = Field(default=None, max_length=1000)
 
 
@@ -218,8 +281,8 @@ class WorkOrderCreateRequest(BaseModel):
     priority: str = Field(default="normal", pattern="^(blocker|high|normal|low)$")
     is_blocking: bool | None = None
     billing_scope: str = Field(default="included", pattern="^(included|billable_change|internal)$")
-    estimated_amount: float | None = Field(default=None, ge=0)
-    client_quote_amount: float | None = Field(default=None, ge=0)
+    estimated_amount: Money | None = Field(default=None, ge=0)
+    client_quote_amount: Money | None = Field(default=None, ge=0)
     billing_notes: str | None = Field(default=None, max_length=2000)
     items: list[WorkOrderItemRequest] = Field(default_factory=list, max_length=50)
     external_url: str | None = Field(default=None, max_length=2000)
@@ -250,6 +313,7 @@ class WorkOrderCreateRequest(BaseModel):
 
 
 class WorkOrderUpdateRequest(BaseModel):
+    episode_id: str | None = None
     status: str | None = Field(
         default=None,
         pattern="^(open|awaiting_approval|in_progress|ready_for_review|complete|rejected|cancelled)$",
@@ -265,8 +329,8 @@ class WorkOrderUpdateRequest(BaseModel):
     budget_line_id: str | None = None
     client_purchase_order_id: str | None = None
     billing_scope: str | None = Field(default=None, pattern="^(included|billable_change|internal)$")
-    estimated_amount: float | None = Field(default=None, ge=0)
-    client_quote_amount: float | None = Field(default=None, ge=0)
+    estimated_amount: Money | None = Field(default=None, ge=0)
+    client_quote_amount: Money | None = Field(default=None, ge=0)
     billing_notes: str | None = Field(default=None, max_length=2000)
     priority: str | None = Field(default=None, pattern="^(blocker|high|normal|low)$")
     is_blocking: bool | None = None
@@ -316,7 +380,7 @@ class PurchaseOrderCreateRequest(BaseModel):
     show_id: str | None = None
     episode_id: str | None = None
     po_number: str = Field(min_length=1, max_length=120)
-    approved_amount: float = Field(gt=0)
+    approved_amount: Money = Field(gt=0)
     issue_date: date | None = None
     expiry_date: date | None = None
     status: str = Field(default="draft", pattern="^(draft|approved|closed|cancelled)$")
@@ -344,7 +408,7 @@ class PurchaseOrderUpdateRequest(BaseModel):
     show_id: str | None = None
     episode_id: str | None = None
     po_number: str | None = Field(default=None, min_length=1, max_length=120)
-    approved_amount: float | None = Field(default=None, gt=0)
+    approved_amount: Money | None = Field(default=None, gt=0)
     issue_date: date | None = None
     expiry_date: date | None = None
     status: str | None = Field(default=None, pattern="^(draft|approved|closed|cancelled)$")
@@ -374,7 +438,7 @@ class PurchaseOrderAllocationRequest(BaseModel):
     work_order_id: str | None = None
     budget_line_id: str | None = None
     vendor_invoice_id: str | None = None
-    amount: float = Field(gt=0)
+    amount: Money = Field(gt=0)
     allocation_date: date
     reference: str | None = Field(default=None, max_length=160)
     description: str | None = Field(default=None, max_length=2000)
@@ -398,7 +462,7 @@ class PurchaseOrderActualCostRequest(BaseModel):
     budget_line_id: str
     invoice_number: str = Field(min_length=1, max_length=120)
     invoice_date: date
-    amount: float = Field(gt=0)
+    amount: Money = Field(gt=0)
     description: str = Field(min_length=1, max_length=2000)
     external_document_url: str | None = Field(default=None, max_length=2000)
     overrun_reason: str | None = Field(default=None, min_length=8, max_length=2000)
@@ -422,7 +486,7 @@ class VendorInvoiceCreateRequest(BaseModel):
     episode_id: str
     invoice_number: str = Field(min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
-    amount: float = Field(gt=0)
+    amount: Money = Field(gt=0)
     status: str = Field(default="received", pattern="^(received|approved|paid|disputed|void)$")
     invoice_date: date | None = None
     due_date: date | None = None
@@ -437,6 +501,34 @@ class VendorInvoiceCreateRequest(BaseModel):
         return value
 
 
+class VendorInvoiceUpdateRequest(BaseModel):
+    """A controlled supplier-invoice correction against its live allocation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    invoice_number: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+    amount: Money | None = Field(default=None, gt=0)
+    status: str | None = Field(default=None, pattern="^(received|approved|paid|disputed|void)$")
+    invoice_date: date | None = None
+    due_date: date | None = None
+    external_document_url: str | None = Field(default=None, max_length=2000)
+    overrun_reason: str | None = Field(default=None, min_length=8, max_length=2000)
+
+    @field_validator("external_document_url")
+    @classmethod
+    def valid_document_url(cls, value: str | None) -> str | None:
+        if value is not None and not value.startswith(("https://", "http://")):
+            raise ValueError("Enter a valid document link.")
+        return value
+
+    @model_validator(mode="after")
+    def meaningful_update(self) -> VendorInvoiceUpdateRequest:
+        if not self.model_fields_set:
+            raise ValueError("Provide at least one supplier-invoice change.")
+        return self
+
+
 class BudgetLineCreateRequest(BaseModel):
     """A planned episode estimate; actuals are allocation-backed server data."""
 
@@ -448,12 +540,12 @@ class BudgetLineCreateRequest(BaseModel):
     code: str | None = Field(default=None, max_length=80)
     external_cost: bool = False
     cost_type: str = Field(default="internal", pattern="^(internal|billable)$")
-    budgeted_amount: float = Field(default=0, ge=0)
-    planned_quantity: float | None = Field(default=None, ge=0)
+    budgeted_amount: Money = Field(default=Decimal("0"), ge=0)
+    planned_quantity: Quantity | None = Field(default=None, ge=0)
     planned_unit: str | None = Field(default=None, pattern="^(hour|day|episode|fixed|unit)$")
     rate_resource_type: str | None = Field(default=None, pattern="^(service|room|person)$")
     rate_resource_id: str | None = None
-    manual_rate_override: float | None = Field(default=None, ge=0)
+    manual_rate_override: Money | None = Field(default=None, ge=0)
     vendor_company_id: str | None = None
     estimate_status: str = Field(default="draft", pattern="^(legacy|draft|approved|revised)$")
     manual_override_reason: str | None = Field(default=None, min_length=4, max_length=2000)
@@ -490,12 +582,12 @@ class BudgetLineUpdateRequest(BaseModel):
     code: str | None = Field(default=None, max_length=80)
     external_cost: bool | None = None
     cost_type: str | None = Field(default=None, pattern="^(internal|billable)$")
-    budgeted_amount: float | None = Field(default=None, ge=0)
-    planned_quantity: float | None = Field(default=None, ge=0)
+    budgeted_amount: Money | None = Field(default=None, ge=0)
+    planned_quantity: Quantity | None = Field(default=None, ge=0)
     planned_unit: str | None = Field(default=None, pattern="^(hour|day|episode|fixed|unit)$")
     rate_resource_type: str | None = Field(default=None, pattern="^(service|room|person)$")
     rate_resource_id: str | None = None
-    manual_rate_override: float | None = Field(default=None, ge=0)
+    manual_rate_override: Money | None = Field(default=None, ge=0)
     vendor_company_id: str | None = None
     estimate_status: str | None = Field(default=None, pattern="^(legacy|draft|approved|revised)$")
     manual_override_reason: str | None = Field(default=None, min_length=4, max_length=2000)
@@ -515,7 +607,7 @@ class BudgetManualActualAdjustmentRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    amount: float = Field(ge=0)
+    amount: Money = Field(ge=0)
     reason: str = Field(min_length=4, max_length=2000)
     reference: str | None = Field(default=None, max_length=240)
     allocation_date: date | None = None
@@ -538,11 +630,11 @@ class BudgetEstimatePreviewRequest(BaseModel):
 
     episode_id: str
     category: str = Field(min_length=2, max_length=120)
-    planned_quantity: float = Field(gt=0)
+    planned_quantity: Quantity = Field(gt=0)
     planned_unit: str = Field(pattern="^(hour|day|episode|fixed|unit)$")
     rate_resource_type: str | None = Field(default=None, pattern="^(service|room|person)$")
     rate_resource_id: str | None = None
-    manual_rate_override: float | None = Field(default=None, ge=0)
+    manual_rate_override: Money | None = Field(default=None, ge=0)
     manual_override_reason: str | None = Field(default=None, min_length=4, max_length=2000)
     vendor_company_id: str | None = None
 
@@ -565,7 +657,7 @@ class ServiceRateCreateRequest(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     category: str = Field(min_length=2, max_length=120)
     unit: str = Field(min_length=2, max_length=40)
-    rate: float = Field(ge=0)
+    rate: Money = Field(ge=0)
     notes: str | None = Field(default=None, max_length=2000)
     is_active: bool = True
 
@@ -576,7 +668,7 @@ class ServiceRateUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=160)
     category: str | None = Field(default=None, min_length=2, max_length=120)
     unit: str | None = Field(default=None, min_length=2, max_length=40)
-    rate: float | None = Field(default=None, ge=0)
+    rate: Money | None = Field(default=None, ge=0)
     notes: str | None = Field(default=None, max_length=2000)
     is_active: bool | None = None
 
@@ -600,7 +692,7 @@ class RateCardOverrideRequest(BaseModel):
     service_rate_id: str | None = None
     category: str | None = Field(default=None, min_length=2, max_length=120)
     unit: str | None = Field(default=None, min_length=2, max_length=40)
-    rate: float = Field(ge=0)
+    rate: Money = Field(ge=0)
 
     @model_validator(mode="after")
     def valid_scope_and_service(self) -> RateCardOverrideRequest:
@@ -631,7 +723,7 @@ class ClientPurchaseOrderCreateRequest(BaseModel):
     show_id: str | None = None
     episode_id: str | None = None
     po_number: str = Field(min_length=1, max_length=120)
-    approved_amount: float = Field(gt=0)
+    approved_amount: Money = Field(gt=0)
     issue_date: date | None = None
     expiry_date: date | None = None
     status: str = Field(default="draft", pattern="^(draft|active|closed|cancelled)$")
@@ -659,7 +751,7 @@ class ClientPurchaseOrderUpdateRequest(BaseModel):
     show_id: str | None = None
     episode_id: str | None = None
     po_number: str | None = Field(default=None, min_length=1, max_length=120)
-    approved_amount: float | None = Field(default=None, gt=0)
+    approved_amount: Money | None = Field(default=None, gt=0)
     issue_date: date | None = None
     expiry_date: date | None = None
     status: str | None = Field(default=None, pattern="^(draft|active|closed|cancelled)$")
@@ -693,7 +785,7 @@ class ClientPurchaseOrderAllocationRequest(BaseModel):
     client_invoice_item_id: str | None = None
     work_order_id: str | None = None
     change_order_reference: str | None = Field(default=None, min_length=1, max_length=160)
-    amount: float = Field(gt=0)
+    amount: Money = Field(gt=0)
     allocation_date: date
     reference: str | None = Field(default=None, max_length=160)
     description: str | None = Field(default=None, max_length=2000)
@@ -847,6 +939,14 @@ class BillableFromWorkOrderRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reference: str | None = Field(default=None, max_length=160)
+
+
+class BillableVoidRequest(BaseModel):
+    """Release a not-yet-invoiced client charge with an auditable reason."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=4, max_length=2000)
 
 
 class ClientPoOverrunRequest(BaseModel):
@@ -1114,12 +1214,12 @@ class CateringRequestCreateRequest(BaseModel):
 
 class CateringRequestUpdateRequest(BaseModel):
     status: str = Field(pattern="^(requested|acknowledged|preparing|delivered|cancelled)$")
-    actual_cost: float | None = Field(default=None, ge=0)
+    actual_cost: Money | None = Field(default=None, ge=0)
     receipt_reference: str | None = Field(default=None, max_length=500)
 
 
 class CateringSettingsUpdateRequest(BaseModel):
-    markup_percent: float = Field(ge=0, le=100)
+    markup_percent: MarkupPercentage = Field(ge=0, le=100)
 
 
 class CurrencySettingsUpdateRequest(BaseModel):
@@ -1133,7 +1233,7 @@ class InvoiceSettingsUpdateRequest(BaseModel):
     tax_enabled: bool = False
     tax_name: str = Field(min_length=1, max_length=40)
     tax_registration_number: str | None = Field(default=None, max_length=120)
-    tax_rate_percent: float = Field(ge=0, le=100)
+    tax_rate_percent: Percentage = Field(ge=0, le=100)
     payment_terms_days: int = Field(ge=0, le=365)
     payment_instructions: str | None = Field(default=None, max_length=2000)
 

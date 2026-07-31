@@ -8,6 +8,8 @@ def test_client_po_balances_keep_billing_authorisation_separate_from_vendor_spen
         "authorised_amount": Decimal("1000"),
         "committed_to_bill_amount": Decimal("650"),
         "invoiced_amount": Decimal("420"),
+        "open_billable_commitment_amount": Decimal("230"),
+        "uncommitted_invoiced_amount": Decimal("0"),
         "remaining_amount": Decimal("350"),
         "variance_amount": Decimal("-580"),
     }

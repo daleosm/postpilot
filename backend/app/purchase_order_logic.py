@@ -6,12 +6,28 @@ from decimal import Decimal
 
 
 def balance_snapshot(authorised: Decimal, committed: Decimal, actual: Decimal) -> dict[str, Decimal]:
-    """Calculate, never persist, PO balance figures."""
+    """Calculate, never persist, supplier-PO balance figures.
+
+    Commitments reserve authorised value before a supplier has invoiced. An
+    invoice normally settles part of that reserved scope, so it must not be
+    subtracted a second time. Actuals beyond the recorded commitments still
+    consume authorisation. In other words:
+
+    ``remaining = authorised - open_commitments - supplier_actuals``
+
+    where ``open_commitments = max(commitments - supplier_actuals, 0)``.
+    This is equivalent to ``authorised - max(commitments, supplier_actuals)``
+    and remains correct for partial invoices and uncommitted supplier costs.
+    """
+    open_commitments = max(committed - actual, Decimal(0))
+    uncommitted_actuals = max(actual - committed, Decimal(0))
     return {
         "authorised_amount": authorised,
         "committed_amount": committed,
         "actual_invoiced_amount": actual,
-        "remaining_amount": authorised - committed,
+        "open_commitment_amount": open_commitments,
+        "uncommitted_actual_amount": uncommitted_actuals,
+        "remaining_amount": authorised - open_commitments - actual,
         "variance_amount": actual - authorised,
     }
 

@@ -21,4 +21,12 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 async def get_db_session() -> AsyncIterator[AsyncSession]:
     async with get_session_factory()() as session:
-        yield session
+        try:
+            yield session
+        finally:
+            # Financial routes commit complete ledger units explicitly. Any
+            # uncommitted unit left by a validation error or unexpected
+            # exception is rolled back when its request scope ends, rather
+            # than leaking a partial transaction to the connection pool.
+            if session.in_transaction():
+                await session.rollback()

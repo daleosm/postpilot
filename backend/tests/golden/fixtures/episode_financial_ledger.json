@@ -1,0 +1,42 @@
+{
+  "estimate": {
+    "original_estimate": 1600.27,
+    "current_approved_estimate": 1600.27,
+    "working_estimate": 1600.27,
+    "actual": 1183.6,
+    "remaining_planned": 416.67,
+    "forecast": 1600.27,
+    "forecast_basis": "current_approved_estimate",
+    "variance": 0.0,
+    "is_locked": true,
+    "currency": "GBP"
+  },
+  "ledger": {
+    "estimate_items": [
+      {"category": "Editorial", "estimated_amount": 350.27, "actual_amount": 350.27, "external_cost": false},
+      {"category": "External colour", "estimated_amount": 1250.0, "actual_amount": 833.33, "external_cost": true}
+    ],
+    "actuals": [
+      {"source_type": "booking", "amount": 350.27, "category": "Editorial", "reference": "booking-actual"},
+      {"source_type": "vendor_invoice", "amount": 833.33, "category": "External colour", "reference": "GOLDEN-SUP-001"}
+    ],
+    "unallocated_actual_count": 0
+  },
+  "vendor_purchase_order": {
+    "authorised_amount": 1250.0,
+    "committed_amount": 1250.0,
+    "actual_invoiced_amount": 833.33,
+    "open_commitment_amount": 416.67,
+    "remaining_amount": 0.0
+  },
+  "invoice": {
+    "status": "issued",
+    "subtotal_amount": 19.99,
+    "tax_amount": 4.0,
+    "total_amount": 23.99,
+    "currency": "GBP",
+    "item_count": 1,
+    "item_amount": 19.99,
+    "exportable": true
+  }
+}

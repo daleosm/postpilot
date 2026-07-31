@@ -13,6 +13,7 @@ from app.api.production import may_view_all_episodes
 from app.api.schemas import WorkOrderBookingRequest, WorkOrderCreateRequest, WorkOrderUpdateRequest
 from app.auth import has_permission, require_permission
 from app.booking_logic import booking_conflicts
+from app.budget_logic import decimal_amount, json_safe
 from app.db.tables import (
     activity_log,
     bookings,
@@ -29,6 +30,7 @@ from app.db.tables import (
     rooms,
     seasons,
     shows,
+    vendor_invoices,
     workflow_stages,
 )
 from app.vendor_spend import external_budget_line_for_episode
@@ -37,7 +39,7 @@ router = APIRouter(prefix="/work-orders", tags=["work-orders"])
 
 
 def _decimal(value: object | None) -> Decimal:
-    return Decimal(str(value or 0))
+    return decimal_amount(value)
 
 
 def _work_order_value(row: object, items: list[object] | None = None) -> dict[str, object]:
@@ -105,7 +107,7 @@ async def _audit(
             action=action,
             entity_type="post_work_order",
             entity_id=work_order_id,
-            metadata={"episodeId": episode_id, **(metadata or {})},
+            metadata=json_safe({"episodeId": episode_id, **(metadata or {})}),
         )
     )
 
@@ -318,7 +320,7 @@ async def _plan_po_commitment(
     *,
     work_order: object,
     order: object,
-    estimated_amount: float | None,
+    estimated_amount: Decimal | None,
     existing: list[object],
     overrun_reason: str | None,
 ) -> dict[str, object]:
@@ -460,7 +462,7 @@ async def _plan_client_po_commitment(
     *,
     work_order: object,
     order: object,
-    client_quote_amount: float | None,
+    client_quote_amount: Decimal | None,
     existing: list[object],
     overrun_reason: str | None,
 ) -> dict[str, object]:
@@ -796,6 +798,7 @@ async def update_work_order(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only update work assigned to you.")
 
     manager_fields = {
+        "episode_id",
         "title",
         "description",
         "department",
@@ -820,6 +823,7 @@ async def update_work_order(
             status_code=status.HTTP_403_FORBIDDEN, detail="Only post management can change work-order details."
         )
     commercial_fields = {
+        "episode_id",
         "work_type",
         "vendor_company_id",
         "purchase_order_id",
@@ -847,6 +851,33 @@ async def update_work_order(
 
     fields = payload.model_fields_set
     episode = await _episode_scope(session, actor, str(work_order.episode_id))
+    episode_changed = bool(payload.episode_id and payload.episode_id != str(work_order.episode_id))
+    if episode_changed:
+        if work_order.booking_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Move or cancel the linked room booking before moving this work order to another episode.",
+            )
+        if work_order.billing_status == "posted":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A posted client charge cannot move episodes. Void it before changing commercial scope.",
+            )
+        has_actual = await session.scalar(
+            select(func.count()).select_from(vendor_invoices).where(
+                and_(
+                    vendor_invoices.c.organization_id == actor.organization_id,
+                    vendor_invoices.c.work_order_id == work_order_id,
+                    vendor_invoices.c.status != "void",
+                )
+            )
+        )
+        if has_actual:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A work order with supplier actuals cannot move episodes; correct the supplier invoice instead.",
+            )
+        episode = await _episode_scope(session, actor, payload.episode_id)
     next_work_type = payload.work_type if "work_type" in fields else work_order.work_type
     next_vendor_company_id = (
         payload.vendor_company_id
@@ -904,7 +935,7 @@ async def update_work_order(
             vendor_company_id=next_vendor_company_id,
             purchase_order_id=next_purchase_order_id,
             require_approved_po=bool(
-                {"work_type", "vendor_company_id", "purchase_order_id", "estimated_amount"}.intersection(fields)
+                {"episode_id", "work_type", "vendor_company_id", "purchase_order_id", "estimated_amount"}.intersection(fields)
                 or (work_order.status == "awaiting_approval" and payload.status == "in_progress")
             ),
         )
@@ -1015,7 +1046,8 @@ async def update_work_order(
         and selected_order
         and next_status != "cancelled"
         and (
-            approval_transition
+            episode_changed
+            or approval_transition
             or (commercial_changed and work_order.status in {"in_progress", "ready_for_review", "complete"})
         )
     )
@@ -1034,7 +1066,8 @@ async def update_work_order(
         and selected_client_order
         and next_status != "cancelled"
         and (
-            approval_transition
+            episode_changed
+            or approval_transition
             or (commercial_changed and work_order.status in {"in_progress", "ready_for_review", "complete"})
         )
     )
@@ -1098,6 +1131,7 @@ async def update_work_order(
     values["updated_at"] = now
     values.update(
         {
+            "episode_id": str(episode.id),
             "work_type": next_work_type,
             "vendor_company_id": next_vendor_company_id,
             "purchase_order_id": next_purchase_order_id,
@@ -1176,8 +1210,8 @@ async def update_work_order(
                 metadata={
                     "workOrderId": work_order_id,
                     "allocationId": allocation_id,
-                    "amount": float(commitment_plan["amount"]),
-                    "overrunAmount": float(commitment_plan["overrun"]),
+                    "amount": str(commitment_plan["amount"]),
+                    "overrunAmount": str(commitment_plan["overrun"]),
                     "overrunReason": commitment_plan["overrun_reason"],
                 },
             )
@@ -1212,8 +1246,8 @@ async def update_work_order(
                 metadata={
                     "workOrderId": work_order_id,
                     "allocationId": client_allocation_id,
-                    "amount": float(client_commitment_plan["amount"]),
-                    "overrunAmount": float(client_commitment_plan["overrun"]),
+                    "amount": str(client_commitment_plan["amount"]),
+                    "overrunAmount": str(client_commitment_plan["overrun"]),
                     "overrunReason": client_commitment_plan["overrun_reason"],
                 },
             )

@@ -8,6 +8,7 @@ does not store payment details, dietary profiles, or media data.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import and_, insert, or_, select, update
@@ -16,6 +17,7 @@ from app.api.dependencies import CurrentActor, DbSession
 from app.api.schemas import CateringRequestCreateRequest, CateringRequestUpdateRequest
 from app.auth import require_permission
 from app.budget_actuals import record_budget_actual
+from app.budget_logic import decimal_amount, json_safe
 from app.db.tables import (
     activity_log,
     billables,
@@ -320,7 +322,7 @@ async def update_catering_request(
             .limit(1)
         )
     ).first()
-    markup_percent = float(markup.markup_percent) if markup else 0.0
+    markup_percent = decimal_amount(markup.markup_percent) if markup else Decimal(0)
     values: dict[str, object] = {
         "status": payload.status,
         "fulfilled_by_person_id": runner.id if runner else None,
@@ -348,7 +350,9 @@ async def update_catering_request(
         ).first()
         if not episode_scope:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found.")
-        billed_amount = round(payload.actual_cost * (1 + markup_percent / 100), 2)
+        billed_amount = (
+            payload.actual_cost * (Decimal(1) + markup_percent / Decimal(100))
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         # Catering stays operational until the runner records the receipt.
         # At that point it creates/updates one live client billable and one
         # actual episode budget line, exactly like the historical Node route.
@@ -438,13 +442,13 @@ async def update_catering_request(
             action="catering.cost_recorded" if payload.actual_cost is not None else f"catering.{payload.status}",
             entity_type="catering_request",
             entity_id=request_id,
-            metadata={
+            metadata=json_safe({
                 "actual_cost": payload.actual_cost,
                 "billable_id": str(billable_id) if billable_id else None,
                 "budget_line_id": str(budget_line_id) if budget_line_id else None,
             }
             if payload.actual_cost is not None
-            else {},
+            else {}),
         )
     )
     await session.commit()

@@ -20,6 +20,9 @@ pnpm test:e2e
 pnpm test:auth
 pnpm test:ui
 pnpm test:backend
+pnpm test:backend:unit
+pnpm test:backend:api
+pnpm test:backend:golden
 pnpm test:shows
 pnpm test:bookings
 pnpm test:deliveries
@@ -30,6 +33,13 @@ credentials-auth suite. Backend tests are run from `backend/` with `pytest`;
 CI runs that PostgreSQL-backed suite before browser tests. The legacy Node API
 and browser/API integration suites have been retired in favour of FastAPI
 tests:
+
+For financial correctness, the backend suite is deliberately split into pure
+Decimal unit rules, PostgreSQL-backed API integration rules, and a small fixed
+[golden ledger](../backend/tests/README.md) scenario. The browser budget
+journey separately proves that the rendered total matches the API, every
+actual can be traced to its source, and a failed reconciliation hides PDF
+export.
 
 | Retired Node area | Authoritative FastAPI coverage |
 | --- | --- |

@@ -13,7 +13,7 @@ from decimal import Decimal
 from fastapi import HTTPException, status
 from sqlalchemy import and_, insert, select, update
 
-from app.budget_logic import decimal_amount
+from app.budget_logic import decimal_amount, money_amount
 from app.db.tables import budget_actual_allocations, budget_lines
 
 
@@ -24,7 +24,7 @@ async def record_budget_actual(
     actor_user_id: str | None,
     budget_line_id: str,
     source_type: str,
-    amount: Decimal | int | float | str,
+    amount: Decimal | int | str,
     currency: str,
     booking_id: str | None = None,
     work_order_id: str | None = None,
@@ -76,7 +76,8 @@ async def record_budget_actual(
     now = datetime.now(UTC)
     values = {
         "source_type": source_type,
-        "amount": decimal_amount(amount),
+        # Allocation is one of the defined monetary persistence boundaries.
+        "amount": money_amount(amount),
         "currency": currency,
         "allocation_date": allocation_date or date.today(),
         "manual_adjustment_reason": manual_adjustment_reason.strip() if manual_adjustment_reason else None,
@@ -85,7 +86,9 @@ async def record_budget_actual(
     }
     existing = None
     if source_column is not None and source_id:
-        source_types = ("booking", "time_submission") if source_type in {"booking", "time_submission"} else (source_type,)
+        source_types = (
+            ("booking", "time_submission") if source_type in {"booking", "time_submission"} else (source_type,)
+        )
         existing = (
             await session.execute(
                 select(

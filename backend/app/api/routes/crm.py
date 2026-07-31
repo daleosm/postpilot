@@ -26,7 +26,7 @@ from app.api.schemas import (
     ShowContactUpdateRequest,
 )
 from app.auth import require_permission
-from app.budget_logic import decimal_amount, monetary
+from app.budget_logic import decimal_amount, json_safe, monetary
 from app.client_purchase_order_logic import client_po_balances
 from app.db.tables import (
     activity_log,
@@ -80,7 +80,7 @@ async def _audit(
             action=action,
             entity_type=entity_type,
             entity_id=entity_id,
-            metadata=metadata,
+            metadata=json_safe(metadata),
         )
     )
 

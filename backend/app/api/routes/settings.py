@@ -29,6 +29,7 @@ from app.api.schemas import (
     SsoConnectionEnabledUpdateRequest,
 )
 from app.auth import require_permission
+from app.budget_logic import json_safe
 from app.config import get_settings
 from app.db.tables import (
     activity_log,
@@ -82,7 +83,7 @@ async def _audit(
             action=action,
             entity_type=entity_type,
             entity_id=entity_id,
-            metadata=metadata or {},
+            metadata=json_safe(metadata or {}),
         )
     )
 

@@ -25,7 +25,7 @@ from app.api.schemas import (
 )
 from app.auth import require_permission
 from app.budget_actuals import record_budget_actual
-from app.budget_logic import can_commit_po, cost_totals, decimal_amount, monetary
+from app.budget_logic import can_commit_po, cost_totals, decimal_amount, json_safe, monetary
 from app.budget_rate_resolution import resolve_budget_rate_snapshot
 from app.db.tables import (
     activity_log,
@@ -33,9 +33,9 @@ from app.db.tables import (
     budget_actual_allocations,
     budget_lines,
     crm_companies,
-    episodes,
     episode_budget_estimate_items,
     episode_budget_estimates,
+    episodes,
     people,
     post_work_orders,
     purchase_order_allocations,
@@ -76,7 +76,7 @@ async def _audit(
             action=action,
             entity_type="budget_line",
             entity_id=entity_id,
-            metadata=metadata,
+            metadata=json_safe(metadata),
         )
     )
 

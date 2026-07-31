@@ -32,6 +32,11 @@ packages = ["app"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+  "unit: deterministic pure calculation and rounding tests; no database required.",
+  "api_integration: PostgreSQL-backed API, transaction, constraint, permission, and tenant-isolation tests.",
+  "golden_ledger: fixed realistic episode ledger and invoice snapshots asserted to £0.01.",
+]
 
 [tool.ruff]
 line-length = 120

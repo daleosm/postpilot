@@ -10,12 +10,13 @@ from sqlalchemy import and_, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import CurrentActor, DbSession
-from app.api.schemas import VendorInvoiceCreateRequest
+from app.api.schemas import VendorInvoiceCreateRequest, VendorInvoiceUpdateRequest
 from app.auth import require_permission
 from app.budget_actuals import record_budget_actual
-from app.budget_logic import decimal_amount
+from app.budget_logic import decimal_amount, json_safe
 from app.db.tables import (
     activity_log,
+    budget_actual_allocations,
     budget_lines,
     crm_companies,
     episodes,
@@ -142,7 +143,7 @@ async def record_vendor_invoice(
                 detail="The linked purchase order is not valid for this supplier invoice.",
             )
         actual = await _purchase_order_actual_total(session, actor, str(order.id))
-        overrun = actual + Decimal(str(payload.amount)) - decimal_amount(order.approved_amount)
+        overrun = actual + decimal_amount(payload.amount) - decimal_amount(order.approved_amount)
         if overrun > 0:
             if not payload.overrun_reason:
                 raise HTTPException(
@@ -260,11 +261,11 @@ async def record_vendor_invoice(
                 action="vendor_invoice.recorded",
                 entity_type="vendor_invoice",
                 entity_id=str(invoice_id),
-                metadata={
+                metadata=json_safe({
                     "budgetLineId": str(budget_line.id),
                     "purchaseOrderId": str(order.id) if order else None,
                     "purchaseOrderAllocationId": str(allocation_id) if allocation_id else None,
-                },
+                }),
             )
         )
         await session.commit()
@@ -279,3 +280,153 @@ async def record_vendor_invoice(
         "budget_line_id": str(budget_line.id),
         "purchase_order_allocation_id": str(allocation_id) if allocation_id else None,
     }
+
+
+@router.patch("/{invoice_id}")
+async def update_vendor_invoice(
+    invoice_id: str, payload: VendorInvoiceUpdateRequest, actor: CurrentActor, session: DbSession
+) -> dict[str, object]:
+    """Correct one supplier invoice without ever creating a second actual.
+
+    The vendor invoice is the stable source identity. Its related budget and
+    PO rows are updated in-place, so the visible delta is exactly the change
+    in invoice value rather than an additional cost allocation.
+    """
+    await require_permission(session, actor, "manage_commercial")
+    invoice = (
+        await session.execute(
+            select(vendor_invoices)
+            .where(and_(vendor_invoices.c.id == invoice_id, vendor_invoices.c.organization_id == actor.organization_id))
+            .with_for_update()
+            .limit(1)
+        )
+    ).first()
+    if not invoice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor invoice not found.")
+    if invoice.status == "paid" and ("amount" in payload.model_fields_set or payload.status == "void"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A paid supplier invoice cannot be amended; record a supplier credit instead.",
+        )
+
+    next_status = payload.status or invoice.status
+    next_amount = Decimal(0) if next_status == "void" else decimal_amount(payload.amount or invoice.amount)
+    po_allocation = (
+        await session.execute(
+            select(purchase_order_allocations)
+            .where(
+                and_(
+                    purchase_order_allocations.c.organization_id == actor.organization_id,
+                    purchase_order_allocations.c.vendor_invoice_id == invoice_id,
+                    purchase_order_allocations.c.allocation_type == "vendor_invoice",
+                )
+            )
+            .with_for_update()
+            .limit(1)
+        )
+    ).first()
+    if po_allocation:
+        order = (
+            await session.execute(
+                select(purchase_orders)
+                .where(
+                    and_(
+                        purchase_orders.c.id == po_allocation.purchase_order_id,
+                        purchase_orders.c.organization_id == actor.organization_id,
+                    )
+                )
+                .with_for_update()
+                .limit(1)
+            )
+        ).first()
+        if not order:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The linked vendor PO is unavailable.")
+        other_actuals = await session.scalar(
+            select(func.coalesce(func.sum(purchase_order_allocations.c.amount), 0)).where(
+                and_(
+                    purchase_order_allocations.c.organization_id == actor.organization_id,
+                    purchase_order_allocations.c.purchase_order_id == order.id,
+                    purchase_order_allocations.c.allocation_type == "vendor_invoice",
+                    purchase_order_allocations.c.id != po_allocation.id,
+                )
+            )
+        )
+        overrun = decimal_amount(other_actuals) + next_amount - decimal_amount(order.approved_amount)
+        if overrun > 0:
+            if not payload.overrun_reason:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Explain the PO overrun before saving it.")
+            await require_permission(session, actor, "approve_budget_overruns")
+
+    now = datetime.now(UTC)
+    values = payload.model_dump(exclude_unset=True)
+    values.pop("overrun_reason", None)
+    if "invoice_number" in values:
+        values["invoice_number"] = values["invoice_number"].strip()
+    if "description" in values and values["description"]:
+        values["description"] = values["description"].strip()
+    values["updated_at"] = now
+    changed = await session.execute(
+        update(vendor_invoices)
+        .where(and_(vendor_invoices.c.id == invoice_id, vendor_invoices.c.organization_id == actor.organization_id))
+        .values(**values)
+        .returning(vendor_invoices)
+    )
+    row = changed.one()
+    await session.execute(
+        update(budget_actual_allocations)
+        .where(
+            and_(
+                budget_actual_allocations.c.organization_id == actor.organization_id,
+                budget_actual_allocations.c.vendor_invoice_id == invoice_id,
+                budget_actual_allocations.c.source_type == "vendor_invoice",
+            )
+        )
+        .values(amount=next_amount, source_reference=row.invoice_number, updated_at=now)
+    )
+    if po_allocation:
+        await session.execute(
+            update(purchase_order_allocations)
+            .where(
+                and_(
+                    purchase_order_allocations.c.id == po_allocation.id,
+                    purchase_order_allocations.c.organization_id == actor.organization_id,
+                )
+            )
+            .values(amount=next_amount, reference=row.invoice_number, description=row.description, updated_at=now)
+        )
+    if row.work_order_id:
+        total = await session.scalar(
+            select(func.coalesce(func.sum(vendor_invoices.c.amount), 0)).where(
+                and_(
+                    vendor_invoices.c.organization_id == actor.organization_id,
+                    vendor_invoices.c.work_order_id == row.work_order_id,
+                    vendor_invoices.c.status != "void",
+                )
+            )
+        )
+        await session.execute(
+            update(post_work_orders)
+            .where(
+                and_(
+                    post_work_orders.c.id == row.work_order_id,
+                    post_work_orders.c.organization_id == actor.organization_id,
+                )
+            )
+            .values(actual_amount=decimal_amount(total), updated_at=now)
+        )
+    await session.execute(
+        insert(activity_log).values(
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            action="vendor_invoice.corrected" if next_status != "void" else "vendor_invoice.voided",
+            entity_type="vendor_invoice",
+            entity_id=invoice_id,
+            metadata=json_safe({"previousAmount": str(invoice.amount), "actualAmount": str(next_amount)}),
+        )
+    )
+    try:
+        await session.commit()
+    except IntegrityError as error:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Supplier invoice reference already exists.") from error
+    return {"id": str(row.id), "amount": decimal_amount(row.amount), "status": row.status, "actual_amount": next_amount}

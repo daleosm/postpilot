@@ -51,6 +51,11 @@ cd backend
 .venv/bin/ruff check .
 .venv/bin/pytest
 
+# Financial test layers (from the repository root)
+pnpm test:backend:unit
+pnpm test:backend:api
+pnpm test:backend:golden
+
 # Full browser suite, including credentials auth
 pnpm test:e2e
 
@@ -61,7 +66,10 @@ pnpm test:approvals
 pnpm test:deliveries
 ~~~
 
-See [tests/README.md](../tests/README.md) for suite ownership, conventions, and coverage notes. FastAPI backend coverage is run with `pytest`; its focused tests live in `backend/tests/`.
+See [tests/README.md](../tests/README.md) for browser-suite ownership and
+[backend/tests/README.md](../backend/tests/README.md) for the backend financial
+test layers. FastAPI backend coverage is run with `pytest`; its focused tests
+live in `backend/tests/`.
 
 ## How to investigate a problem
 

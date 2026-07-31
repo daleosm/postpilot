@@ -10,6 +10,8 @@ def test_purchase_order_balances_are_derived_from_the_ledger() -> None:
         "authorised_amount": Decimal("1000"),
         "committed_amount": Decimal("1100"),
         "actual_invoiced_amount": Decimal("600"),
+        "open_commitment_amount": Decimal("500"),
+        "uncommitted_actual_amount": Decimal("0"),
         "remaining_amount": Decimal("-100"),
         "variance_amount": Decimal("-400"),
     }

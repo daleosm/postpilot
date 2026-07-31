@@ -11,14 +11,14 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import and_, func, insert, or_, select, update
+from sqlalchemy import and_, delete, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import CurrentActor, DbSession
-from app.api.schemas import BillableFromWorkOrderRequest, ClientInvoiceIssueRequest
+from app.api.schemas import BillableFromWorkOrderRequest, BillableVoidRequest, ClientInvoiceIssueRequest
 from app.auth import require_permission
 from app.billing_logic import invoice_number_prefix, invoice_totals
-from app.budget_logic import decimal_amount, monetary
+from app.budget_logic import decimal_amount, json_safe, monetary
 from app.db.tables import (
     activity_log,
     billables,
@@ -55,7 +55,7 @@ async def _audit(
             action=action,
             entity_type=entity_type,
             entity_id=entity_id,
-            metadata=metadata,
+            metadata=json_safe(metadata),
         )
     )
 
@@ -281,7 +281,13 @@ async def _client_po_warnings(
     return warnings
 
 
-async def _episode_invoice_readiness(session: DbSession, actor: CurrentActor, episode_id: str) -> dict[str, object]:
+async def _episode_invoice_readiness(
+    session: DbSession,
+    actor: CurrentActor,
+    episode_id: str,
+    *,
+    include_invoice_export_reasons: bool = True,
+) -> dict[str, object]:
     episode = await _episode_scope(session, actor, episode_id)
     unconfirmed_bookings = (
         await session.execute(
@@ -383,6 +389,25 @@ async def _episode_invoice_readiness(session: DbSession, actor: CurrentActor, ep
         else None
     )
     total = sum((decimal_amount(item.amount) for item in ready_billables), Decimal(0))
+    invoice_values = []
+    for item in issued_invoices:
+        value: dict[str, object] = {
+            "id": str(item.id),
+            "invoice_number": item.invoice_number,
+            "status": item.status,
+            "invoice_date": item.invoice_date,
+            "due_date": item.due_date,
+            "total_amount": monetary(decimal_amount(item.total_amount)),
+            "currency": item.currency,
+        }
+        if include_invoice_export_reasons:
+            # The register must show a real export lock, not merely hide the
+            # download control. Reuse the authoritative reconciliation gate.
+            value["export_blocked_reason"] = (
+                await _invoice_export_readiness(session, actor, str(item.id))
+            )["blocked_reason"]
+        invoice_values.append(value)
+
     return {
         "episode": _episode_value(episode),
         "unconfirmed_bookings": [
@@ -401,18 +426,7 @@ async def _episode_invoice_readiness(session: DbSession, actor: CurrentActor, ep
             }
             for item in ready_billables
         ],
-        "invoices": [
-            {
-                "id": str(item.id),
-                "invoice_number": item.invoice_number,
-                "status": item.status,
-                "invoice_date": item.invoice_date,
-                "due_date": item.due_date,
-                "total_amount": monetary(decimal_amount(item.total_amount)),
-                "currency": item.currency,
-            }
-            for item in issued_invoices
-        ],
+        "invoices": invoice_values,
         "invoice_profile_complete": profile_complete,
         "workflow_complete": workflow_complete,
         "invoice_ready_total": monetary(total),
@@ -634,6 +648,7 @@ async def create_billable_from_work_order(
             status="approved",
             rate_source="approved_client_change",
             rate_snapshot={"workOrderId": work_order_id, "clientQuoteAmount": str(amount)},
+            source_work_order_id=work_order.id,
             created_at=now,
             updated_at=now,
         )
@@ -673,7 +688,7 @@ async def create_billable_from_work_order(
         action="billable.posted_from_work_order",
         entity_type="billable",
         entity_id=str(billable.id),
-        metadata={"workOrderId": work_order_id, "episodeId": str(episode.id), "amount": float(amount)},
+        metadata={"workOrderId": work_order_id, "episodeId": str(episode.id), "amount": str(amount)},
     )
     if work_order.client_purchase_order_id:
         await _audit(
@@ -682,7 +697,7 @@ async def create_billable_from_work_order(
             action="client_purchase_order.work_order_posted_to_billable",
             entity_type="client_purchase_order",
             entity_id=str(work_order.client_purchase_order_id),
-            metadata={"workOrderId": work_order_id, "billableId": str(billable.id), "amount": float(amount)},
+            metadata={"workOrderId": work_order_id, "billableId": str(billable.id), "amount": str(amount)},
         )
     try:
         await session.commit()
@@ -692,6 +707,79 @@ async def create_billable_from_work_order(
             status_code=status.HTTP_409_CONFLICT, detail="This work order was already posted to billing."
         ) from error
     return _billable_value(billable)
+
+
+@router.post("/billables/{billable_id}/void")
+async def void_billable(
+    billable_id: str, payload: BillableVoidRequest, actor: CurrentActor, session: DbSession
+) -> dict[str, object]:
+    """Void a pre-invoice client charge and release its PO commitment once.
+
+    Issued invoices deliberately cannot be changed through this route: they
+    require a future credit-note flow. Before issue, the billable is still an
+    operational source record and can be released with a complete audit trail.
+    """
+    await require_permission(session, actor, "manage_commercial")
+    billable = (
+        await session.execute(
+            select(billables)
+            .where(and_(billables.c.id == billable_id, billables.c.organization_id == actor.organization_id))
+            .with_for_update()
+            .limit(1)
+        )
+    ).first()
+    if not billable:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Billable not found.")
+    if billable.status == "void":
+        return {**_billable_value(billable), "released": False}
+    if billable.status != "approved" or billable.client_invoice_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only an approved, uninvoiced billable can be voided. Issue a credit note for an invoiced charge.",
+        )
+    now = datetime.now(UTC)
+    released = await session.execute(
+        delete(client_purchase_order_allocations).where(
+            and_(
+                client_purchase_order_allocations.c.organization_id == actor.organization_id,
+                client_purchase_order_allocations.c.billable_id == billable_id,
+                client_purchase_order_allocations.c.allocation_type == "billable",
+            )
+        )
+    )
+    changed = await session.execute(
+        update(billables)
+        .where(and_(billables.c.id == billable_id, billables.c.organization_id == actor.organization_id))
+        .values(status="void", override_reason=payload.reason.strip(), updated_at=now)
+        .returning(billables)
+    )
+    row = changed.one()
+    work_order_id = str(row.source_work_order_id) if row.source_work_order_id else None
+    if not work_order_id and isinstance(row.rate_snapshot, dict):
+        candidate = row.rate_snapshot.get("workOrderId")
+        work_order_id = str(candidate) if candidate else None
+    if work_order_id:
+        await session.execute(
+            update(post_work_orders)
+            .where(
+                and_(
+                    post_work_orders.c.id == work_order_id,
+                    post_work_orders.c.organization_id == actor.organization_id,
+                    post_work_orders.c.billing_status == "posted",
+                )
+            )
+            .values(billing_status="draft", updated_at=now)
+        )
+    await _audit(
+        session,
+        actor,
+        action="billable.voided",
+        entity_type="billable",
+        entity_id=billable_id,
+        metadata={"reason": payload.reason.strip(), "releasedClientPoAllocation": bool(released.rowcount)},
+    )
+    await session.commit()
+    return {**_billable_value(row), "released": bool(released.rowcount)}
 
 
 async def _invoice_po_scope(
@@ -994,35 +1082,58 @@ async def _invoice_or_404(session: DbSession, actor: CurrentActor, invoice_id: s
 
 async def _invoice_export_readiness(session: DbSession, actor: CurrentActor, invoice_id: str) -> dict[str, object]:
     invoice = await _invoice_or_404(session, actor, invoice_id)
+    checks = {
+        "workflowComplete": False,
+        "allRequiredActualsSubmitted": False,
+        "billablesReconcile": False,
+        "clientPoValid": False,
+        "invoiceLinesEqualSourceBillables": False,
+        "totalsReconcile": False,
+    }
+    blocking_reasons: list[str] = []
+    blocking_records: list[dict[str, object]] = []
     if invoice.status == "void":
-        return {
-            "invoice_id": str(invoice.id),
-            "exportable": False,
-            "blocked_reason": "A void invoice cannot be exported.",
-        }
+        blocking_reasons.append("A void invoice cannot be exported.")
+        blocking_records.append({"type": "invoice", "id": str(invoice.id), "label": invoice.invoice_number})
     if not invoice.episode_id:
+        blocking_reasons.append("This invoice is not linked to an episode.")
+        blocking_records.append({"type": "invoice", "id": str(invoice.id), "label": invoice.invoice_number})
         return {
             "invoice_id": str(invoice.id),
+            "invoice_number": invoice.invoice_number,
             "exportable": False,
-            "blocked_reason": "This invoice is not linked to an episode.",
+            "blockingReasons": blocking_reasons,
+            "blockingRecords": blocking_records,
+            "checks": checks,
+            # Compatibility with the existing UI contract.
+            "blocked_reason": blocking_reasons[0],
+            "client_po_warnings": [],
         }
-    readiness = await _episode_invoice_readiness(session, actor, str(invoice.episode_id))
-    if not readiness["workflow_complete"]:
-        return {
-            "invoice_id": str(invoice.id),
-            "exportable": False,
-            "blocked_reason": "Complete the episode workflow before exporting its invoice.",
-        }
-    if readiness["unconfirmed_bookings"]:
-        pending = len(readiness["unconfirmed_bookings"])
-        return {
-            "invoice_id": str(invoice.id),
-            "exportable": False,
-            "blocked_reason": (
-                f"{pending} assigned booking{'s' if pending != 1 else ''} still need actual time "
-                "confirmed before invoice export."
-            ),
-        }
+
+    readiness = await _episode_invoice_readiness(
+        session,
+        actor,
+        str(invoice.episode_id),
+        include_invoice_export_reasons=False,
+    )
+    checks["workflowComplete"] = bool(readiness["workflow_complete"])
+    if not checks["workflowComplete"]:
+        blocking_reasons.append("Complete the episode workflow before exporting its invoice.")
+        blocking_records.append(
+            {"type": "episode", "id": str(invoice.episode_id), "label": readiness["episode"]["title"]}
+        )
+    checks["allRequiredActualsSubmitted"] = not bool(readiness["unconfirmed_bookings"])
+    if not checks["allRequiredActualsSubmitted"]:
+        blocking_reasons.append("Confirm actual time for every assigned episode booking before invoice export.")
+        blocking_records.extend(
+            {
+                "type": "booking",
+                "id": item["id"],
+                "label": item["title"],
+                "person": item["person_name"],
+            }
+            for item in readiness["unconfirmed_bookings"]
+        )
     items = (
         await session.execute(
             select(client_invoice_items)
@@ -1035,6 +1146,59 @@ async def _invoice_export_readiness(session: DbSession, actor: CurrentActor, inv
             .order_by(client_invoice_items.c.created_at, client_invoice_items.c.id)
         )
     ).all()
+    item_billable_ids = [item.billable_id for item in items if item.billable_id]
+    source_billables = (
+        await session.execute(
+            select(billables).where(
+                and_(
+                    billables.c.organization_id == actor.organization_id,
+                    billables.c.id.in_(item_billable_ids or ["00000000-0000-0000-0000-000000000000"]),
+                )
+            )
+        )
+    ).all()
+    sources_by_id = {str(source.id): source for source in source_billables}
+    source_ids = [str(item.billable_id) for item in items if item.billable_id]
+    lines_have_unique_sources = len(source_ids) == len(set(source_ids)) == len(items)
+    source_states_match = all(
+        (source := sources_by_id.get(str(item.billable_id)))
+        and source.status == "invoiced"
+        and str(source.client_invoice_id) == str(invoice.id)
+        for item in items
+    )
+    checks["billablesReconcile"] = bool(items) and lines_have_unique_sources and source_states_match
+    if not checks["billablesReconcile"]:
+        blocking_reasons.append("One or more invoice lines are not reconciled to an invoiced source billable.")
+        blocking_records.append({"type": "invoice", "id": str(invoice.id), "label": invoice.invoice_number})
+
+    line_values_match_sources = all(
+        (source := sources_by_id.get(str(item.billable_id)))
+        and decimal_amount(item.amount) == decimal_amount(source.amount)
+        and decimal_amount(item.amount)
+        == invoice_totals(
+            decimal_amount(item.quantity) * decimal_amount(item.unit_amount),
+            tax_enabled=False,
+            tax_rate_percent=Decimal(0),
+        )["subtotal_amount"]
+        for item in items
+    )
+    checks["invoiceLinesEqualSourceBillables"] = checks["billablesReconcile"] and line_values_match_sources
+    if not checks["invoiceLinesEqualSourceBillables"]:
+        blocking_reasons.append("An invoice line does not exactly match its source billable.")
+
+    calculated = invoice_totals(
+        sum((decimal_amount(item.amount) for item in items), Decimal(0)),
+        tax_enabled=bool(invoice.tax_enabled),
+        tax_rate_percent=decimal_amount(invoice.tax_rate_percent),
+    )
+    checks["totalsReconcile"] = (
+        calculated["subtotal_amount"] == decimal_amount(invoice.subtotal_amount)
+        and calculated["tax_amount"] == decimal_amount(invoice.tax_amount)
+        and calculated["total_amount"] == decimal_amount(invoice.total_amount)
+    )
+    if not checks["totalsReconcile"]:
+        blocking_reasons.append("Invoice line totals and the saved invoice totals do not reconcile.")
+        blocking_records.append({"type": "invoice", "id": str(invoice.id), "label": invoice.invoice_number})
     warnings = await _client_po_warnings(
         session,
         actor,
@@ -1051,12 +1215,26 @@ async def _invoice_export_readiness(session: DbSession, actor: CurrentActor, inv
         require_active=False,
         as_of=invoice.invoice_date,
     )
-    blocker = next((warning for warning in warnings if warning["blocks_billing"]), None)
+    po_blockers = [warning for warning in warnings if warning["blocks_billing"]]
+    checks["clientPoValid"] = not po_blockers
+    for warning in po_blockers:
+        blocking_reasons.append(str(warning["message"]))
+        blocking_records.append(
+            {
+                "type": "client_purchase_order",
+                "id": str(warning["client_purchase_order_id"]),
+                "label": str(warning["po_number"]),
+            }
+        )
+    exportable = bool(invoice.status != "void" and all(checks.values()))
     return {
         "invoice_id": str(invoice.id),
         "invoice_number": invoice.invoice_number,
-        "exportable": not blocker,
-        "blocked_reason": str(blocker["message"]) if blocker else None,
+        "exportable": exportable,
+        "blockingReasons": blocking_reasons,
+        "blockingRecords": blocking_records,
+        "checks": checks,
+        "blocked_reason": blocking_reasons[0] if blocking_reasons else None,
         "client_po_warnings": warnings,
     }
 

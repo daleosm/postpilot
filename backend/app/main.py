@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router, root_router
 from app.config import get_settings
 from app.db.session import get_engine, get_session_factory
+from app.financial_idempotency import financial_idempotency_middleware
 
 
 @asynccontextmanager
@@ -38,8 +39,9 @@ def create_app() -> FastAPI:
         allow_origins=settings.frontend_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-Id", "Idempotency-Key"],
     )
+    app.middleware("http")(financial_idempotency_middleware)
     app.include_router(root_router)
     app.include_router(api_router)
     return app

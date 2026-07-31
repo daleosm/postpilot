@@ -18,6 +18,7 @@ from app.api.schemas import (
 )
 from app.auth import require_any_permission, require_permission
 from app.budget_actuals import record_budget_actual
+from app.budget_logic import decimal_amount, json_safe, monetary
 from app.db.tables import (
     activity_log,
     budget_lines,
@@ -38,11 +39,11 @@ router = APIRouter(prefix="/purchase-orders", tags=["purchase-orders"])
 
 
 def _decimal(value: object | None) -> Decimal:
-    return Decimal(str(value or 0))
+    return decimal_amount(value)
 
 
 def _currency(value: Decimal) -> float:
-    return float(value.quantize(Decimal("0.01")))
+    return monetary(value)
 
 
 async def _audit(
@@ -55,7 +56,7 @@ async def _audit(
             action=action,
             entity_type="purchase_order",
             entity_id=purchase_order_id,
-            metadata=metadata,
+            metadata=json_safe(metadata),
         )
     )
 
@@ -655,6 +656,26 @@ async def record_purchase_order_actual_cost(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Supplier actuals can only be recorded against an approved or closed PO.",
+        )
+    # Idempotency must be assessed before projected-balance validation. A
+    # network retry of an already-recorded invoice is never a new overrun.
+    duplicate_invoice = (
+        await session.execute(
+            select(vendor_invoices.c.id)
+            .where(
+                and_(
+                    vendor_invoices.c.organization_id == actor.organization_id,
+                    vendor_invoices.c.vendor_company_id == order.vendor_company_id,
+                    vendor_invoices.c.invoice_number == payload.invoice_number.strip(),
+                )
+            )
+            .limit(1)
+        )
+    ).first()
+    if duplicate_invoice:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A supplier invoice with that reference already exists for this vendor.",
         )
     episode_id = str(order.episode_id) if order.episode_id else payload.episode_id
     if order.episode_id and payload.episode_id and str(order.episode_id) != payload.episode_id:

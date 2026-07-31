@@ -16,7 +16,7 @@ from app.api.schemas import (
     ClientPurchaseOrderUpdateRequest,
 )
 from app.auth import require_permission
-from app.budget_logic import decimal_amount, monetary
+from app.budget_logic import decimal_amount, json_safe, monetary
 from app.client_purchase_order_logic import client_po_balances, valid_client_po_status_transition
 from app.db.tables import (
     activity_log,
@@ -46,7 +46,7 @@ async def _audit(
             action=action,
             entity_type="client_purchase_order",
             entity_id=client_purchase_order_id,
-            metadata=metadata,
+            metadata=json_safe(metadata),
         )
     )
 
@@ -601,7 +601,7 @@ async def create_client_purchase_order_allocation(
             status_code=status.HTTP_409_CONFLICT, detail="This source already has a Client PO allocation."
         )
     committed, invoiced = await _totals(session, actor, client_purchase_order_id)
-    amount = Decimal(str(payload.amount))
+    amount = decimal_amount(payload.amount)
     next_committed = (
         committed + amount if payload.allocation_type in {"billable", "change_order", "work_order"} else committed
     )
@@ -647,8 +647,8 @@ async def create_client_purchase_order_allocation(
         {
             "allocationId": str(created),
             "allocationType": payload.allocation_type,
-            "amount": float(amount),
-            "overrunAmount": float(max(overrun_amount, Decimal(0))),
+            "amount": str(amount),
+            "overrunAmount": str(max(overrun_amount, Decimal(0))),
             "overrunReason": payload.overrun_reason,
         },
     )

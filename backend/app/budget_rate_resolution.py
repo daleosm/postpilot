@@ -10,7 +10,7 @@ from sqlalchemy import and_, select
 
 from app.api.dependencies import CurrentActor, DbSession
 from app.api.routes.rate_cards import resolve_effective_rate
-from app.budget_logic import decimal_amount
+from app.budget_logic import decimal_amount, money_amount
 from app.db.tables import people, rooms, service_rates
 
 RATE_RESOURCE_TYPES = {"service", "room", "person"}
@@ -29,7 +29,9 @@ class BudgetRateSnapshot:
 
     @property
     def estimate(self) -> Decimal:
-        return self.quantity * self.rate
+        # A planned estimate is a saved monetary boundary. Keep higher
+        # precision for quantities, but snapshot the resulting money once.
+        return money_amount(self.quantity * self.rate)
 
 
 async def resolve_budget_rate_snapshot(
@@ -38,11 +40,11 @@ async def resolve_budget_rate_snapshot(
     *,
     episode_id: str,
     category: str,
-    quantity: Decimal | int | float | str,
+    quantity: Decimal | int | str,
     unit: str | None,
     resource_type: str,
     resource_id: str,
-    manual_rate_override: Decimal | int | float | str | None = None,
+    manual_rate_override: Decimal | int | str | None = None,
     manual_override_reason: str | None = None,
 ) -> BudgetRateSnapshot:
     """Resolve a selected resource to one inherited rate and snapshot it.

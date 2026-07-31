@@ -158,10 +158,14 @@ people = Table(
     Column("is_active", Boolean, nullable=False, server_default="true"),
     Column("is_freelancer", Boolean, nullable=False, server_default="false"),
     Column("availability", existing_postgres_enum("availability_status"), nullable=False, server_default="available"),
-    Column("hourly_rate", Numeric(10, 2)),
-    Column("day_rate", Numeric(10, 2)),
+    Column("hourly_rate", Numeric(14, 2)),
+    Column("day_rate", Numeric(14, 2)),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint(
+        "(hourly_rate IS NULL OR hourly_rate >= 0) AND (day_rate IS NULL OR day_rate >= 0)",
+        name="people_rates_non_negative_check",
+    ),
 )
 
 organization_role_policies = Table(
@@ -497,6 +501,10 @@ budget_lines = Table(
     Column("cost_type", existing_postgres_enum("cost_type"), nullable=False),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint(
+        "budgeted_amount >= 0 AND actual_amount >= 0 AND (planned_quantity IS NULL OR planned_quantity >= 0) AND (rate_snapshot IS NULL OR rate_snapshot >= 0)",
+        name="budget_lines_non_negative_money_check",
+    ),
 )
 
 budget_actual_allocations = Table(
@@ -599,8 +607,8 @@ catering_requests = Table(
     Column("requested_for", DateTime(timezone=True)),
     Column("status", existing_postgres_enum("catering_request_status"), nullable=False),
     Column("fulfilled_at", DateTime(timezone=True)),
-    Column("actual_cost", Numeric(12, 2)),
-    Column("billed_amount", Numeric(12, 2)),
+    Column("actual_cost", Numeric(14, 2)),
+    Column("billed_amount", Numeric(14, 2)),
     Column("markup_percent", Numeric(7, 2)),
     Column("currency", Text, nullable=False),
     Column("receipt_reference", Text),
@@ -608,6 +616,10 @@ catering_requests = Table(
     Column("budget_line_id", UUID(as_uuid=False)),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint(
+        "quantity > 0 AND (actual_cost IS NULL OR actual_cost >= 0) AND (billed_amount IS NULL OR billed_amount >= 0) AND (markup_percent IS NULL OR markup_percent >= 0)",
+        name="catering_requests_financial_non_negative_check",
+    ),
 )
 
 # Rate cards are the facility's live room/service price source. Person rates
@@ -627,6 +639,7 @@ service_rates = Table(
     Column("is_active", Boolean, nullable=False),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint("rate >= 0", name="service_rates_rate_non_negative_check"),
 )
 
 rate_cards = Table(
@@ -659,6 +672,7 @@ rate_card_items = Table(
     Column("rate", Numeric(14, 2), nullable=False),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint("rate >= 0", name="rate_card_items_rate_non_negative_check"),
 )
 
 bookings = Table(
@@ -867,6 +881,10 @@ post_work_orders = Table(
     Column("completed_at", DateTime(timezone=True)),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint(
+        "(estimated_amount IS NULL OR estimated_amount >= 0) AND (client_quote_amount IS NULL OR client_quote_amount >= 0) AND (actual_amount IS NULL OR actual_amount >= 0)",
+        name="post_work_orders_non_negative_money_check",
+    ),
 )
 
 post_work_order_items = Table(
@@ -885,6 +903,10 @@ post_work_order_items = Table(
     Column("position", Integer, nullable=False),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint(
+        "quantity >= 0 AND unit_rate >= 0 AND discount_percent >= 0 AND discount_percent <= 100",
+        name="post_work_order_items_non_negative_money_check",
+    ),
 )
 
 # Work orders only need the narrow PO shape required to validate a reference
@@ -992,6 +1014,10 @@ client_invoices = Table(
     Column("payment_instructions", Text),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint(
+        "sequence > 0 AND subtotal_amount >= 0 AND tax_rate_percent >= 0 AND tax_amount >= 0 AND total_amount >= 0 AND total_amount = subtotal_amount + tax_amount",
+        name="client_invoices_financial_totals_check",
+    ),
 )
 
 billables = Table(
@@ -1015,9 +1041,11 @@ billables = Table(
     Column("due_date", Date),
     Column("rate_source", Text),
     Column("rate_snapshot", JSON),
+    Column("source_work_order_id", UUID(as_uuid=False), ForeignKey("post_work_orders.id", ondelete="RESTRICT")),
     Column("override_reason", Text),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint("amount >= 0", name="billables_amount_non_negative_check"),
 )
 
 client_invoice_items = Table(
@@ -1039,6 +1067,10 @@ client_invoice_items = Table(
     Column("amount", Numeric(14, 2), nullable=False),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint(
+        "quantity > 0 AND unit_amount >= 0 AND amount >= 0 AND amount = round(quantity * unit_amount, 2)",
+        name="client_invoice_items_financial_amounts_check",
+    ),
 )
 
 purchase_order_allocations = Table(
@@ -1082,6 +1114,7 @@ vendor_invoices = Table(
     Column("external_document_url", Text),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint("amount >= 0", name="vendor_invoices_amount_non_negative_check"),
 )
 
 qc_reports = Table(
@@ -1147,4 +1180,36 @@ api_sessions = Table(
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("last_seen_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+# Persisted replay records for financial POSTs.  They are intentionally
+# tenant- and actor-scoped: a request key is never a capability, merely a safe
+# retry token for a single commercial operation.
+financial_idempotency_keys = Table(
+    "financial_idempotency_keys",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True, server_default=func.gen_random_uuid()),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("actor_user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("operation", Text, nullable=False),
+    Column("idempotency_key", Text, nullable=False),
+    Column("request_hash", String(64), nullable=False),
+    Column("response_status", Integer),
+    Column("response_body", JSON),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("completed_at", DateTime(timezone=True)),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint("length(trim(operation)) > 0", name="financial_idempotency_operation_check"),
+    CheckConstraint("length(trim(idempotency_key)) BETWEEN 1 AND 255", name="financial_idempotency_key_check"),
+    CheckConstraint(
+        "(response_status IS NULL AND response_body IS NULL) OR (response_status BETWEEN 100 AND 599 AND response_body IS NOT NULL)",
+        name="financial_idempotency_response_check",
+    ),
+    UniqueConstraint(
+        "organization_id",
+        "actor_user_id",
+        "operation",
+        "idempotency_key",
+        name="financial_idempotency_actor_operation_key_unique",
+    ),
 )
