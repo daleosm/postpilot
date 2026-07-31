@@ -62,6 +62,7 @@ test.describe("Episode estimate to actual UI", () => {
 
   test("expands seeded actuals to their booking and supplier-invoice sources, then explains variance", async ({ page }) => {
     await page.goto(`/budget?network=Slate%2B&show=Crossing%20Point&episode=${COPPERLINE_EPISODE_ID}`);
+    await expect(page.getByRole("heading", { name: /Budget · E\d{2} .+/ })).toBeVisible();
 
     const actuals = page.getByRole("heading", { name: "Actuals" }).locator("xpath=ancestor::section[1]");
     await actuals.locator("summary").first().click();

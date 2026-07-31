@@ -98,9 +98,10 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
   const currency = estimateOverview.currency ?? lines[0]?.currency ?? "USD";
   const episodePurchaseOrders = purchaseOrdersForEpisode(data.purchaseOrders, selectedEpisode);
   const episodeClientPurchaseOrders = clientPurchaseOrdersForEpisode(data.clientPurchaseOrders, selectedEpisode);
+  const episodeLabel = selectedEpisode.label.replace(`${activeShow} · `, "");
 
   return <div className="space-y-5">
-    <PageHeader eyebrow={`Episode cost control · ${activeShow}`} title="Budget" description="Episode-level costs with show roll-ups for post-production control." action={<div className="flex gap-2"><Link href={`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`} className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">All episodes</Link>{!estimateOverview.isLocked && <EstimateBuilder episode={selectedEpisode} resources={data.resources} />}</div>} />
+    <PageHeader eyebrow={`Episode cost control · ${activeShow}`} title={`Budget · ${episodeLabel}`} description="Episode-level costs with show roll-ups for post-production control." action={<div className="flex gap-2"><Link href={`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`} className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">All episodes</Link>{!estimateOverview.isLocked && <EstimateBuilder episode={selectedEpisode} resources={data.resources} />}</div>} />
 
     <div className="flex justify-end"><RateCardDialog rates={serviceRates} scope={{ type: "episode", episodeId: selectedEpisodeId }} title="Episode service rate card" /></div>
     <EstimateRevisionPanel episodeId={selectedEpisodeId} estimate={estimateOverview} />
