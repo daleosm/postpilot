@@ -1,5 +1,7 @@
 """Fast checks for the Python-owned fixture contract without a database."""
 
+from pathlib import Path
+
 from app.demo_seed import (
     DEMO_BOOKINGS_PER_TENANT,
     DEMO_MANIFESTS_PER_TENANT,
@@ -31,3 +33,25 @@ def test_demo_seed_uses_short_human_names_for_supplemental_debug_users() -> None
     assert len(SUPPLEMENTAL_PEOPLE) == len(TENANTS)
     names = [name for roster in SUPPLEMENTAL_PEOPLE for name in roster.values()]
     assert all("Post" not in name and "Finish" not in name and "Editorial" not in name for name in names)
+
+
+def test_demo_seed_documents_transparent_cost_plans_and_linked_actual_sources() -> None:
+    source = (Path(__file__).resolve().parents[1] / "app/demo_seed.py").read_text()
+
+    for phrase in (
+        "budget_specs = (",
+        '"Edit suite"',
+        '"Editorial artists"',
+        '"VFX"',
+        '"Colour"',
+        '"Sound"',
+        '"QC"',
+        '"Delivery"',
+        '"External vendors"',
+        '"source_type": "booking"',
+        '"source_type": "work_order"',
+        'source_type="vendor_invoice"',
+        "episode_budget_estimates",
+        "episode_budget_estimate_items",
+    ):
+        assert phrase in source

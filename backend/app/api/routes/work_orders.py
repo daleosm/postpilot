@@ -16,6 +16,7 @@ from app.booking_logic import booking_conflicts
 from app.db.tables import (
     activity_log,
     bookings,
+    budget_lines,
     client_purchase_order_allocations,
     client_purchase_orders,
     crm_companies,
@@ -30,6 +31,7 @@ from app.db.tables import (
     shows,
     workflow_stages,
 )
+from app.vendor_spend import external_budget_line_for_episode
 
 router = APIRouter(prefix="/work-orders", tags=["work-orders"])
 
@@ -47,6 +49,7 @@ def _work_order_value(row: object, items: list[object] | None = None) -> dict[st
         "work_type": row.work_type,
         "vendor_company_id": str(row.vendor_company_id) if row.vendor_company_id else None,
         "purchase_order_id": str(row.purchase_order_id) if row.purchase_order_id else None,
+        "budget_line_id": str(row.budget_line_id) if row.budget_line_id else None,
         "client_purchase_order_id": str(row.client_purchase_order_id) if row.client_purchase_order_id else None,
         "kind": row.kind,
         "title": row.title,
@@ -181,10 +184,21 @@ async def _validate_create_references(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail="Select an approved PO for this vendor and episode."
             )
-    elif payload.purchase_order_id:
+        if payload.budget_line_id:
+            await external_budget_line_for_episode(
+                session,
+                organization_id=actor.organization_id,
+                episode_id=str(episode.id),
+                budget_line_id=payload.budget_line_id,
+                purchase_order_id=payload.purchase_order_id,
+            )
+    elif payload.purchase_order_id or payload.budget_line_id:
         # Pydantic catches normal internal work; this protects a deliberately
         # malformed request as well.
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Internal work cannot use a vendor PO.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Internal work cannot use a vendor PO or external budget item.",
+        )
 
     await _validate_client_purchase_order_scope(
         session,
@@ -688,6 +702,7 @@ async def create_work_order(
     await require_permission(session, actor, "manage_work_orders")
     commercial_fields = {
         "estimated_amount",
+        "budget_line_id",
         "client_quote_amount",
         "billing_notes",
         "items",
@@ -708,6 +723,7 @@ async def create_work_order(
             work_type=payload.work_type,
             vendor_company_id=payload.vendor_company_id if payload.work_type == "external_vendor" else None,
             purchase_order_id=payload.purchase_order_id if payload.work_type == "external_vendor" else None,
+            budget_line_id=payload.budget_line_id if payload.work_type == "external_vendor" else None,
             client_purchase_order_id=payload.client_purchase_order_id,
             kind=payload.kind,
             title=payload.title.strip(),
@@ -788,6 +804,7 @@ async def update_work_order(
         "work_type",
         "vendor_company_id",
         "purchase_order_id",
+        "budget_line_id",
         "client_purchase_order_id",
         "billing_scope",
         "estimated_amount",
@@ -806,6 +823,7 @@ async def update_work_order(
         "work_type",
         "vendor_company_id",
         "purchase_order_id",
+        "budget_line_id",
         "estimated_amount",
         "client_purchase_order_id",
         "billing_scope",
@@ -840,6 +858,11 @@ async def update_work_order(
         if "purchase_order_id" in fields
         else (str(work_order.purchase_order_id) if work_order.purchase_order_id else None)
     )
+    next_budget_line_id = (
+        payload.budget_line_id
+        if "budget_line_id" in fields
+        else (str(work_order.budget_line_id) if work_order.budget_line_id else None)
+    )
     next_estimated_amount = payload.estimated_amount if "estimated_amount" in fields else work_order.estimated_amount
     next_billing_scope = payload.billing_scope if "billing_scope" in fields else work_order.billing_scope
     next_client_purchase_order_id = (
@@ -857,6 +880,7 @@ async def update_work_order(
         if (
             ("vendor_company_id" in fields and payload.vendor_company_id)
             or ("purchase_order_id" in fields and payload.purchase_order_id)
+            or ("budget_line_id" in fields and payload.budget_line_id)
             or ("estimated_amount" in fields and payload.estimated_amount is not None)
         ):
             raise HTTPException(
@@ -865,6 +889,7 @@ async def update_work_order(
             )
         next_vendor_company_id = None
         next_purchase_order_id = None
+        next_budget_line_id = None
         next_estimated_amount = None
     elif next_work_type == "external_vendor":
         if not next_vendor_company_id:
@@ -883,6 +908,14 @@ async def update_work_order(
                 or (work_order.status == "awaiting_approval" and payload.status == "in_progress")
             ),
         )
+        if next_budget_line_id:
+            await external_budget_line_for_episode(
+                session,
+                organization_id=actor.organization_id,
+                episode_id=str(episode.id),
+                budget_line_id=next_budget_line_id,
+                purchase_order_id=next_purchase_order_id,
+            )
 
     if next_client_purchase_order_id and (next_work_type != "internal" or next_billing_scope != "billable_change"):
         if "client_purchase_order_id" in fields and payload.client_purchase_order_id:
@@ -1054,6 +1087,7 @@ async def update_work_order(
         "work_type",
         "vendor_company_id",
         "purchase_order_id",
+        "budget_line_id",
         "estimated_amount",
         "client_purchase_order_id",
         "billing_scope",
@@ -1067,6 +1101,7 @@ async def update_work_order(
             "work_type": next_work_type,
             "vendor_company_id": next_vendor_company_id,
             "purchase_order_id": next_purchase_order_id,
+            "budget_line_id": next_budget_line_id,
             "estimated_amount": next_estimated_amount,
             "client_purchase_order_id": next_client_purchase_order_id,
             "billing_scope": next_billing_scope,
@@ -1314,12 +1349,25 @@ async def reserve_work_order_room(
         )
 
     now = datetime.now(UTC)
+    budget_item = (
+        await session.execute(
+            select(budget_lines.c.id).where(
+                and_(
+                    budget_lines.c.organization_id == actor.organization_id,
+                    budget_lines.c.work_order_id == work_order.id,
+                    budget_lines.c.episode_id == work_order.episode_id,
+                    budget_lines.c.external_cost.is_(False),
+                )
+            ).limit(1)
+        )
+    ).first()
     created = await session.execute(
         insert(bookings)
         .values(
             organization_id=actor.organization_id,
             room_id=room.id,
             episode_id=work_order.episode_id,
+            budget_line_id=budget_item.id if budget_item else None,
             person_id=person_id,
             title=f"Work order · {work_order.title}"[:160],
             starts_at=payload.starts_at,
@@ -1383,7 +1431,11 @@ async def reserve_work_order_room(
             action="booking.created_from_work_order",
             entity_type="booking",
             entity_id=booking_id,
-            metadata={"workOrderId": work_order_id, "episodeId": str(work_order.episode_id)},
+            metadata={
+                "workOrderId": work_order_id,
+                "episodeId": str(work_order.episode_id),
+                "budgetLineId": str(budget_item.id) if budget_item else None,
+            },
         )
     )
     await session.commit()

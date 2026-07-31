@@ -71,6 +71,37 @@ def _work_order(lab: ProductionApiLab, episode_id: str) -> str:
     return work_order_id
 
 
+def _external_budget_line(lab: ProductionApiLab, episode_id: str, *, amount: float = 500) -> str:
+    created = lab.client.post(
+        "/v1/budget/lines",
+        json={
+            "episode_id": episode_id,
+            "category": "External supplier finishing",
+            "budgeted_amount": amount,
+            "external_cost": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    return created.json()["id"]
+
+
+def _service_rate(lab: ProductionApiLab, *, category: str, unit: str, rate: float) -> str:
+    response = lab.client.post(
+        "/v1/rate-cards/services",
+        json={"name": f"Python budget rate {uuid4().hex[:8]}", "category": category, "unit": unit, "rate": rate},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+def _rate_override(lab: ProductionApiLab, *, scope: str, service_rate_id: str, rate: float, **target: object) -> None:
+    response = lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={"scope": scope, "service_rate_id": service_rate_id, "rate": rate, **target},
+    )
+    assert response.status_code == 201, response.text
+
+
 def test_commercial_form_options_are_tenant_scoped_and_capability_gated(
     production_lab: ProductionApiLab,
 ) -> None:
@@ -92,6 +123,142 @@ def test_commercial_form_options_are_tenant_scoped_and_capability_gated(
     assert production_lab.client.get("/v1/budget/options").status_code == 403
 
 
+def test_budget_rate_resolution_snapshots_inherited_rate_and_rejects_foreign_resources(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    episode_id = _episode_id(production_lab)
+    service_id = _service_rate(production_lab, category="Python budget finishing", unit="day", rate=90)
+    _rate_override(production_lab, scope="master", service_rate_id=service_id, rate=100)
+    _rate_override(
+        production_lab,
+        scope="client",
+        service_rate_id=service_id,
+        rate=110,
+        client_company_id=production_lab.data.client_company_id,
+    )
+    _rate_override(production_lab, scope="network", service_rate_id=service_id, rate=120, network="Python Network")
+    _rate_override(
+        production_lab,
+        scope="show",
+        service_rate_id=service_id,
+        rate=130,
+        show_id=production_lab.data.show_id,
+    )
+    _rate_override(production_lab, scope="episode", service_rate_id=service_id, rate=140, episode_id=episode_id)
+
+    preview = production_lab.client.post(
+        "/v1/budget/estimate-preview",
+        json={
+            "episode_id": episode_id,
+            "category": "Ignored because the service is authoritative",
+            "planned_quantity": 2,
+            "planned_unit": "day",
+            "rate_resource_type": "service",
+            "rate_resource_id": service_id,
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["estimate"] == 280
+    assert preview.json()["rate_source"] == "episode_rate_card"
+
+    created = production_lab.client.post(
+        "/v1/budget/lines",
+        json={
+            "episode_id": episode_id,
+            "category": "Ignored because the service is authoritative",
+            "description": "Two finishing days.",
+            "budgeted_amount": 1,
+            "planned_quantity": 2,
+            "planned_unit": "day",
+            "rate_resource_type": "service",
+            "rate_resource_id": service_id,
+        },
+    )
+    assert created.status_code == 201, created.text
+    line = created.json()
+    assert line["category"] == "Python budget finishing"
+    assert line["estimated_amount"] == 280
+    assert line["rate_snapshot"] == 140
+    assert line["rate_source"] == "episode_rate_card"
+    assert line["resource_reference"].startswith(f"service:{service_id}")
+
+    # Changing the live rate card changes future estimates only: this line is a snapshot.
+    _rate_override(production_lab, scope="episode", service_rate_id=service_id, rate=175, episode_id=episode_id)
+    lines = production_lab.client.get("/v1/budget/lines", params={"episode_id": episode_id})
+    assert lines.status_code == 200, lines.text
+    persisted = next(item for item in lines.json()["budget_lines"] if item["id"] == line["id"])
+    assert persisted["estimated_amount"] == 280
+    future = production_lab.client.post(
+        "/v1/budget/lines",
+        json={
+            "episode_id": episode_id,
+            "category": "Python budget finishing",
+            "planned_quantity": 2,
+            "planned_unit": "day",
+            "rate_resource_type": "service",
+            "rate_resource_id": service_id,
+        },
+    )
+    assert future.status_code == 201, future.text
+    assert future.json()["estimated_amount"] == 350
+    assert future.json()["rate_snapshot"] == 175
+
+    foreign_service_id = str(uuid4())
+    production_lab.execute(
+        """
+        INSERT INTO service_rates (id, organization_id, name, category, unit, rate, currency, is_active)
+        VALUES ($1, $2, 'Foreign budget rate', 'Python budget finishing', 'day', 999, 'GBP', true)
+        """,
+        foreign_service_id,
+        production_lab.data.foreign_organization_id,
+    )
+    foreign = production_lab.client.post(
+        "/v1/budget/lines",
+        json={
+            "episode_id": episode_id,
+            "category": "Python budget finishing",
+            "planned_quantity": 1,
+            "planned_unit": "day",
+            "rate_resource_type": "service",
+            "rate_resource_id": foreign_service_id,
+        },
+    )
+    assert foreign.status_code == 404
+
+    room_service_id = _service_rate(production_lab, category="Python room resource", unit="hour", rate=50)
+    person_service_id = _service_rate(production_lab, category="Python person resource", unit="fixed", rate=75)
+    _rate_override(production_lab, scope="master", service_rate_id=room_service_id, rate=50)
+    _rate_override(production_lab, scope="master", service_rate_id=person_service_id, rate=75)
+    room_line = production_lab.client.post(
+        "/v1/budget/lines",
+        json={
+            "episode_id": episode_id,
+            "category": "Python room resource",
+            "planned_quantity": 3,
+            "planned_unit": "hour",
+            "rate_resource_type": "room",
+            "rate_resource_id": production_lab.data.room_id,
+        },
+    )
+    person_line = production_lab.client.post(
+        "/v1/budget/lines",
+        json={
+            "episode_id": episode_id,
+            "category": "Python person resource",
+            "planned_quantity": 2,
+            "planned_unit": "fixed",
+            "rate_resource_type": "person",
+            "rate_resource_id": production_lab.data.editor_person_id,
+        },
+    )
+    assert room_line.status_code == person_line.status_code == 201
+    assert room_line.json()["estimated_amount"] == 150
+    assert room_line.json()["resource_reference"].startswith(f"room:{production_lab.data.room_id}")
+    assert person_line.json()["estimated_amount"] == 150
+    assert person_line.json()["resource_reference"].startswith(f"person:{production_lab.data.editor_person_id}")
+
+
 def test_budget_lines_create_live_episode_and_show_rollups_with_po_commitments(
     production_lab: ProductionApiLab,
 ) -> None:
@@ -108,7 +275,6 @@ def test_budget_lines_create_live_episode_and_show_rollups_with_po_commitments(
             "description": "Additional paint fixes.",
             "external_cost": True,
             "budgeted_amount": 300,
-            "actual_amount": 125,
             "purchase_order_id": purchase_order_id,
         },
     )
@@ -119,12 +285,34 @@ def test_budget_lines_create_live_episode_and_show_rollups_with_po_commitments(
             "category": "Online suite",
             "external_cost": False,
             "budgeted_amount": 120,
-            "actual_amount": 90,
             "work_order_id": work_order_id,
         },
     )
 
     assert external.status_code == internal.status_code == 201
+    external_actual = production_lab.client.post(
+        f"/v1/budget/lines/{external.json()['id']}/manual-actual-adjustments",
+        json={"amount": 125, "reason": "Supplier receipt matched to the approved scope."},
+    )
+    internal_actual = production_lab.client.post(
+        f"/v1/budget/lines/{internal.json()['id']}/manual-actual-adjustments",
+        json={"amount": 90, "reason": "Historical actual carried into the new ledger."},
+    )
+    assert external_actual.status_code == internal_actual.status_code == 201
+    browser_total = production_lab.client.patch(
+        f"/v1/budget/lines/{external.json()['id']}", json={"actual_amount": 999}
+    )
+    assert browser_total.status_code == 422
+    allocation_ledger = production_lab.client.get(
+        f"/v1/budget/lines/{external.json()['id']}/actual-allocations"
+    )
+    assert allocation_ledger.status_code == 200
+    allocations = allocation_ledger.json()["actual_allocations"]
+    assert len(allocations) == 1
+    assert allocations[0]["source_type"] == "manual_adjustment"
+    assert allocations[0]["reason"] == "Supplier receipt matched to the approved scope."
+    assert allocations[0]["amount"] == 125
+    assert allocations[0]["currency"] == "GBP"
     assert external.json()["purchase_order"]["committed_amount"] == 300
     assert internal.json()["work_order"] == {
         "id": work_order_id,
@@ -177,11 +365,16 @@ def test_budget_line_update_reconciles_one_po_commitment_and_does_not_duplicate_
 
     updated = production_lab.client.patch(
         f"/v1/budget/lines/{line_id}",
-        json={"budgeted_amount": 325, "actual_amount": 300, "description": "Final colour fixes."},
+        json={"budgeted_amount": 325, "description": "Final colour fixes."},
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["estimated_amount"] == 325
-    assert updated.json()["actual_amount"] == 300
+    adjustment = production_lab.client.post(
+        f"/v1/budget/lines/{line_id}/manual-actual-adjustments",
+        json={"amount": 300, "reason": "Approved reconciliation after final colour fixes."},
+    )
+    assert adjustment.status_code == 201, adjustment.text
+    assert adjustment.json()["actual_amount"] == 300
     assert updated.json()["purchase_order"]["committed_amount"] == 325
     assert (
         production_lab.fetchval(
@@ -258,11 +451,13 @@ def test_budget_summary_reports_vendor_actuals_once_with_po_actuals_kept_separat
     production_lab.sign_in_as_manager()
     episode_id = _episode_id(production_lab)
     purchase_order_id = _approved_po(production_lab)
+    budget_line_id = _external_budget_line(production_lab, episode_id)
 
     invoice = production_lab.client.post(
         f"/v1/purchase-orders/{purchase_order_id}/actual-costs",
         json={
             "episode_id": episode_id,
+            "budget_line_id": budget_line_id,
             "invoice_number": f"PY-SUPPLIER-{uuid4().hex[:8].upper()}",
             "invoice_date": "2035-07-10",
             "amount": 275,
@@ -274,7 +469,7 @@ def test_budget_summary_reports_vendor_actuals_once_with_po_actuals_kept_separat
     summary = production_lab.client.get(f"/v1/budget/episodes/{episode_id}/summary")
     assert summary.status_code == 200, summary.text
     values = summary.json()["summary"]
-    assert values["estimated_amount"] == 0
+    assert values["estimated_amount"] == 500
     assert values["actual_amount"] == values["external_actual_amount"] == 275
     # PO actuals are visible in their own authorisation ledger and must not be
     # added to `actual_amount` a second time.
@@ -363,8 +558,9 @@ def test_budget_api_requires_commercial_capability_and_validates_tenant_referenc
     )
     foreign_episode = production_lab.client.get(f"/v1/budget/episodes/{production_lab.data.foreign_episode_id}/summary")
     foreign_show = production_lab.client.get(f"/v1/budget/shows/{production_lab.data.foreign_show_id}/summary")
-    foreign_update = production_lab.client.patch(
-        f"/v1/budget/lines/{foreign_budget_line_id}", json={"actual_amount": 1}
+    foreign_update = production_lab.client.post(
+        f"/v1/budget/lines/{foreign_budget_line_id}/manual-actual-adjustments",
+        json={"amount": 1, "reason": "Foreign tenant probe must be denied."},
     )
 
     assert (

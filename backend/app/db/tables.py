@@ -24,6 +24,7 @@ from sqlalchemy import (
     TypeDecorator,
     UniqueConstraint,
     cast,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, ENUM, UUID
 from sqlalchemy.sql import func
@@ -480,11 +481,81 @@ budget_lines = Table(
     Column("category", Text, nullable=False),
     Column("description", Text),
     Column("budgeted_amount", Numeric(14, 2), nullable=False),
+    # Planned estimate inputs are retained alongside the monetary snapshot so
+    # an episode budget can explain where every estimate came from.
+    Column("planned_quantity", Numeric(12, 2)),
+    Column("planned_unit", Text),
+    Column("rate_snapshot", Numeric(14, 2)),
+    Column("rate_source", Text),
+    Column("resource_reference", Text),
+    Column("estimate_status", Text, nullable=False, server_default=text("'legacy'")),
+    Column("manual_override_reason", Text),
+    # Compatibility cache maintained exclusively by the allocation trigger.
+    # API clients never write it directly.
     Column("actual_amount", Numeric(14, 2), nullable=False),
     Column("currency", Text, nullable=False),
     Column("cost_type", existing_postgres_enum("cost_type"), nullable=False),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+)
+
+budget_actual_allocations = Table(
+    "budget_actual_allocations",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("budget_line_id", UUID(as_uuid=False), ForeignKey("budget_lines.id", ondelete="CASCADE"), nullable=False),
+    Column("source_type", Text, nullable=False),
+    # A confirmed time submission belongs to its booking in the current model.
+    Column("booking_id", UUID(as_uuid=False), ForeignKey("bookings.id", ondelete="SET NULL")),
+    Column("work_order_id", UUID(as_uuid=False), ForeignKey("post_work_orders.id", ondelete="SET NULL")),
+    Column("vendor_invoice_id", UUID(as_uuid=False), ForeignKey("vendor_invoices.id", ondelete="SET NULL")),
+    Column("manual_adjustment_reason", Text),
+    Column("source_reference", Text),
+    Column("amount", Numeric(14, 2), nullable=False),
+    Column("currency", Text, nullable=False),
+    Column("allocation_date", Date, nullable=False),
+    Column("created_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+# An approved episode estimate is an immutable snapshot of the plan at that
+# point in time. Current budget_lines remain the editable working ledger only
+# while an estimate revision is open.
+episode_budget_estimates = Table(
+    "episode_budget_estimates",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False),
+    Column("revision_number", Integer, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("approved_amount", Numeric(14, 2)),
+    Column("created_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("approved_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("approved_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+episode_budget_estimate_items = Table(
+    "episode_budget_estimate_items",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("estimate_id", UUID(as_uuid=False), ForeignKey("episode_budget_estimates.id", ondelete="CASCADE"), nullable=False),
+    # Deliberately not an FK: a later revision can remove a working budget
+    # line without making an approved historical estimate disappear.
+    Column("source_budget_line_id", UUID(as_uuid=False)),
+    Column("category", Text, nullable=False),
+    Column("description", Text),
+    Column("external_cost", Boolean, nullable=False),
+    Column("planned_amount", Numeric(14, 2), nullable=False),
+    Column("currency", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
 )
 
 rooms = Table(
@@ -597,6 +668,7 @@ bookings = Table(
     Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
     Column("room_id", UUID(as_uuid=False), ForeignKey("rooms.id", ondelete="SET NULL")),
     Column("episode_id", UUID(as_uuid=False), ForeignKey("episodes.id", ondelete="SET NULL")),
+    Column("budget_line_id", UUID(as_uuid=False), ForeignKey("budget_lines.id", ondelete="SET NULL")),
     Column("person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
     Column("guest_person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
     Column("title", Text, nullable=False),
@@ -764,6 +836,7 @@ post_work_orders = Table(
     Column("work_type", existing_postgres_enum("work_order_work_type"), nullable=False),
     Column("vendor_company_id", UUID(as_uuid=False)),
     Column("purchase_order_id", UUID(as_uuid=False)),
+    Column("budget_line_id", UUID(as_uuid=False), ForeignKey("budget_lines.id", ondelete="SET NULL")),
     Column("client_purchase_order_id", UUID(as_uuid=False)),
     Column("qc_issue_id", UUID(as_uuid=False)),
     Column("delivery_item_id", UUID(as_uuid=False), ForeignKey("episode_delivery_items.id", ondelete="SET NULL")),
@@ -998,6 +1071,7 @@ vendor_invoices = Table(
     Column("work_order_id", UUID(as_uuid=False)),
     Column("show_id", UUID(as_uuid=False)),
     Column("episode_id", UUID(as_uuid=False)),
+    Column("budget_line_id", UUID(as_uuid=False), ForeignKey("budget_lines.id", ondelete="RESTRICT")),
     Column("invoice_number", Text, nullable=False),
     Column("description", Text),
     Column("amount", Numeric(14, 2), nullable=False),

@@ -1,7 +1,9 @@
-import { AlertTriangle, ArrowRight, CircleDollarSign, ReceiptText, TrendingUp } from "lucide-react";
+import { ArrowRight, CircleDollarSign, ReceiptText, TrendingUp } from "lucide-react";
 import Link from "next/link";
 
-import { BudgetLineForm } from "@/components/budget-line-form";
+import { EstimateBuilder } from "@/components/estimate-builder";
+import { EstimateRevisionPanel, type EstimateOverview } from "@/components/estimate-revision-panel";
+import { EpisodeBudgetOperations, type OperationalLedger } from "@/components/episode-budget-operations";
 import type { ClientPurchaseOrderSummary } from "@/components/client-purchase-orders-summary";
 import { EpisodeInvoicePanel } from "@/components/episode-invoice-panel";
 import { PageHeader } from "@/components/operations-ui";
@@ -38,6 +40,7 @@ type Line = {
 type BudgetData = {
   lines: Line[];
   episodes: Array<{ id: string; label: string; showId: string; showTitle: string; network: string }>;
+  resources: { services: Array<{ id: string; name: string; category: string; unit: string }>; rooms: Array<{ id: string; name: string; type: string }>; people: Array<{ id: string; name: string; role: string }>; vendors: Array<{ id: string; name: string }> };
   workOrderCharges: Array<{ id: string; title: string; department: string | null; status: string; billingStatus: string; estimatedAmount: string | number | null; currency: string; billingNotes: string | null; episodeId: string; episodeTitle: string; episodeNumber: number; showId: string; showTitle: string; clientCompanyId: string | null }>;
   purchaseOrders: PurchaseOrderSummary[];
   clientPurchaseOrders: ClientPurchaseOrderSummary[];
@@ -84,79 +87,30 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
   if (!selectedEpisodeId) return <BudgetEpisodePicker network={selectedNetwork} show={activeShow} episodes={data.episodes.filter((episode) => episode.showTitle === activeShow)} lines={data.lines.filter((line) => line.showTitle === activeShow)} rates={serviceRates} showId={showRows.find((show) => show.title === activeShow)?.id} purchaseOrders={data.purchaseOrders} />;
   const selectedEpisode = data.episodes.find((episode) => episode.id === selectedEpisodeId && episode.showTitle === activeShow);
   if (!selectedEpisode) redirect(`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`);
-  const bookingCosts = await loadBookingCosts(selectedEpisodeId);
-  const invoiceReadiness = await loadInvoiceReadiness(selectedEpisodeId);
+  const [bookingCosts, invoiceReadiness, estimateOverview, operationalLedger] = await Promise.all([
+    loadBookingCosts(selectedEpisodeId),
+    loadInvoiceReadiness(selectedEpisodeId),
+    loadEstimateOverview(selectedEpisodeId),
+    loadOperationalLedger(selectedEpisodeId),
+  ]);
   const episodes = [selectedEpisode];
   const lines = data.lines.filter((line) => line.episodeId === selectedEpisodeId && line.showTitle === activeShow);
-  const currency = lines[0]?.currency ?? "USD";
-  const totals = lines.reduce((sum, line) => ({ estimate: sum.estimate + Number(line.budgetedAmount), actual: sum.actual + Number(line.actualAmount) }), { estimate: 0, actual: 0 });
-  const burn = totals.estimate ? Math.round((totals.actual / totals.estimate) * 100) : 0;
-  const variance = totals.actual - totals.estimate;
-  const forecast = totals.actual;
-  const episodeTotals = Object.values(lines.reduce<Record<string, { label: string; estimate: number; actual: number }>>((groups, line) => {
-    const key = line.episodeId ?? line.id;
-    groups[key] ??= { label: episodeLabel(line), estimate: 0, actual: 0 };
-    groups[key].estimate += Number(line.budgetedAmount);
-    groups[key].actual += Number(line.actualAmount);
-    return groups;
-  }, {}));
+  const currency = estimateOverview.currency ?? lines[0]?.currency ?? "USD";
   const episodePurchaseOrders = purchaseOrdersForEpisode(data.purchaseOrders, selectedEpisode);
   const episodeClientPurchaseOrders = clientPurchaseOrdersForEpisode(data.clientPurchaseOrders, selectedEpisode);
 
   return <div className="space-y-5">
-    <PageHeader eyebrow={`Episode cost control · ${activeShow}`} title="Budget" description="Episode-level costs with show roll-ups for post-production control." action={<div className="flex gap-2"><Link href={`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`} className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">All episodes</Link><BudgetLineForm episodes={episodes} currency={currency} purchaseOrders={episodePurchaseOrders} /></div>} />
-
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-      <Metric icon={<CircleDollarSign size={16} />} label="Estimated" value={money(totals.estimate, currency)} detail={`${lines.length} cost lines`} />
-      <Metric icon={<ReceiptText size={16} />} label="Actual" value={money(totals.actual, currency)} detail={burn ? `${burn}% of estimate` : "No spend recorded"} />
-      <Metric icon={<TrendingUp size={16} />} label="Forecast" value={money(forecast, currency)} detail="Actual recorded cost" warning={forecast > totals.estimate} />
-      <Metric icon={variance > 0 ? <AlertTriangle size={16} /> : <TrendingUp size={16} />} label="Variance" value={`${variance > 0 ? "+" : ""}${money(variance, currency)}`} detail={variance > 0 ? "Over estimate" : "Within estimate"} warning={variance > 0} />
-      <Metric icon={<ReceiptText size={16} />} label="PO committed" value={money(sumPurchaseOrders(episodePurchaseOrders).committed, currency)} detail={`${episodePurchaseOrders.length} applicable PO${episodePurchaseOrders.length === 1 ? "" : "s"} · excluded from actual`} />
-    </section>
+    <PageHeader eyebrow={`Episode cost control · ${activeShow}`} title="Budget" description="Episode-level costs with show roll-ups for post-production control." action={<div className="flex gap-2"><Link href={`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`} className="rounded-md border border-[#dfe3df] bg-white px-3 py-2 text-xs font-semibold text-[#52635d]">All episodes</Link>{!estimateOverview.isLocked && <EstimateBuilder episode={selectedEpisode} resources={data.resources} />}</div>} />
 
     <div className="flex justify-end"><RateCardDialog rates={serviceRates} scope={{ type: "episode", episodeId: selectedEpisodeId }} title="Episode service rate card" /></div>
+    <EstimateRevisionPanel episodeId={selectedEpisodeId} estimate={estimateOverview} />
+    <EpisodeBudgetOperations estimate={estimateOverview} lines={lines} ledger={operationalLedger} episodes={episodes} resources={data.resources} purchaseOrders={episodePurchaseOrders} />
     <ClientPoBudgetSafeguards orders={episodeClientPurchaseOrders} />
     <EpisodeInvoicePanel episodeId={selectedEpisodeId} readiness={invoiceReadiness} />
     <BookingCostBasis entries={bookingCosts} fallbackCurrency={currency} />
     <WorkOrderChargeQueue charges={activeShow ? data.workOrderCharges.filter((charge) => charge.showTitle === activeShow) : data.workOrderCharges} />
     <PurchaseOrderBudgetSummary title="Episode purchase orders" orders={episodePurchaseOrders} currency={currency} />
 
-    <section className="panel p-5">
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-        <div><p className="text-xs font-semibold uppercase tracking-[.08em] text-[#7d837f]">Budget burn</p><p className="mt-1 text-sm text-[#69716d]">{activeShow ?? "All active shows"}</p></div>
-        <p className="text-right text-2xl font-semibold tracking-[-.04em] text-[#2e3734]">{burn}% <span className="text-sm font-normal text-[#7d837f]">spent</span></p>
-      </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#ecebe7]"><div className={`h-full rounded-full ${burn > 100 ? "bg-[#c17a4f]" : "bg-[#66877f]"}`} style={{ width: `${Math.min(burn, 100)}%` }} /></div>
-      <p className="mt-3 text-sm text-[#68716d]">{money(totals.actual, currency)} actual against {money(totals.estimate, currency)} estimated.</p>
-    </section>
-
-    {episodeTotals.length > 0 && <section className="panel overflow-hidden">
-      <div className="border-b border-[#ebeae6] px-5 py-3"><h2 className="text-sm font-semibold text-[#353b39]">Episode roll-up</h2></div>
-      <div className="divide-y divide-[#efeeea]">{episodeTotals.map((episode) => {
-        const episodeBurn = episode.estimate ? Math.round((episode.actual / episode.estimate) * 100) : 0;
-        return <div key={episode.label} className="grid gap-3 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_130px_130px_80px] sm:items-center">
-          <div className="min-w-0"><p className="truncate text-sm font-medium text-[#3d4642]">{episode.label}</p><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#ecebe7]"><div className={`h-full rounded-full ${episodeBurn > 100 ? "bg-[#c17a4f]" : "bg-[#66877f]"}`} style={{ width: `${Math.min(episodeBurn, 100)}%` }} /></div></div>
-          <p className="text-sm text-[#67706c]"><span className="sm:hidden">Estimate · </span>{money(episode.estimate, currency)}</p>
-          <p className="text-sm text-[#67706c]"><span className="sm:hidden">Actual · </span>{money(episode.actual, currency)}</p>
-          <p className={`text-sm font-semibold ${episodeBurn > 100 ? "text-[#a65f42]" : "text-[#4f7767]"}`}>{episodeBurn}%</p>
-        </div>;
-      })}</div>
-    </section>}
-
-    <section className="panel overflow-hidden">
-      <div className="border-b border-[#ebeae6] px-5 py-3"><h2 className="text-sm font-semibold text-[#353b39]">Cost lines</h2></div>
-      {lines.length === 0 ? <div className="px-5 py-12 text-center text-sm text-[#7d837f]">No episode budget lines match this show. Add the first line to begin tracking spend.</div> : <div className="overflow-x-auto"><div className="min-w-[760px]">
-        <div className="grid grid-cols-[minmax(190px,1.2fr)_160px_120px_100px_100px_125px_80px] gap-3 bg-[#fafaf8] px-5 py-3 text-[10px] font-semibold uppercase tracking-[.08em] text-[#7e837f]"><span>Category</span><span>Episode</span><span>Estimate</span><span>Actual</span><span>PO</span><span>Type</span><span>Action</span></div>
-        <div className="divide-y divide-[#efeeea]">{lines.map((line) => <div key={line.id} className="grid grid-cols-[minmax(190px,1.2fr)_160px_120px_100px_100px_125px_80px] items-center gap-3 px-5 py-3 text-sm text-[#4f5753]">
-          <div className="min-w-0"><p className="font-medium text-[#39423e]">{line.category}</p>{line.description && <p className="mt-0.5 truncate text-xs text-[#858a87]">{line.description}</p>}</div>
-          <p className="truncate text-xs text-[#626b67]">{episodeLabel(line)}</p>
-          <p>{money(Number(line.budgetedAmount), line.currency)}</p><p>{money(Number(line.actualAmount), line.currency)}</p>
-          {line.purchaseOrderId && line.purchaseOrderNumber ? <Link href={`/budget/purchase-orders/${line.purchaseOrderId}${line.purchaseOrderAllocationId ? `#allocation-${line.purchaseOrderAllocationId}` : ""}`} className="truncate text-xs font-semibold text-[#58756b] hover:underline">{line.purchaseOrderNumber}</Link> : <span className="text-xs text-[#858a87]">—</span>}
-          <p className="capitalize text-xs text-[#6d7672]">{line.costType}</p>
-          {line.workOrderId || line.vendorInvoiceId ? <span className="text-xs text-[#858a87]">Linked</span> : <BudgetLineForm episodes={episodes} currency={currency} purchaseOrders={episodePurchaseOrders} line={line} />}
-        </div>)}</div>
-      </div></div>}
-    </section>
   </div>;
 }
 
@@ -177,12 +131,18 @@ async function loadInvoiceReadiness(episodeId: string) {
   return camelize(await postpilotApiServerFetch(`/billing/episodes/${episodeId}/readiness`)) as React.ComponentProps<typeof EpisodeInvoicePanel>["readiness"];
 }
 
-function Metric({ icon, label, value, detail, warning = false }: { icon: React.ReactNode; label: string; value: string; detail: string; warning?: boolean }) {
-  return <div className="panel p-4"><div className={`flex items-center gap-2 text-xs font-semibold uppercase tracking-[.08em] ${warning ? "text-[#a65f42]" : "text-[#76807b]"}`}>{icon}{label}</div><p className="mt-3 text-xl font-semibold tracking-[-.035em] text-[#343d39]">{value}</p><p className="mt-1 text-xs text-[#858a87]">{detail}</p></div>;
+async function loadEstimateOverview(episodeId: string): Promise<EstimateOverview> {
+  const response = await postpilotApiServerFetch<{ estimate: Record<string, unknown> }>(`/budget/episodes/${episodeId}/estimate-overview`);
+  return camelize(response.estimate) as EstimateOverview;
 }
 
-function episodeLabel(line: Line) {
-  return line.episodeTitle ? `E${String(line.episodeNumber ?? 0).padStart(2, "0")} ${line.episodeTitle}` : "Unassigned legacy line";
+async function loadOperationalLedger(episodeId: string): Promise<OperationalLedger> {
+  const response = await postpilotApiServerFetch<{ ledger: Record<string, unknown> }>(`/budget/episodes/${episodeId}/operational-ledger`);
+  return camelize(response.ledger) as OperationalLedger;
+}
+
+function Metric({ icon, label, value, detail, warning = false }: { icon: React.ReactNode; label: string; value: string; detail: string; warning?: boolean }) {
+  return <div className="panel p-4"><div className={`flex items-center gap-2 text-xs font-semibold uppercase tracking-[.08em] ${warning ? "text-[#a65f42]" : "text-[#76807b]"}`}>{icon}{label}</div><p className="mt-3 text-xl font-semibold tracking-[-.035em] text-[#343d39]">{value}</p><p className="mt-1 text-xs text-[#858a87]">{detail}</p></div>;
 }
 
 function money(value: number, currency = "USD") {
@@ -419,7 +379,7 @@ function BudgetHealth({ actual, estimate }: { actual: number; estimate: number }
 async function load(): Promise<BudgetData> {
   const [budget, options, purchaseOrders, clientPurchaseOrders, workOrderCharges] = await Promise.all([
       postpilotApiServerFetch<{ budget_lines: Array<Record<string, unknown>> }>("/budget/lines"),
-      postpilotApiServerFetch<{ shows: Array<{ id: string; title: string; network: string | null }>; episodes: Array<{ id: string; show_id: string; show_title: string; number: number; title: string }> }>("/budget/options"),
+      postpilotApiServerFetch<{ companies: Array<{ id: string; name: string; type: string }>; shows: Array<{ id: string; title: string; network: string | null }>; episodes: Array<{ id: string; show_id: string; show_title: string; number: number; title: string }>; services: Array<{ id: string; name: string; category: string; unit: string }>; rooms: Array<{ id: string; name: string; type: string }>; people: Array<{ id: string; name: string; role: string }> }>("/budget/options"),
       postpilotApiServerFetch<{ purchase_orders: Array<Record<string, unknown>> }>("/purchase-orders"),
       postpilotApiServerFetch<{ client_purchase_orders: Array<Record<string, unknown>> }>("/client-purchase-orders"),
       postpilotApiServerFetch<{ work_order_charges: Array<Record<string, unknown>> }>("/billing/work-order-charges"),
@@ -428,6 +388,7 @@ async function load(): Promise<BudgetData> {
     const showById = new Map(options.shows.map((show) => [show.id, show]));
   return {
       episodes: options.episodes.map((episode) => ({ id: episode.id, label: `${episode.show_title} · E${String(episode.number).padStart(2, "0")} ${episode.title}`, showId: episode.show_id, showTitle: episode.show_title, network: showById.get(episode.show_id)?.network ?? "Independent" })),
+      resources: { services: options.services, rooms: options.rooms, people: options.people, vendors: options.companies.filter((company) => company.type === "vendor").map((company) => ({ id: company.id, name: company.name })) },
       lines: budget.budget_lines.map((line) => {
         const episode = line.episode_id ? episodeById.get(String(line.episode_id)) : undefined;
         const show = line.show_id ? showById.get(String(line.show_id)) : undefined;

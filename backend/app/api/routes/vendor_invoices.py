@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.dependencies import CurrentActor, DbSession
 from app.api.schemas import VendorInvoiceCreateRequest
 from app.auth import require_permission
+from app.budget_actuals import record_budget_actual
 from app.budget_logic import decimal_amount
 from app.db.tables import (
     activity_log,
@@ -24,6 +25,7 @@ from app.db.tables import (
     seasons,
     vendor_invoices,
 )
+from app.vendor_spend import external_budget_line_for_episode
 
 router = APIRouter(prefix="/vendor-invoices", tags=["vendor-invoices"])
 
@@ -104,6 +106,15 @@ async def record_vendor_invoice(
                 detail="Approve the vendor work order before recording its invoice.",
             )
 
+    selected_budget_line_id = payload.budget_line_id
+    if work_order and work_order.budget_line_id:
+        if selected_budget_line_id and str(selected_budget_line_id) != str(work_order.budget_line_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The supplier invoice must use the work order's external budget item.",
+            )
+        selected_budget_line_id = str(work_order.budget_line_id)
+
     order = None
     if work_order and work_order.purchase_order_id:
         order = (
@@ -140,6 +151,28 @@ async def record_vendor_invoice(
                 )
             await require_permission(session, actor, "approve_budget_overruns")
 
+    budget_line = await external_budget_line_for_episode(
+        session,
+        organization_id=actor.organization_id,
+        episode_id=str(episode.id),
+        budget_line_id=selected_budget_line_id,
+        purchase_order_id=str(order.id) if order else None,
+    )
+    # The budget item remains the actual-cost ledger. Retaining an optional PO
+    # reference only gives episode and show summaries authorisation context;
+    # it does not create a second commitment or actual allocation.
+    if order and not budget_line.purchase_order_id:
+        await session.execute(
+            update(budget_lines)
+            .where(
+                and_(
+                    budget_lines.c.id == budget_line.id,
+                    budget_lines.c.organization_id == actor.organization_id,
+                )
+            )
+            .values(purchase_order_id=order.id, updated_at=datetime.now(UTC))
+        )
+
     now = datetime.now(UTC)
     invoice_date = payload.invoice_date or date.today()
     try:
@@ -152,6 +185,7 @@ async def record_vendor_invoice(
                     work_order_id=work_order.id if work_order else None,
                     show_id=episode.show_id,
                     episode_id=episode.id,
+                    budget_line_id=budget_line.id,
                     invoice_number=payload.invoice_number.strip(),
                     description=payload.description.strip() if payload.description else None,
                     amount=payload.amount,
@@ -166,31 +200,18 @@ async def record_vendor_invoice(
                 .returning(vendor_invoices.c.id)
             )
         ).scalar_one()
-        budget_line_id = (
-            await session.execute(
-                insert(budget_lines)
-                .values(
-                    organization_id=actor.organization_id,
-                    show_id=episode.show_id,
-                    season_id=episode.season_id,
-                    episode_id=episode.id,
-                    vendor_invoice_id=invoice_id,
-                    purchase_order_id=order.id if order else None,
-                    external_cost=True,
-                    category="Vendor invoice",
-                    description=(f"{order.po_number} · " if order else "")
-                    + f"{payload.invoice_number.strip()}"
-                    + (f" · {payload.description.strip()}" if payload.description else ""),
-                    budgeted_amount=0,
-                    actual_amount=payload.amount,
-                    currency=actor.active_organization.currency,
-                    cost_type="internal",
-                    created_at=now,
-                    updated_at=now,
-                )
-                .returning(budget_lines.c.id)
-            )
-        ).scalar_one()
+        await record_budget_actual(
+            session,
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            budget_line_id=str(budget_line.id),
+            source_type="vendor_invoice",
+            vendor_invoice_id=str(invoice_id),
+            amount=payload.amount,
+            currency=actor.active_organization.currency,
+            source_reference=payload.invoice_number.strip(),
+            allocation_date=invoice_date,
+        )
         allocation_id = None
         if order:
             allocation_id = (
@@ -213,6 +234,15 @@ async def record_vendor_invoice(
                 )
             ).scalar_one()
         if work_order:
+            work_order_actual = await session.scalar(
+                select(func.coalesce(func.sum(vendor_invoices.c.amount), 0)).where(
+                    and_(
+                        vendor_invoices.c.organization_id == actor.organization_id,
+                        vendor_invoices.c.work_order_id == work_order.id,
+                        vendor_invoices.c.status != "void",
+                    )
+                )
+            )
             await session.execute(
                 update(post_work_orders)
                 .where(
@@ -221,7 +251,7 @@ async def record_vendor_invoice(
                         post_work_orders.c.organization_id == actor.organization_id,
                     )
                 )
-                .values(actual_amount=payload.amount, updated_at=now)
+                .values(actual_amount=work_order_actual, updated_at=now)
             )
         await session.execute(
             insert(activity_log).values(
@@ -231,7 +261,7 @@ async def record_vendor_invoice(
                 entity_type="vendor_invoice",
                 entity_id=str(invoice_id),
                 metadata={
-                    "budgetLineId": str(budget_line_id),
+                    "budgetLineId": str(budget_line.id),
                     "purchaseOrderId": str(order.id) if order else None,
                     "purchaseOrderAllocationId": str(allocation_id) if allocation_id else None,
                 },
@@ -246,6 +276,6 @@ async def record_vendor_invoice(
         ) from error
     return {
         "id": str(invoice_id),
-        "budget_line_id": str(budget_line_id),
+        "budget_line_id": str(budget_line.id),
         "purchase_order_allocation_id": str(allocation_id) if allocation_id else None,
     }

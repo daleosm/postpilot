@@ -1082,7 +1082,7 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                         "status": "in_progress",
                         "billing_scope": "internal",
                         "billing_status": "not_billable",
-                        "estimated_amount": Decimal("2750") * multiplier,
+                        "estimated_amount": Decimal("3500") * multiplier,
                         "currency": currency,
                         "external_url": "https://example.com/vendor-brief",
                     },
@@ -1269,29 +1269,159 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
         )
     )
 
+    # Each tenant starts with an explainable planning sample. These are not
+    # opaque category totals: each estimate records quantity, unit, rate
+    # source, and the room, person, service, delivery profile, or supplier it
+    # represents. The same fixed IDs keep the browser demo stable.
+    budget_specs = (
+        # line, episode, category, description, quantity, unit, rate, source, resource, external
+        (1, 1, "Edit suite", "Editorial bay allowance for assembly and picture review.", 5, "day", 760, "master_rate_card", f"room:{room_id(1)} · {tenant['rooms'][0]}", False),
+        (2, 3, "Editorial artists", "Assistant-editor turnover and editorial support.", 4, "day", 535, "network_rate_card", f"person:{person_id(role_indices['assistant_editor'])} · Assistant editor", False),
+        (3, 2, "VFX", "VFX pulls, graphics turnover, and title review package.", 1, "fixed", 3450, "show_rate_card", f"service:{uid(number, '36', 7)} · VFX turnover", False),
+        (4, 5, "Colour", "Colour suite and supervised grade notes pass.", 2, "day", 1020, "episode_rate_card", f"room:{room_id(3)} · {tenant['rooms'][2]}", False),
+        (5, 7, "Sound", "Mix-stage time for final mix, stems, and review reference.", 3, "day", 1160, "network_rate_card", f"room:{room_id(4)} · {tenant['rooms'][3]}", False),
+        (6, 8, "QC", "Technical QC pass and corrective re-check allowance.", 1, "episode", 485, "master_rate_card", f"room:{room_id(5)} · {tenant['rooms'][4]}", False),
+        (7, 1, "Delivery", "Delivery manifest preparation, metadata, and recipient handoff.", 1, "fixed", 1650, "manual_estimate", f"delivery_profile:{profile_id} · {network} delivery profile", False),
+        (8, 1, "External vendors", "External caption correction and specialist QC support.", 1, "fixed", 3500, "manual_estimate", f"vendor:{company_id(3)} · {tenant['name']} Facilities Vendor", True),
+    )
     budget_rows = []
-    for index, category in enumerate(
-        ("Edit suite", "Editorial artists", "VFX", "Colour", "Sound", "QC", "Finalisation"), start=1
-    ):
-        amount = Decimal(index * 12500) * multiplier
+    budget_actual_rows = []
+    for index, episode_position, category, description, quantity, unit, rate, rate_source, resource_reference, external_cost in budget_specs:
+        amount = Decimal(quantity * rate) * multiplier
+        line_id = uid(number, "30", index)
+        show_position = next(
+            position
+            for position, show in enumerate(tenant["shows"], start=1)
+            if episode_position <= position * 4 and episode_position > (position - 1) * 4
+        )
         budget_rows.append(
             {
-                "id": uid(number, "30", index),
+                "id": line_id,
                 "organization_id": organization_id,
-                "show_id": show_id((index - 1) % len(tenant["shows"]) + 1),
-                "season_id": season_id((index - 1) % len(tenant["shows"]) + 1),
-                "episode_id": episode_id(index),
-                "code": f"POST-{index:02d}",
+                "show_id": show_id(show_position),
+                "season_id": season_id(show_position),
+                "episode_id": episode_id(episode_position),
+                "code": f"EST-{index:02d}",
                 "category": category,
-                "description": f"{category} profile for {tenant['name']}",
+                "description": description,
+                "planned_quantity": Decimal(quantity),
+                "planned_unit": unit,
+                "rate_snapshot": Decimal(rate) * multiplier,
+                "rate_source": rate_source,
+                "resource_reference": resource_reference,
+                "estimate_status": "approved",
                 "budgeted_amount": amount,
-                "actual_amount": amount * (Decimal("1.12") if index == 3 else Decimal("0.92")),
+                # The allocation trigger owns this compatibility cache.
+                "actual_amount": Decimal("0"),
                 "currency": currency,
                 "cost_type": "internal",
-                "external_cost": False,
+                "external_cost": external_cost,
             }
         )
+
+    # A confirmed actual on the colour booking and a logged editorial work
+    # order make the sample ledger traceable without using browser-entered
+    # totals. Supplier actuals are appended after their invoice exists.
+    budget_actual_rows.extend(
+        [
+            {
+                "id": uid(number, "49", 1),
+                "organization_id": organization_id,
+                "budget_line_id": uid(number, "30", 4),
+                "booking_id": booking_id(8),
+                "source_type": "booking",
+                "source_reference": f"booking-actual:{booking_id(8)}",
+                "amount": Decimal("1120") * multiplier,
+                "currency": currency,
+                "allocation_date": now_at(-1).date(),
+                "created_at": now_at(0),
+                "updated_at": now_at(0),
+            },
+            {
+                "id": uid(number, "49", 2),
+                "organization_id": organization_id,
+                "budget_line_id": uid(number, "30", 2),
+                "work_order_id": uid(number, "38", 3),
+                "source_type": "work_order",
+                "source_reference": f"work-order-actual:{uid(number, '38', 3)}",
+                "amount": Decimal("510") * multiplier,
+                "currency": currency,
+                "allocation_date": now_at(-1).date(),
+                "created_at": now_at(0),
+                "updated_at": now_at(0),
+            },
+        ]
+    )
     await connection.execute(insert(t.budget_lines).values(budget_rows))
+    # Existing demo figures are historical actuals.  Seed them as explicit
+    # allocation rows rather than relying on the compatibility cache so every
+    # visible actual can be traced back to a ledger entry after the migration.
+    await connection.execute(
+        insert(t.budget_actual_allocations).values(nullable_rows(budget_actual_rows))
+    )
+    # Freeze an approved baseline for every seeded episode that has planned
+    # work. The item snapshots let the demo show original/current estimates
+    # and later revisions without treating the mutable budget line as history.
+    lines_by_episode: dict[str, list[dict]] = {}
+    for line in budget_rows:
+        lines_by_episode.setdefault(line["episode_id"], []).append(line)
+    estimate_rows = []
+    estimate_item_rows = []
+    for estimate_position, (seed_episode_id, lines) in enumerate(lines_by_episode.items(), start=1):
+        estimate_id = uid(number, "54", estimate_position)
+        approved_amount = sum((Decimal(str(line["budgeted_amount"])) for line in lines), Decimal("0"))
+        estimate_rows.append(
+            {
+                "id": estimate_id,
+                "organization_id": organization_id,
+                "episode_id": seed_episode_id,
+                "revision_number": 1,
+                "name": "Original approved episode estimate",
+                "reason": "Seeded baseline from the active rate-card and supplier plan.",
+                "status": "approved",
+                "approved_amount": approved_amount,
+                "created_by_user_id": users[0]["id"],
+                "approved_by_user_id": users[0]["id"],
+                "approved_at": now_at(-10),
+                "created_at": now_at(-11),
+                "updated_at": now_at(-10),
+            }
+        )
+        for line_position, line in enumerate(lines, start=1):
+            estimate_item_rows.append(
+                {
+                    "id": uid(number, "55", estimate_position * 10 + line_position),
+                    "organization_id": organization_id,
+                    "estimate_id": estimate_id,
+                    "source_budget_line_id": line["id"],
+                    "category": line["category"],
+                    "description": line["description"],
+                    "external_cost": line["external_cost"],
+                    "planned_amount": line["budgeted_amount"],
+                    "currency": currency,
+                    "created_at": now_at(-10),
+                }
+            )
+    await connection.execute(insert(t.episode_budget_estimates).values(estimate_rows))
+    await connection.execute(insert(t.episode_budget_estimate_items).values(estimate_item_rows))
+    for linked_booking_id, budget_line_id in (
+        (booking_id(1), uid(number, "30", 1)),
+        (booking_id(8), uid(number, "30", 4)),
+        (booking_id(10), uid(number, "30", 5)),
+        (booking_id(11), uid(number, "30", 6)),
+    ):
+        await connection.execute(
+            update(t.bookings)
+            .where(t.bookings.c.organization_id == organization_id)
+            .where(t.bookings.c.id == linked_booking_id)
+            .values(budget_line_id=budget_line_id)
+        )
+    await connection.execute(
+        update(t.post_work_orders)
+        .where(t.post_work_orders.c.organization_id == organization_id)
+        .where(t.post_work_orders.c.id == uid(number, "38", 1))
+        .values(budget_line_id=uid(number, "30", 8))
+    )
     vendor_invoice_id, vendor_po_id = uid(number, "47", 1), uid(number, "48", 1)
     actual_vendor_cost = Decimal("2750") * multiplier
     await connection.execute(
@@ -1302,6 +1432,7 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
             work_order_id=work_order_id,
             show_id=show_id(1),
             episode_id=episode_id(1),
+            budget_line_id=uid(number, "30", 8),
             invoice_number=f"{slug.upper()}-V-001",
             description="External QC and finishing support",
             amount=actual_vendor_cost,
@@ -1335,6 +1466,26 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
         .values(purchase_order_id=vendor_po_id)
     )
     await connection.execute(
+        update(t.budget_lines)
+        .where(t.budget_lines.c.id == uid(number, "30", 8))
+        .values(purchase_order_id=vendor_po_id, work_order_id=work_order_id, vendor_invoice_id=vendor_invoice_id)
+    )
+    await connection.execute(
+        insert(t.budget_actual_allocations).values(
+            id=uid(number, "49", 3),
+            organization_id=organization_id,
+            budget_line_id=uid(number, "30", 8),
+            vendor_invoice_id=vendor_invoice_id,
+            source_type="vendor_invoice",
+            source_reference=f"vendor-invoice:{vendor_invoice_id}",
+            amount=actual_vendor_cost,
+            currency=currency,
+            allocation_date=now_at(-3).date(),
+            created_at=now_at(0),
+            updated_at=now_at(0),
+        )
+    )
+    await connection.execute(
         insert(t.purchase_order_allocations).values(
             nullable_rows(
                 [
@@ -1344,7 +1495,7 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                         "purchase_order_id": vendor_po_id,
                         "allocation_type": "work_order",
                         "work_order_id": work_order_id,
-                        "amount": actual_vendor_cost,
+                        "amount": Decimal("3500") * multiplier,
                         "allocation_date": now_at(-7).date(),
                         "reference": "WO-EXT-001",
                         "description": "External caption and QC commitment",
@@ -1412,8 +1563,8 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                     {
                         "id": uid(number, "45", 4),
                         "organization_id": organization_id,
-                        "episode_id": episode_id(1),
-                        "name": f"{episode_rows[0]['production_code']} override",
+                        "episode_id": episode_id(5),
+                        "name": f"{episode_rows[4]['production_code']} override",
                         "currency": currency,
                         "is_active": True,
                     },
@@ -1434,6 +1585,44 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                     "rate": Decimal(rate) * multiplier,
                 }
                 for index, (_, category, unit, rate) in enumerate(MASTER_RATES, start=1)
+            ]
+            + [
+                {
+                    "id": uid(number, "46", 17),
+                    "organization_id": organization_id,
+                    "rate_card_id": uid(number, "45", 2),
+                    "service_rate_id": uid(number, "36", 12),
+                    "category": "Assistant editorial",
+                    "unit": "day",
+                    "rate": Decimal("535") * multiplier,
+                },
+                {
+                    "id": uid(number, "46", 18),
+                    "organization_id": organization_id,
+                    "rate_card_id": uid(number, "45", 2),
+                    "service_rate_id": uid(number, "36", 4),
+                    "category": "Sound",
+                    "unit": "day",
+                    "rate": Decimal("1160") * multiplier,
+                },
+                {
+                    "id": uid(number, "46", 19),
+                    "organization_id": organization_id,
+                    "rate_card_id": uid(number, "45", 3),
+                    "service_rate_id": uid(number, "36", 7),
+                    "category": "VFX",
+                    "unit": "fixed",
+                    "rate": Decimal("3450") * multiplier,
+                },
+                {
+                    "id": uid(number, "46", 20),
+                    "organization_id": organization_id,
+                    "rate_card_id": uid(number, "45", 4),
+                    "service_rate_id": uid(number, "36", 3),
+                    "category": "Colour",
+                    "unit": "day",
+                    "rate": Decimal("1020") * multiplier,
+                },
             ]
         )
     )

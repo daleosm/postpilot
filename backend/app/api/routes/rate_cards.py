@@ -288,7 +288,7 @@ async def _items_for_cards(session: DbSession, actor: CurrentActor, card_ids: li
     return grouped
 
 
-async def _effective_rate(
+async def resolve_effective_rate(
     session: DbSession,
     actor: CurrentActor,
     *,
@@ -707,7 +707,7 @@ async def get_effective_rate(
         "episode_id": episode_id,
         "category": category,
         "unit": unit,
-        "effective_rate": await _effective_rate(
+        "effective_rate": await resolve_effective_rate(
             session,
             actor,
             episode_id=episode_id,

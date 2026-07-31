@@ -15,6 +15,7 @@ from sqlalchemy import and_, insert, or_, select, update
 from app.api.dependencies import CurrentActor, DbSession
 from app.api.schemas import CateringRequestCreateRequest, CateringRequestUpdateRequest
 from app.auth import require_permission
+from app.budget_actuals import record_budget_actual
 from app.db.tables import (
     activity_log,
     billables,
@@ -381,19 +382,7 @@ async def update_catering_request(
                     .returning(billables.c.id)
                 )
             ).scalar_one()
-        if budget_line_id:
-            await session.execute(
-                update(budget_lines)
-                .where(
-                    and_(budget_lines.c.id == budget_line_id, budget_lines.c.organization_id == actor.organization_id)
-                )
-                .values(
-                    actual_amount=payload.actual_cost,
-                    currency=actor.active_organization.currency,
-                    updated_at=datetime.now(UTC),
-                )
-            )
-        else:
+        if not budget_line_id:
             budget_line_id = (
                 await session.execute(
                     insert(budget_lines)
@@ -407,7 +396,8 @@ async def update_catering_request(
                         category="Catering",
                         description="Runner fulfilled catering request",
                         budgeted_amount=0,
-                        actual_amount=payload.actual_cost,
+                        estimate_status="legacy",
+                        actual_amount=0,
                         currency=actor.active_organization.currency,
                         cost_type="billable",
                         external_cost=False,
@@ -415,6 +405,17 @@ async def update_catering_request(
                     .returning(budget_lines.c.id)
                 )
             ).scalar_one()
+        await record_budget_actual(
+            session,
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            budget_line_id=str(budget_line_id),
+            source_type="manual_adjustment",
+            amount=payload.actual_cost,
+            currency=actor.active_organization.currency,
+            manual_adjustment_reason="Runner fulfilled catering request",
+            source_reference=f"catering:{request_id}",
+        )
         values.update(
             actual_cost=payload.actual_cost,
             billed_amount=billed_amount,

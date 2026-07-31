@@ -618,6 +618,9 @@ async def get_episode_workspace(episode_id: str, actor: CurrentActor, session: D
         )
     ).all()
 
+    can_view_commercial = await has_permission(session, actor, "manage_commercial") or bool(
+        actor.active_organization and actor.active_organization.role == "client"
+    )
     assignee = people.alias("workspace_work_order_assignee")
     approver = people.alias("workspace_work_order_approver")
     work_order_rows = (
@@ -629,6 +632,11 @@ async def get_episode_workspace(episode_id: str, actor: CurrentActor, session: D
                 assignee.c.role.label("assignee_role_name"),
                 approver.c.name.label("approved_by_name"),
                 purchase_orders.c.po_number.label("purchase_order_number"),
+                budget_lines.c.category.label("budget_item_category"),
+                budget_lines.c.description.label("budget_item_description"),
+                budget_lines.c.budgeted_amount.label("budget_item_estimated_amount"),
+                budget_lines.c.actual_amount.label("budget_item_actual_amount"),
+                budget_lines.c.currency.label("budget_item_currency"),
             )
             .outerjoin(
                 workflow_stages,
@@ -656,6 +664,13 @@ async def get_episode_workspace(episode_id: str, actor: CurrentActor, session: D
                 and_(
                     purchase_orders.c.id == post_work_orders.c.purchase_order_id,
                     purchase_orders.c.organization_id == actor.organization_id,
+                ),
+            )
+            .outerjoin(
+                budget_lines,
+                and_(
+                    budget_lines.c.id == post_work_orders.c.budget_line_id,
+                    budget_lines.c.organization_id == actor.organization_id,
                 ),
             )
             .where(
@@ -686,9 +701,6 @@ async def get_episode_workspace(episode_id: str, actor: CurrentActor, session: D
 
     current_stage = next((stage for stage in stages if stage.id == row.workflow_stage_id), None)
     blocker = await _stage_blocker(session, actor, episode_id, current_stage) if current_stage else None
-    can_view_commercial = await has_permission(session, actor, "manage_commercial") or bool(
-        actor.active_organization and actor.active_organization.role == "client"
-    )
     budget_rows = []
     if can_view_commercial:
         budget_rows = (
@@ -893,7 +905,23 @@ async def get_episode_workspace(episode_id: str, actor: CurrentActor, session: D
                 "currency": item.currency,
                 "client_quote_currency": item.client_quote_currency,
                 "billing_notes": item.billing_notes,
-                "budget_line_id": None,
+                "budget_line_id": str(item.budget_line_id) if item.budget_line_id else None,
+                "budget_item": {
+                    "id": str(item.budget_line_id),
+                    "label": item.budget_item_description or item.budget_item_category,
+                }
+                if item.budget_line_id and (item.budget_item_description or item.budget_item_category)
+                else None,
+                "budget_item_context": {
+                    "estimated_amount": str(item.budget_item_estimated_amount),
+                    "actual_amount": str(item.budget_item_actual_amount),
+                    "remaining_estimate": str(
+                        max(0, item.budget_item_estimated_amount - item.budget_item_actual_amount)
+                    ),
+                    "currency": item.budget_item_currency,
+                }
+                if can_view_commercial and item.budget_line_id and item.budget_item_estimated_amount is not None
+                else None,
                 "approved_by_person_id": str(item.approved_by_person_id) if item.approved_by_person_id else None,
                 "approved_by_name": item.approved_by_name,
                 "approved_at": item.approved_at,

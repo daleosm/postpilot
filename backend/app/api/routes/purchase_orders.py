@@ -17,6 +17,7 @@ from app.api.schemas import (
     PurchaseOrderUpdateRequest,
 )
 from app.auth import require_any_permission, require_permission
+from app.budget_actuals import record_budget_actual
 from app.db.tables import (
     activity_log,
     budget_lines,
@@ -31,6 +32,7 @@ from app.db.tables import (
     vendor_invoices,
 )
 from app.purchase_order_logic import balance_snapshot, valid_status_transition
+from app.vendor_spend import external_budget_line_for_episode
 
 router = APIRouter(prefix="/purchase-orders", tags=["purchase-orders"])
 
@@ -676,6 +678,24 @@ async def record_purchase_order_actual_cost(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found.")
     if order.show_id and order.show_id != episode.show_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Choose an episode from this PO's show.")
+    budget_line = await external_budget_line_for_episode(
+        session,
+        organization_id=actor.organization_id,
+        episode_id=str(episode.id),
+        budget_line_id=payload.budget_line_id,
+        purchase_order_id=purchase_order_id,
+    )
+    if not budget_line.purchase_order_id:
+        await session.execute(
+            update(budget_lines)
+            .where(
+                and_(
+                    budget_lines.c.id == budget_line.id,
+                    budget_lines.c.organization_id == actor.organization_id,
+                )
+            )
+            .values(purchase_order_id=purchase_order_id, updated_at=datetime.now(UTC))
+        )
     _, actual = await _totals(session, actor, purchase_order_id)
     overrun = max(Decimal(0), actual + _decimal(payload.amount) - _decimal(order.approved_amount))
     if overrun > 0:
@@ -693,6 +713,7 @@ async def record_purchase_order_actual_cost(
                 vendor_company_id=order.vendor_company_id,
                 show_id=episode.show_id,
                 episode_id=episode.id,
+                budget_line_id=budget_line.id,
                 invoice_number=payload.invoice_number.strip(),
                 description=payload.description.strip(),
                 amount=payload.amount,
@@ -706,26 +727,18 @@ async def record_purchase_order_actual_cost(
             .returning(vendor_invoices.c.id)
         )
         invoice_id = str(invoice.scalar_one())
-        budget = await session.execute(
-            insert(budget_lines)
-            .values(
-                organization_id=actor.organization_id,
-                show_id=episode.show_id,
-                season_id=episode.season_id,
-                episode_id=episode.id,
-                vendor_invoice_id=invoice_id,
-                purchase_order_id=purchase_order_id,
-                external_cost=True,
-                category="Vendor invoice",
-                description=f"{order.po_number} · {payload.invoice_number.strip()} · {payload.description.strip()}",
-                budgeted_amount=0,
-                actual_amount=payload.amount,
-                currency=actor.active_organization.currency,
-                cost_type="internal",
-            )
-            .returning(budget_lines.c.id)
+        await record_budget_actual(
+            session,
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            budget_line_id=str(budget_line.id),
+            source_type="vendor_invoice",
+            vendor_invoice_id=invoice_id,
+            amount=payload.amount,
+            currency=actor.active_organization.currency,
+            source_reference=payload.invoice_number.strip(),
+            allocation_date=payload.invoice_date,
         )
-        budget_line_id = str(budget.scalar_one())
         allocation = await session.execute(
             insert(purchase_order_allocations)
             .values(
@@ -749,7 +762,7 @@ async def record_purchase_order_actual_cost(
             actor,
             "purchase_order.invoice_recorded",
             purchase_order_id,
-            {"invoiceId": invoice_id, "budgetLineId": budget_line_id, "allocationId": allocation_id},
+            {"invoiceId": invoice_id, "budgetLineId": str(budget_line.id), "allocationId": allocation_id},
         )
         if overrun > 0:
             await _audit(
@@ -768,7 +781,7 @@ async def record_purchase_order_actual_cost(
         ) from error
     return {
         "invoice_id": invoice_id,
-        "budget_line_id": budget_line_id,
+        "budget_line_id": str(budget_line.id),
         "allocation_id": allocation_id,
         "purchase_order": await _detail(session, actor, purchase_order_id),
     }

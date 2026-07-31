@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, insert, or_, select, update
+from sqlalchemy import and_, case, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.dependencies import CurrentActor, DbSession
@@ -24,9 +24,11 @@ from app.api.schemas import (
 from app.auth import has_permission, require_permission
 from app.booking_costs import BOOKING_RATE_DEFINITIONS, confirmed_hours, cost_for_hours
 from app.booking_logic import booking_conflicts, is_active_option, nearest_free_slot, resequence_options
+from app.budget_actuals import record_budget_actual
 from app.db.tables import (
     activity_log,
     bookings,
+    budget_lines,
     episode_team_assignments,
     episodes,
     organization_members,
@@ -53,11 +55,12 @@ def _money(value: Decimal) -> float:
     return float(value.quantize(Decimal("0.01")))
 
 
-def _booking_values(row: object) -> dict[str, object]:
-    return {
+def _booking_values(row: object, *, include_commercial_context: bool = False) -> dict[str, object]:
+    value = {
         "id": row.id,
         "room_id": row.room_id,
         "episode_id": row.episode_id,
+        "budget_line_id": str(row.budget_line_id) if row.budget_line_id else None,
         "person_id": row.person_id,
         "guest_person_id": row.guest_person_id,
         "title": row.title,
@@ -82,6 +85,8 @@ def _booking_values(row: object) -> dict[str, object]:
         # A linked work order is the authoritative source for a calendar
         # reservation. It is deliberately not inferred from the booking title.
         "work_order_id": getattr(row, "work_order_id", None),
+        "actual_budget_status": getattr(row, "actual_budget_status", None),
+        "budget_item_label": getattr(row, "budget_item_label", None),
         "workflow_state": (
             {
                 "primary_stage_id": str(getattr(row, "workflow_stage_id", "")) or None,
@@ -89,9 +94,27 @@ def _booking_values(row: object) -> dict[str, object]:
                 "display_status": getattr(row, "workflow_status", None),
             }
             if getattr(row, "episode_id", None)
-            else None
+        else None
         ),
     }
+    if getattr(row, "budget_line_id", None) and getattr(row, "budget_item_label", None):
+        value["budget_item"] = {
+            "id": str(row.budget_line_id),
+            "label": getattr(row, "budget_item_label"),
+        }
+    else:
+        value["budget_item"] = None
+    if include_commercial_context and getattr(row, "budget_line_id", None):
+        estimated = _decimal(getattr(row, "budget_item_estimated_amount", None))
+        actual = _decimal(getattr(row, "budget_item_actual_amount", None))
+        if estimated is not None and actual is not None:
+            value["budget_item_context"] = {
+                "estimated_amount": _money(estimated),
+                "actual_amount": _money(actual),
+                "remaining_estimate": _money(max(Decimal(0), estimated - actual)),
+                "currency": getattr(row, "budget_item_currency", None),
+            }
+    return value
 
 
 def _window(payload: BookingCreateRequest) -> dict[str, object]:
@@ -112,6 +135,7 @@ def _payload_from_booking(row: object) -> BookingCreateRequest:
         title=row.title,
         room_id=row.room_id,
         episode_id=row.episode_id,
+        budget_line_id=row.budget_line_id,
         person_id=row.person_id,
         guest_person_id=row.guest_person_id,
         starts_at=row.starts_at,
@@ -360,6 +384,95 @@ async def _validate_references(session: DbSession, actor: CurrentActor, payload:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Client account not found for this post house."
             )
+    if payload.budget_line_id:
+        item = (
+            await session.execute(
+                select(
+                    budget_lines.c.id,
+                    budget_lines.c.episode_id,
+                    budget_lines.c.external_cost,
+                ).where(
+                    and_(
+                        budget_lines.c.id == payload.budget_line_id,
+                        budget_lines.c.organization_id == actor.organization_id,
+                    )
+                ).limit(1)
+            )
+        ).first()
+        if not item:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget item not found.")
+        if item.external_cost:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An external-cost budget item cannot be used by an internal booking.",
+            )
+        if not payload.episode_id or str(item.episode_id or "") != payload.episode_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The selected budget item must belong to this booking's episode.",
+            )
+
+
+async def _booking_budget_item(session: DbSession, actor: CurrentActor, booking: object) -> object | None:
+    """Return the saved estimate item selected for this booking, if any."""
+    if not booking.budget_line_id:
+        return None
+    item = (
+        await session.execute(
+            select(
+                budget_lines.c.id,
+                budget_lines.c.episode_id,
+                budget_lines.c.category,
+                budget_lines.c.description,
+                budget_lines.c.rate_snapshot,
+                budget_lines.c.planned_unit,
+                budget_lines.c.currency,
+                budget_lines.c.external_cost,
+            ).where(
+                and_(
+                    budget_lines.c.id == booking.budget_line_id,
+                    budget_lines.c.organization_id == actor.organization_id,
+                )
+            ).limit(1)
+        )
+    ).first()
+    if not item or item.external_cost or str(item.episode_id or "") != str(booking.episode_id or ""):
+        # Database guards prevent this in normal operation. Treat a stale
+        # historic relation as unallocated rather than accidentally posting a
+        # cost to a different episode.
+        return None
+    return item
+
+
+async def _booking_actual_allocation(
+    session: DbSession,
+    actor: CurrentActor,
+    *,
+    booking: object,
+    actual_hours: Decimal,
+) -> dict[str, object]:
+    """Calculate the budget actual exclusively from the saved estimate rate."""
+    item = await _booking_budget_item(session, actor, booking)
+    if not item:
+        return {"status": "unallocated", "reason": "No episode budget item was selected for this booking."}
+    if item.rate_snapshot is None or not item.planned_unit:
+        return {
+            "status": "unallocated",
+            "reason": "The selected budget item has no saved rate snapshot.",
+            "budget_line_id": str(item.id),
+            "budget_item_label": item.description or item.category,
+        }
+    amount = cost_for_hours(_decimal(item.rate_snapshot), item.planned_unit, actual_hours)
+    return {
+        "status": "allocated",
+        "budget_line_id": str(item.id),
+        "budget_item_label": item.description or item.category,
+        "rate": _money(_decimal(item.rate_snapshot) or Decimal(0)),
+        "unit": item.planned_unit,
+        "amount": _money(amount),
+        "amount_decimal": amount,
+        "currency": item.currency,
+    }
 
 
 async def _add_booking_client_to_episode_team(
@@ -476,6 +589,7 @@ async def list_bookings(
     from_at: datetime | None = None,
     to_at: datetime | None = None,
 ) -> dict[str, object]:
+    can_view_commercial = await has_permission(session, actor, "manage_commercial")
     conditions = [bookings.c.organization_id == actor.organization_id]
     if not await may_view_all_episodes(session, actor):
         if not actor.person_id:
@@ -505,6 +619,28 @@ async def list_bookings(
             workflow_stages.c.name.label("workflow_stage_name"),
             people.c.name.label("person_name"),
             post_work_orders.c.id.label("work_order_id"),
+            func.coalesce(budget_lines.c.description, budget_lines.c.category).label("budget_item_label"),
+            budget_lines.c.budgeted_amount.label("budget_item_estimated_amount"),
+            budget_lines.c.actual_amount.label("budget_item_actual_amount"),
+            budget_lines.c.currency.label("budget_item_currency"),
+            case(
+                (
+                    and_(
+                        bookings.c.actual_starts_at.is_not(None),
+                        bookings.c.actual_ends_at.is_not(None),
+                        or_(bookings.c.budget_line_id.is_(None), budget_lines.c.rate_snapshot.is_(None)),
+                    ),
+                    "unallocated",
+                ),
+                (
+                    and_(
+                        bookings.c.actual_starts_at.is_not(None),
+                        bookings.c.actual_ends_at.is_not(None),
+                    ),
+                    "allocated",
+                ),
+                else_="not_submitted",
+            ).label("actual_budget_status"),
         )
         .select_from(bookings)
         .outerjoin(
@@ -533,6 +669,13 @@ async def list_bookings(
                 post_work_orders.c.organization_id == actor.organization_id,
             ),
         )
+        .outerjoin(
+            budget_lines,
+            and_(
+                budget_lines.c.id == bookings.c.budget_line_id,
+                budget_lines.c.organization_id == actor.organization_id,
+            ),
+        )
         .where(and_(*conditions))
         .order_by(bookings.c.starts_at, bookings.c.id)
     )
@@ -542,7 +685,7 @@ async def list_bookings(
         .order_by(rooms.c.name, rooms.c.id)
     )
     return {
-        "bookings": [_booking_values(row) for row in result],
+        "bookings": [_booking_values(row, include_commercial_context=can_view_commercial) for row in result],
         "rooms": [{"id": room.id, "name": room.name, "type": room.type} for room in room_rows],
     }
 
@@ -640,6 +783,29 @@ async def booking_resources(actor: CurrentActor, session: DbSession) -> dict[str
         .where(and_(*episode_conditions))
         .order_by(shows.c.title, episodes.c.number)
     )
+    episode_rows = episode_rows.all()
+    budget_items: list[object] = []
+    if episode_rows:
+        budget_items = (
+            await session.execute(
+                select(
+                    budget_lines.c.id,
+                    budget_lines.c.episode_id,
+                    budget_lines.c.category,
+                    budget_lines.c.description,
+                    budget_lines.c.rate_snapshot,
+                    budget_lines.c.planned_unit,
+                )
+                .where(
+                    and_(
+                        budget_lines.c.organization_id == actor.organization_id,
+                        budget_lines.c.external_cost.is_(False),
+                        budget_lines.c.episode_id.in_([row.id for row in episode_rows]),
+                    )
+                )
+                .order_by(budget_lines.c.category, budget_lines.c.created_at, budget_lines.c.id)
+            )
+        ).all()
     return {
         "rooms": [{"id": str(row.id), "name": row.name, "type": row.type} for row in room_rows.all()],
         "people": [
@@ -661,7 +827,16 @@ async def booking_resources(actor: CurrentActor, session: DbSession) -> dict[str
         ],
         "episodes": [
             {"id": str(row.id), "label": f"{row.show_title} · E{row.number:02d} {row.title}"}
-            for row in episode_rows.all()
+            for row in episode_rows
+        ],
+        "budget_items": [
+            {
+                "id": str(row.id),
+                "episode_id": str(row.episode_id),
+                "label": row.description or row.category,
+                "has_rate_snapshot": row.rate_snapshot is not None and row.planned_unit is not None,
+            }
+            for row in budget_items
         ],
     }
 
@@ -727,6 +902,7 @@ async def get_booking_time_submission(booking_id: str, actor: CurrentActor, sess
         "overtime_minutes": booking.approved_overtime_minutes,
         "submitted_at": latest.created_at if latest else None,
         "cost": latest.metadata.get("actualCost") if latest else None,
+        "budget_actual": latest.metadata.get("budgetActual") if latest else None,
         "work_order": {
             "id": str(work_order.id),
             "actual_amount": str(work_order.actual_amount) if work_order.actual_amount is not None else None,
@@ -781,6 +957,12 @@ async def submit_booking_actuals(
         actual_ends_at=payload.actual_ends_at,
         overtime_minutes=payload.overtime_minutes,
     )
+    budget_actual = await _booking_actual_allocation(
+        session,
+        actor,
+        booking=booking,
+        actual_hours=Decimal(str(actual_cost["actual_hours"])),
+    )
     now = datetime.now(UTC)
     await session.execute(
         update(bookings)
@@ -792,7 +974,24 @@ async def submit_booking_actuals(
             updated_at=now,
         )
     )
+    if budget_actual["status"] == "allocated":
+        await record_budget_actual(
+            session,
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            budget_line_id=str(budget_actual["budget_line_id"]),
+            source_type="booking",
+            booking_id=booking_id,
+            amount=budget_actual["amount_decimal"],
+            currency=str(budget_actual["currency"]),
+            source_reference=f"booking-actual:{booking_id}",
+        )
     if work_order and work_order.work_type == "internal":
+        work_order_actual = (
+            _decimal(budget_actual["amount"])
+            if budget_actual["status"] == "allocated"
+            else _decimal(actual_cost["total_internal_cost"])
+        )
         await session.execute(
             update(post_work_orders)
             .where(
@@ -801,7 +1000,7 @@ async def submit_booking_actuals(
                     post_work_orders.c.organization_id == actor.organization_id,
                 )
             )
-            .values(actual_amount=_decimal(actual_cost["total_internal_cost"]), updated_at=now)
+            .values(actual_amount=work_order_actual, updated_at=now)
         )
 
     planned_hours = confirmed_hours(booking.starts_at, booking.ends_at, 0)
@@ -814,6 +1013,7 @@ async def submit_booking_actuals(
         "overtimeMinutes": payload.overtime_minutes,
         "note": payload.note.strip() if payload.note else None,
         "actualCost": actual_cost,
+        "budgetActual": {key: value for key, value in budget_actual.items() if key != "amount_decimal"},
         "workOrderId": str(work_order.id) if work_order else None,
     }
     await session.execute(
@@ -886,6 +1086,7 @@ async def create_booking(payload: BookingCreateRequest, actor: CurrentActor, ses
             title=values.title.strip(),
             room_id=values.room_id,
             episode_id=values.episode_id,
+            budget_line_id=values.budget_line_id,
             person_id=values.person_id,
             guest_person_id=values.guest_person_id,
             starts_at=values.starts_at,
@@ -933,6 +1134,14 @@ async def update_booking(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
     previous = _payload_from_booking(existing)
     await _validate_references(session, actor, payload)
+    if (
+        (existing.actual_starts_at is not None or existing.actual_ends_at is not None)
+        and str(existing.budget_line_id or "") != str(payload.budget_line_id or "")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A booking's budget item cannot change after actual time has been confirmed.",
+        )
     values = payload.model_copy(deep=True)
     if values.is_option and values.status != "cancelled":
         values.status = "tentative"
@@ -951,6 +1160,7 @@ async def update_booking(
             title=values.title.strip(),
             room_id=values.room_id,
             episode_id=values.episode_id,
+            budget_line_id=values.budget_line_id,
             person_id=values.person_id,
             guest_person_id=values.guest_person_id,
             starts_at=values.starts_at,
@@ -984,6 +1194,7 @@ async def update_booking(
             metadata={
                 "from": {"roomId": existing.room_id, "personId": existing.person_id},
                 "episodeId": values.episode_id,
+                "budgetLineId": values.budget_line_id,
             },
         )
     )
@@ -1140,6 +1351,7 @@ async def copy_episode_bookings(
             room_id=str(booking.room_id) if booking.room_id else None,
             person_id=str(booking.person_id) if booking.person_id else None,
             episode_id=str(target.id),
+            budget_line_id=None,
             starts_at=starts_at,
             ends_at=ends_at,
             setup_minutes=booking.setup_minutes,

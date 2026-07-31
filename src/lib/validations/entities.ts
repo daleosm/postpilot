@@ -549,6 +549,7 @@ export const updateBillableSchema = insertBillableSchema.omit({ organizationId: 
 export const insertVendorInvoiceSchema = z.object({
   vendorCompanyId: id,
   workOrderId: nullableId,
+  budgetLineId: nullableId,
   episodeId: id,
   invoiceNumber: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000).nullable().optional(),
@@ -562,6 +563,7 @@ export const insertVendorInvoiceSchema = z.object({
 /** A deliberately small supplier-actual entry made from a PO detail page. */
 export const createPurchaseOrderActualCostSchema = z.object({
   episodeId: nullableId,
+  budgetLineId: id,
   invoiceNumber: z.string().trim().min(1, "Enter the supplier invoice or reference number.").max(120),
   invoiceDate: z.coerce.date({ error: "Enter the supplier invoice date." }),
   amount: money.positive("Enter a positive supplier cost."),

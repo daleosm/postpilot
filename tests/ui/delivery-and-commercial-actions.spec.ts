@@ -97,6 +97,7 @@ test.describe("Commercial register actions", () => {
     await page.goto("/budget/purchase-orders");
     await page.locator('a[href^="/budget/purchase-orders/"]').first().click();
     await page.getByRole("button", { name: "Record supplier actual" }).click();
+    await page.getByLabel("External budget item").selectOption({ index: 1 });
     await page.getByLabel("Supplier invoice / reference").fill("UI-VENDOR-104");
     await page.getByLabel("Invoice date").fill("2034-08-15");
     await page.getByLabel("Description").fill("UI colour correction invoice");

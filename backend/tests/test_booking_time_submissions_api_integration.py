@@ -79,6 +79,50 @@ def _create_linked_booking(lab: ProductionApiLab) -> tuple[str, str]:
     return booking_id, work_order_id
 
 
+def _create_budgeted_booking(lab: ProductionApiLab) -> tuple[str, str]:
+    """Create one internal estimate item and book it before time is confirmed."""
+    viewer_person_id = _viewer_person_id(lab)
+    lab.sign_in_as_manager()
+    episode_id = _episode_id(lab)
+    service_id = str(uuid4())
+    lab.execute(
+        """
+        INSERT INTO service_rates (id, organization_id, name, category, unit, rate, currency, is_active)
+        VALUES ($1, $2, 'Snapshot booking suite', 'Edit suite', 'day', 900, 'GBP', true)
+        """,
+        service_id,
+        lab.data.organization_id,
+    )
+    line = lab.client.post(
+        "/v1/budget/lines",
+        json={
+            "episode_id": episode_id,
+            "category": "Edit suite",
+            "planned_quantity": 1,
+            "planned_unit": "day",
+            "rate_resource_type": "service",
+            "rate_resource_id": service_id,
+        },
+    )
+    assert line.status_code == 201, line.text
+    booking = lab.client.post(
+        "/v1/bookings",
+        json={
+            "title": "Budgeted editorial actuals",
+            "room_id": lab.data.room_id,
+            "episode_id": episode_id,
+            "budget_line_id": line.json()["id"],
+            "person_id": viewer_person_id,
+            "starts_at": "2035-09-20T09:00:00Z",
+            "ends_at": "2035-09-20T12:00:00Z",
+            "booking_type": "edit",
+            "status": "confirmed",
+        },
+    )
+    assert booking.status_code == 201, booking.text
+    return booking.json()["id"], line.json()["id"]
+
+
 def test_assigned_artist_confirms_linked_booking_actuals_with_live_room_and_person_costs(
     production_lab: ProductionApiLab,
 ) -> None:
@@ -295,3 +339,152 @@ def test_booking_actuals_enforce_owner_tenant_and_input_boundaries(production_la
     production_lab.sign_in_as_client()
     client_submission = production_lab.client.post(f"/v1/bookings/{booking_id}/time-submissions", json=payload)
     assert client_submission.status_code == 403
+
+
+def test_confirmed_time_uses_the_booking_budget_item_saved_rate_snapshot(production_lab: ProductionApiLab) -> None:
+    booking_id, budget_line_id = _create_budgeted_booking(production_lab)
+    resources = production_lab.client.get("/v1/bookings/resources")
+    assert resources.status_code == 200, resources.text
+    assert any(
+        item["id"] == budget_line_id and item["has_rate_snapshot"]
+        for item in resources.json()["budget_items"]
+    )
+    production_lab.sign_out()
+    production_lab.sign_in_as_viewer()
+
+    submitted = production_lab.client.post(
+        f"/v1/bookings/{booking_id}/time-submissions",
+        json={
+            "actual_starts_at": "2035-09-20T09:00:00Z",
+            "actual_ends_at": "2035-09-20T12:00:00Z",
+            "overtime_minutes": 30,
+        },
+    )
+
+    assert submitted.status_code == 201, submitted.text
+    assert submitted.json()["actual_internal_cost"] >= 0
+    allocation = production_lab.fetchrow(
+        """
+        SELECT budget_line_id::text, source_type, amount::text, currency
+        FROM budget_actual_allocations
+        WHERE organization_id = $1 AND booking_id = $2
+        """,
+        production_lab.data.organization_id,
+        booking_id,
+    )
+    assert allocation is not None
+    assert dict(allocation) == {
+        "budget_line_id": budget_line_id,
+        "source_type": "booking",
+        "amount": "350.00",
+        "currency": "GBP",
+    }
+    assert production_lab.fetchval("SELECT actual_amount::text FROM budget_lines WHERE id = $1", budget_line_id) == "350.00"
+    listed = production_lab.client.get("/v1/bookings")
+    row = next(item for item in listed.json()["bookings"] if item["id"] == booking_id)
+    assert row["budget_line_id"] == budget_line_id
+    assert row["actual_budget_status"] == "allocated"
+
+
+def test_actual_time_without_a_budget_item_is_visible_as_unallocated(production_lab: ProductionApiLab) -> None:
+    booking_id, _ = _create_linked_booking(production_lab)
+    production_lab.sign_out()
+    production_lab.sign_in_as_viewer()
+    submitted = production_lab.client.post(
+        f"/v1/bookings/{booking_id}/time-submissions",
+        json={
+            "actual_starts_at": "2035-08-20T09:00:00Z",
+            "actual_ends_at": "2035-08-20T12:00:00Z",
+            "overtime_minutes": 0,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    assert production_lab.fetchval(
+        "SELECT count(*) FROM budget_actual_allocations WHERE organization_id = $1 AND booking_id = $2",
+        production_lab.data.organization_id,
+        booking_id,
+    ) == 0
+    listed = production_lab.client.get("/v1/bookings")
+    row = next(item for item in listed.json()["bookings"] if item["id"] == booking_id)
+    assert row["actual_budget_status"] == "unallocated"
+
+
+def test_booking_budget_item_rejects_foreign_and_wrong_episode_links(production_lab: ProductionApiLab) -> None:
+    production_lab.sign_in_as_manager()
+    episode_id = _episode_id(production_lab)
+    foreign_line_id = str(uuid4())
+    production_lab.execute(
+        """
+        INSERT INTO budget_lines (
+          id, organization_id, show_id, episode_id, external_cost, category,
+          budgeted_amount, actual_amount, currency, cost_type
+        ) VALUES ($1, $2, $3, $4, false, 'Foreign edit', 10, 0, 'GBP', 'internal')
+        """,
+        foreign_line_id,
+        production_lab.data.foreign_organization_id,
+        production_lab.data.foreign_show_id,
+        production_lab.data.foreign_episode_id,
+    )
+    foreign = production_lab.client.post(
+        "/v1/bookings",
+        json={
+            "title": "Foreign budget item",
+            "room_id": production_lab.data.room_id,
+            "episode_id": episode_id,
+            "budget_line_id": foreign_line_id,
+            "starts_at": "2035-10-20T09:00:00Z",
+            "ends_at": "2035-10-20T12:00:00Z",
+        },
+    )
+    assert foreign.status_code == 404
+
+
+def test_work_order_room_reservation_preserves_its_internal_budget_item(production_lab: ProductionApiLab) -> None:
+    production_lab.sign_in_as_manager()
+    episode_id = _episode_id(production_lab)
+    work_order_id, budget_line_id = str(uuid4()), str(uuid4())
+    production_lab.execute(
+        """
+        INSERT INTO post_work_orders (
+          id, organization_id, episode_id, work_type, kind, title, assignee_person_id,
+          priority, is_blocking, status, billing_scope, billing_status, currency
+        ) VALUES (
+          $1, $2, $3, 'internal', 'work_order', 'Budgeted sound correction', $4,
+          'normal', false, 'in_progress', 'included', 'not_billable', 'GBP'
+        )
+        """,
+        work_order_id,
+        production_lab.data.organization_id,
+        episode_id,
+        production_lab.data.manager_person_id,
+    )
+    production_lab.execute(
+        """
+        INSERT INTO budget_lines (
+          id, organization_id, show_id, episode_id, work_order_id, external_cost,
+          category, budgeted_amount, planned_quantity, planned_unit, rate_snapshot,
+          rate_source, resource_reference, estimate_status, actual_amount, currency, cost_type
+        ) VALUES (
+          $1, $2, $3, $4, $5, false,
+          'Sound', 300, 3, 'hour', 100,
+          'master_rate_card', 'service:manual-sound', 'approved', 0, 'GBP', 'internal'
+        )
+        """,
+        budget_line_id,
+        production_lab.data.organization_id,
+        production_lab.data.show_id,
+        episode_id,
+        work_order_id,
+    )
+
+    reserved = production_lab.client.post(
+        f"/v1/work-orders/{work_order_id}/booking",
+        json={
+            "room_id": production_lab.data.room_id,
+            "starts_at": "2035-11-20T09:00:00Z",
+            "ends_at": "2035-11-20T12:00:00Z",
+        },
+    )
+
+    assert reserved.status_code == 201, reserved.text
+    assert production_lab.fetchval("SELECT budget_line_id::text FROM bookings WHERE id = $1", reserved.json()["id"]) == budget_line_id

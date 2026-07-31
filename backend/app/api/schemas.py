@@ -145,6 +145,7 @@ class BookingCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=240)
     room_id: str | None = None
     episode_id: str | None = None
+    budget_line_id: str | None = None
     person_id: str | None = None
     guest_person_id: str | None = None
     starts_at: datetime
@@ -163,6 +164,8 @@ class BookingCreateRequest(BaseModel):
     def valid_window(self) -> BookingCreateRequest:
         if self.ends_at <= self.starts_at:
             raise ValueError("Booking end must be after its start.")
+        if self.budget_line_id and not self.episode_id:
+            raise ValueError("Choose an episode before assigning a budget item.")
         return self
 
 
@@ -204,6 +207,7 @@ class WorkOrderCreateRequest(BaseModel):
     work_type: str = Field(default="internal", pattern="^(internal|external_vendor)$")
     vendor_company_id: str | None = None
     purchase_order_id: str | None = None
+    budget_line_id: str | None = None
     client_purchase_order_id: str | None = None
     kind: str = Field(default="work_order", pattern="^(work_order|qc_exception|delivery_correction)$")
     title: str = Field(min_length=2, max_length=160)
@@ -235,7 +239,7 @@ class WorkOrderCreateRequest(BaseModel):
         if self.work_type == "external_vendor" and not self.vendor_company_id:
             raise ValueError("Choose a vendor for external work.")
         if self.work_type == "internal" and (
-            self.vendor_company_id or self.purchase_order_id or self.estimated_amount is not None
+            self.vendor_company_id or self.purchase_order_id or self.budget_line_id or self.estimated_amount is not None
         ):
             raise ValueError("Internal work cannot include a vendor, PO, or vendor estimate.")
         if self.client_purchase_order_id and (self.work_type != "internal" or self.billing_scope != "billable_change"):
@@ -258,6 +262,7 @@ class WorkOrderUpdateRequest(BaseModel):
     work_type: str | None = Field(default=None, pattern="^(internal|external_vendor)$")
     vendor_company_id: str | None = None
     purchase_order_id: str | None = None
+    budget_line_id: str | None = None
     client_purchase_order_id: str | None = None
     billing_scope: str | None = Field(default=None, pattern="^(included|billable_change|internal)$")
     estimated_amount: float | None = Field(default=None, ge=0)
@@ -390,6 +395,7 @@ class PurchaseOrderAllocationRequest(BaseModel):
 
 class PurchaseOrderActualCostRequest(BaseModel):
     episode_id: str | None = None
+    budget_line_id: str
     invoice_number: str = Field(min_length=1, max_length=120)
     invoice_date: date
     amount: float = Field(gt=0)
@@ -412,6 +418,7 @@ class VendorInvoiceCreateRequest(BaseModel):
 
     vendor_company_id: str
     work_order_id: str | None = None
+    budget_line_id: str | None = None
     episode_id: str
     invoice_number: str = Field(min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
@@ -431,7 +438,7 @@ class VendorInvoiceCreateRequest(BaseModel):
 
 
 class BudgetLineCreateRequest(BaseModel):
-    """A manual episode cost line; financial totals remain server-derived."""
+    """A planned episode estimate; actuals are allocation-backed server data."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -442,7 +449,14 @@ class BudgetLineCreateRequest(BaseModel):
     external_cost: bool = False
     cost_type: str = Field(default="internal", pattern="^(internal|billable)$")
     budgeted_amount: float = Field(default=0, ge=0)
-    actual_amount: float = Field(default=0, ge=0)
+    planned_quantity: float | None = Field(default=None, ge=0)
+    planned_unit: str | None = Field(default=None, pattern="^(hour|day|episode|fixed|unit)$")
+    rate_resource_type: str | None = Field(default=None, pattern="^(service|room|person)$")
+    rate_resource_id: str | None = None
+    manual_rate_override: float | None = Field(default=None, ge=0)
+    vendor_company_id: str | None = None
+    estimate_status: str = Field(default="draft", pattern="^(legacy|draft|approved|revised)$")
+    manual_override_reason: str | None = Field(default=None, min_length=4, max_length=2000)
     work_order_id: str | None = None
     purchase_order_id: str | None = None
     overrun_reason: str | None = Field(default=None, min_length=8, max_length=2000)
@@ -451,8 +465,18 @@ class BudgetLineCreateRequest(BaseModel):
     def coherent_links(self) -> BudgetLineCreateRequest:
         if self.purchase_order_id and not self.external_cost:
             raise ValueError("Only external-cost lines can use a vendor PO.")
-        if self.purchase_order_id and self.budgeted_amount <= 0:
+        if (
+            self.purchase_order_id
+            and self.budgeted_amount <= 0
+            and not (self.rate_resource_id or self.manual_rate_override is not None)
+        ):
             raise ValueError("A PO-linked cost line needs a positive estimate.")
+        if bool(self.rate_resource_type) != bool(self.rate_resource_id):
+            raise ValueError("Choose both a budget resource type and resource.")
+        if self.rate_resource_id and self.planned_quantity is None:
+            raise ValueError("A rate-resolved budget item needs a planned quantity.")
+        if self.manual_rate_override is not None and self.rate_resource_id and not self.manual_override_reason:
+            raise ValueError("Explain a manual rate override.")
         return self
 
 
@@ -467,7 +491,14 @@ class BudgetLineUpdateRequest(BaseModel):
     external_cost: bool | None = None
     cost_type: str | None = Field(default=None, pattern="^(internal|billable)$")
     budgeted_amount: float | None = Field(default=None, ge=0)
-    actual_amount: float | None = Field(default=None, ge=0)
+    planned_quantity: float | None = Field(default=None, ge=0)
+    planned_unit: str | None = Field(default=None, pattern="^(hour|day|episode|fixed|unit)$")
+    rate_resource_type: str | None = Field(default=None, pattern="^(service|room|person)$")
+    rate_resource_id: str | None = None
+    manual_rate_override: float | None = Field(default=None, ge=0)
+    vendor_company_id: str | None = None
+    estimate_status: str | None = Field(default=None, pattern="^(legacy|draft|approved|revised)$")
+    manual_override_reason: str | None = Field(default=None, min_length=4, max_length=2000)
     work_order_id: str | None = None
     purchase_order_id: str | None = None
     overrun_reason: str | None = Field(default=None, min_length=8, max_length=2000)
@@ -476,6 +507,53 @@ class BudgetLineUpdateRequest(BaseModel):
     def meaningful_update(self) -> BudgetLineUpdateRequest:
         if not self.model_fields_set - {"overrun_reason"}:
             raise ValueError("Provide at least one budget-line change.")
+        return self
+
+
+class BudgetManualActualAdjustmentRequest(BaseModel):
+    """An exceptional actual with an explicit reason; no browser totals on lines."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    amount: float = Field(ge=0)
+    reason: str = Field(min_length=4, max_length=2000)
+    reference: str | None = Field(default=None, max_length=240)
+    allocation_date: date | None = None
+
+
+class BudgetEstimateRevisionCreateRequest(BaseModel):
+    """Start a named draft revision or approve the initial working estimate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=2, max_length=160)
+    reason: str = Field(min_length=4, max_length=2000)
+    approve_immediately: bool = False
+
+
+class BudgetEstimatePreviewRequest(BaseModel):
+    """One planned estimate row resolved exclusively by the server."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    episode_id: str
+    category: str = Field(min_length=2, max_length=120)
+    planned_quantity: float = Field(gt=0)
+    planned_unit: str = Field(pattern="^(hour|day|episode|fixed|unit)$")
+    rate_resource_type: str | None = Field(default=None, pattern="^(service|room|person)$")
+    rate_resource_id: str | None = None
+    manual_rate_override: float | None = Field(default=None, ge=0)
+    manual_override_reason: str | None = Field(default=None, min_length=4, max_length=2000)
+    vendor_company_id: str | None = None
+
+    @model_validator(mode="after")
+    def coherent_rate_input(self) -> BudgetEstimatePreviewRequest:
+        if bool(self.rate_resource_type) != bool(self.rate_resource_id):
+            raise ValueError("Choose both a budget resource type and resource.")
+        if self.rate_resource_id and self.manual_rate_override is not None and not self.manual_override_reason:
+            raise ValueError("Explain a manual rate override.")
+        if not self.rate_resource_id and self.manual_rate_override is None:
+            raise ValueError("A fixed or vendor estimate needs a manual rate.")
         return self
 
 

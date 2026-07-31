@@ -244,9 +244,11 @@ def test_vendor_actual_endpoint_records_live_costs_and_scopes_the_linked_po(
     approved = production_lab.client.patch(f"/v1/purchase-orders/{purchase_order_id}", json={"status": "approved"})
     assert approved.status_code == 200, approved.text
     work_order_id = _external_work_order(production_lab, vendor_id=vendor_id, episode_id=episode_id)
+    budget_line_id = _budget_line(production_lab)
     production_lab.execute(
-        "UPDATE post_work_orders SET purchase_order_id = $1 WHERE id = $2",
+        "UPDATE post_work_orders SET purchase_order_id = $1, budget_line_id = $2 WHERE id = $3",
         purchase_order_id,
+        budget_line_id,
         work_order_id,
     )
 
@@ -274,6 +276,158 @@ def test_vendor_actual_endpoint_records_live_costs_and_scopes_the_linked_po(
         work_order_id,
     )
     assert float(actual_amount) == 425.5
+    assert production_lab.fetchval("SELECT actual_amount FROM budget_lines WHERE id = $1", budget_line_id) == 425.5
+
+
+def test_external_vendor_work_can_use_no_po_and_posts_invoices_to_its_budget_item(
+    production_lab: ProductionApiLab,
+) -> None:
+    """A PO is optional; approval forecasts and invoices create actual spend."""
+    production_lab.sign_in_as_manager()
+    vendor_id = _vendor(production_lab)
+    episode_id = _episode_id(production_lab)
+    budget_line_id = _budget_line(production_lab, amount=700)
+    created = production_lab.client.post(
+        "/v1/work-orders",
+        json={
+            "episode_id": episode_id,
+            "title": "External online tidy pass",
+            "work_type": "external_vendor",
+            "vendor_company_id": vendor_id,
+            "budget_line_id": budget_line_id,
+            "estimated_amount": 320,
+        },
+    )
+    assert created.status_code == 201, created.text
+    work_order_id = created.json()["id"]
+    assert created.json()["budget_line_id"] == budget_line_id
+    assert production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}).status_code == 200
+    approved = production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "in_progress"})
+    assert approved.status_code == 200, approved.text
+    assert production_lab.fetchval("SELECT actual_amount FROM budget_lines WHERE id = $1", budget_line_id) == 0
+    invoice = production_lab.client.post(
+        "/v1/vendor-invoices",
+        json={
+            "vendor_company_id": vendor_id,
+            "episode_id": episode_id,
+            "work_order_id": work_order_id,
+            "invoice_number": "PY-NO-PO-001",
+            "description": "No-PO external online tidy pass",
+            "amount": 125,
+        },
+    )
+    assert invoice.status_code == 201, invoice.text
+    assert invoice.json()["purchase_order_allocation_id"] is None
+    assert production_lab.fetchval("SELECT actual_amount FROM budget_lines WHERE id = $1", budget_line_id) == 125
+    assert (
+        production_lab.fetchval(
+            "SELECT count(*) FROM purchase_order_allocations WHERE work_order_id = $1", work_order_id
+        )
+        == 0
+    )
+
+
+def test_partial_vendor_invoices_update_one_budget_item_without_counting_po_commitment_twice(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    vendor_id = _vendor(production_lab)
+    episode_id = _episode_id(production_lab)
+    budget_line_id = _budget_line(production_lab, amount=700)
+    po = production_lab.client.post(
+        "/v1/purchase-orders", json=_payload(production_lab, vendor_id, episode_id=episode_id, approved_amount=800)
+    )
+    assert po.status_code == 201, po.text
+    po_id = po.json()["id"]
+    assert production_lab.client.patch(f"/v1/purchase-orders/{po_id}", json={"status": "approved"}).status_code == 200
+    work_order = production_lab.client.post(
+        "/v1/work-orders",
+        json={
+            "episode_id": episode_id,
+            "title": "External title treatment",
+            "work_type": "external_vendor",
+            "vendor_company_id": vendor_id,
+            "purchase_order_id": po_id,
+            "budget_line_id": budget_line_id,
+            "estimated_amount": 500,
+        },
+    )
+    assert work_order.status_code == 201, work_order.text
+    work_order_id = work_order.json()["id"]
+    assert production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}).status_code == 200
+    assert production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "in_progress"}).status_code == 200
+
+    for reference, amount in (("PY-PARTIAL-001", 125), ("PY-PARTIAL-002", 175)):
+        invoice = production_lab.client.post(
+            "/v1/vendor-invoices",
+            json={
+                "vendor_company_id": vendor_id,
+                "episode_id": episode_id,
+                "work_order_id": work_order_id,
+                "invoice_number": reference,
+                "description": "External title treatment invoice",
+                "amount": amount,
+            },
+        )
+        assert invoice.status_code == 201, invoice.text
+        assert invoice.json()["budget_line_id"] == budget_line_id
+
+    po_detail = production_lab.client.get(f"/v1/purchase-orders/{po_id}").json()
+    budget = production_lab.client.get(f"/v1/budget/episodes/{episode_id}/summary").json()["summary"]
+    assert po_detail["committed_amount"] == 500
+    assert po_detail["actual_invoiced_amount"] == 300
+    assert budget["actual_amount"] == budget["external_actual_amount"] == 300
+    assert production_lab.fetchval("SELECT actual_amount FROM post_work_orders WHERE id = $1", work_order_id) == 300
+    assert (
+        production_lab.fetchval(
+            "SELECT count(*) FROM budget_actual_allocations WHERE budget_line_id = $1 AND source_type = 'vendor_invoice'",
+            budget_line_id,
+        )
+        == 2
+    )
+
+
+def test_external_vendor_work_rejects_internal_or_foreign_budget_items(production_lab: ProductionApiLab) -> None:
+    production_lab.sign_in_as_manager()
+    vendor_id = _vendor(production_lab)
+    episode_id = _episode_id(production_lab)
+    internal_line = str(uuid4())
+    season_id = production_lab.fetchval("SELECT season_id::text FROM episodes WHERE id = $1", episode_id)
+    production_lab.execute(
+        """
+        INSERT INTO budget_lines (
+          id, organization_id, show_id, season_id, episode_id, category,
+          budgeted_amount, actual_amount, currency, cost_type, external_cost
+        ) VALUES ($1, $2, $3, $4, $5, 'Internal editorial', 100, 0, 'GBP', 'internal', false)
+        """,
+        internal_line,
+        production_lab.data.organization_id,
+        production_lab.data.show_id,
+        season_id,
+        episode_id,
+    )
+    foreign_line = str(uuid4())
+    production_lab.execute(
+        """
+        INSERT INTO budget_lines (
+          id, organization_id, show_id, season_id, episode_id, category,
+          budgeted_amount, actual_amount, currency, cost_type, external_cost
+        ) VALUES ($1, $2, $3, NULL, $4, 'Foreign vendor', 100, 0, 'GBP', 'internal', true)
+        """,
+        foreign_line,
+        production_lab.data.foreign_organization_id,
+        production_lab.data.foreign_show_id,
+        production_lab.data.foreign_episode_id,
+    )
+    payload = {
+        "episode_id": episode_id,
+        "title": "External vendor scope check",
+        "work_type": "external_vendor",
+        "vendor_company_id": vendor_id,
+    }
+    internal = production_lab.client.post("/v1/work-orders", json={**payload, "budget_line_id": internal_line})
+    foreign = production_lab.client.post("/v1/work-orders", json={**payload, "budget_line_id": foreign_line})
+    assert internal.status_code == foreign.status_code == 404
 
 
 def test_purchase_orders_reject_foreign_scope_and_hide_foreign_register_records(
@@ -326,10 +480,12 @@ def test_purchase_order_supplier_actual_creates_one_invoice_allocation_and_budge
         production_lab.client.patch(f"/v1/purchase-orders/{purchase_order_id}", json={"status": "approved"}).status_code
         == 200
     )
+    budget_line_id = _budget_line(production_lab)
 
     actual = production_lab.client.post(
         f"/v1/purchase-orders/{purchase_order_id}/actual-costs",
         json={
+            "budget_line_id": budget_line_id,
             "invoice_number": "PY-FIN-2048",
             "invoice_date": "2035-07-08",
             "amount": 312.45,
@@ -340,6 +496,7 @@ def test_purchase_order_supplier_actual_creates_one_invoice_allocation_and_budge
     duplicate = production_lab.client.post(
         f"/v1/purchase-orders/{purchase_order_id}/actual-costs",
         json={
+            "budget_line_id": budget_line_id,
             "invoice_number": "PY-FIN-2048",
             "invoice_date": "2035-07-08",
             "amount": 312.45,
@@ -351,7 +508,7 @@ def test_purchase_order_supplier_actual_creates_one_invoice_allocation_and_budge
     assert duplicate.status_code == 409
     invoice = production_lab.fetchrow(
         """
-        SELECT vendor_company_id::text, show_id::text, episode_id::text, invoice_number, amount::text,
+        SELECT vendor_company_id::text, show_id::text, episode_id::text, budget_line_id::text, invoice_number, amount::text,
                external_document_url
         FROM vendor_invoices WHERE id = $1
         """,
@@ -361,6 +518,7 @@ def test_purchase_order_supplier_actual_creates_one_invoice_allocation_and_budge
         "vendor_company_id": vendor_id,
         "show_id": production_lab.data.show_id,
         "episode_id": _episode_id(production_lab),
+        "budget_line_id": budget_line_id,
         "invoice_number": "PY-FIN-2048",
         "amount": "312.45",
         "external_document_url": "https://vendor.postpilot.test/invoices/PY-FIN-2048",
@@ -374,7 +532,7 @@ def test_purchase_order_supplier_actual_creates_one_invoice_allocation_and_budge
     )
     assert budget and dict(budget) == {
         "purchase_order_id": purchase_order_id,
-        "vendor_invoice_id": actual.json()["invoice_id"],
+        "vendor_invoice_id": None,
         "actual_amount": "312.45",
         "external_cost": True,
     }
@@ -537,11 +695,12 @@ def test_purchase_order_blocks_allocations_after_close_or_cancellation_but_allow
         production_lab.client.patch(f"/v1/purchase-orders/{closed_id}", json={"status": "approved"}).status_code == 200
     )
     assert production_lab.client.patch(f"/v1/purchase-orders/{closed_id}", json={"status": "closed"}).status_code == 200
+    closed_budget_line_id = _budget_line(production_lab)
     blocked_allocation = production_lab.client.post(
         f"/v1/purchase-orders/{closed_id}/allocations",
         json={
             "allocation_type": "budget_line",
-            "budget_line_id": _budget_line(production_lab),
+            "budget_line_id": closed_budget_line_id,
             "amount": 50,
             "allocation_date": "2035-07-03",
         },
@@ -549,6 +708,7 @@ def test_purchase_order_blocks_allocations_after_close_or_cancellation_but_allow
     closed_actual = production_lab.client.post(
         f"/v1/purchase-orders/{closed_id}/actual-costs",
         json={
+            "budget_line_id": closed_budget_line_id,
             "invoice_number": "PY-CLOSED-INV",
             "invoice_date": "2035-07-08",
             "amount": 50,
@@ -565,6 +725,7 @@ def test_purchase_order_blocks_allocations_after_close_or_cancellation_but_allow
     cancelled_actual = production_lab.client.post(
         f"/v1/purchase-orders/{cancelled_id}/actual-costs",
         json={
+            "budget_line_id": _budget_line(production_lab),
             "invoice_number": "PY-CANCELLED-INV",
             "invoice_date": "2035-07-08",
             "amount": 50,
@@ -590,9 +751,11 @@ def test_purchase_order_actual_overrun_requires_a_reason_and_records_the_authori
         production_lab.client.patch(f"/v1/purchase-orders/{purchase_order_id}", json={"status": "approved"}).status_code
         == 200
     )
+    budget_line_id = _budget_line(production_lab)
     no_reason = production_lab.client.post(
         f"/v1/purchase-orders/{purchase_order_id}/actual-costs",
         json={
+            "budget_line_id": budget_line_id,
             "invoice_number": "PY-OVERRUN-1",
             "invoice_date": "2035-07-08",
             "amount": 150,
@@ -602,6 +765,7 @@ def test_purchase_order_actual_overrun_requires_a_reason_and_records_the_authori
     authorised = production_lab.client.post(
         f"/v1/purchase-orders/{purchase_order_id}/actual-costs",
         json={
+            "budget_line_id": budget_line_id,
             "invoice_number": "PY-OVERRUN-1",
             "invoice_date": "2035-07-08",
             "amount": 150,

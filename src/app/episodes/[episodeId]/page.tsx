@@ -25,7 +25,7 @@ export default async function EpisodeDetailPage({ params }: { params: Promise<{ 
   const visibleData = canManageCommercial || isClient ? data : {
     ...data,
     budget: [],
-    workOrders: data.workOrders.map((workOrder) => ({ ...workOrder, billingScope: "included", billingStatus: "not_billable", estimatedAmount: null, clientQuoteAmount: null, actualAmount: null, currency: "", clientQuoteCurrency: null, billingNotes: null, budgetLineId: null })),
+    workOrders: data.workOrders.map((workOrder) => ({ ...workOrder, billingScope: "included", billingStatus: "not_billable", estimatedAmount: null, clientQuoteAmount: null, actualAmount: null, currency: "", clientQuoteCurrency: null, billingNotes: null, budgetItemContext: null })),
   };
   const safeVisibleData = canViewDelivery ? visibleData : { ...visibleData, deliveryManifest: null };
   const episodeData = safeVisibleData;

@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
+from app.demo_seed import uid
 
 pytestmark = pytest.mark.skipif(
     os.getenv("POSTPILOT_RUN_DB_TESTS") != "true",
@@ -209,6 +210,61 @@ def test_demo_calendar_and_work_orders_exercise_current_operational_states(clien
         not user["name"].startswith(("Northstar Post ", "Riverside Post ", "Horizon Finish "))
         for user in debug_users.json()
     )
+
+
+def test_seeded_budget_demo_has_rate_snapshots_real_actual_sources_and_separate_po_ledgers(client: TestClient) -> None:
+    """The public fixtures demonstrate a real estimate-to-actual path.
+
+    The assertions deliberately span different episodes: grade time is a
+    booking submission, editorial support is a work-order actual, and the
+    supplier invoice is an external-cost actual. This makes the UI's trace
+    drill-down meaningful without relying on invented category totals.
+    """
+    sign_in_as_maya(client)
+    organization_id = "10000000-0000-4000-8000-000000000001"
+    selected = client.post("/v1/organizations/active", json={"organization_id": organization_id, "pathname": "/budget"})
+    assert selected.status_code == 200, selected.text
+
+    colour_episode_id = uid(1, "27", 5)
+    colour = client.get(f"/v1/budget/episodes/{colour_episode_id}/operational-ledger")
+    assert colour.status_code == 200, colour.text
+    colour_ledger = colour.json()["ledger"]
+    booking_actual = next(item for item in colour_ledger["actuals"] if item["source_type"] == "booking")
+    assert booking_actual["budget_item"]["category"] == "Colour"
+    assert booking_actual["booking"]["room_name"]
+    assert booking_actual["time_submission"]["actual_starts_at"]
+
+    editorial_episode_id = uid(1, "27", 3)
+    editorial = client.get(f"/v1/budget/episodes/{editorial_episode_id}/operational-ledger")
+    assert editorial.status_code == 200, editorial.text
+    work_order_actual = next(item for item in editorial.json()["ledger"]["actuals"] if item["source_type"] == "work_order")
+    assert work_order_actual["budget_item"]["category"] == "Editorial artists"
+    assert work_order_actual["work_order"]["title"] == "Prepare editorial turnover notes"
+
+    external_episode_id = uid(1, "27", 1)
+    external = client.get(f"/v1/budget/episodes/{external_episode_id}/operational-ledger")
+    assert external.status_code == 200, external.text
+    invoice_actual = next(item for item in external.json()["ledger"]["actuals"] if item["source_type"] == "vendor_invoice")
+    assert invoice_actual["budget_item"]["category"] == "External vendors"
+    assert invoice_actual["vendor_invoice"]["invoice_number"] == "NORTHSTAR-POST-V-001"
+
+    rate = client.get(
+        "/v1/rate-cards/effective",
+        params={"episode_id": colour_episode_id, "category": "Colour", "unit": "day"},
+    )
+    assert rate.status_code == 200, rate.text
+    assert rate.json()["effective_rate"]["source"] == "episode_rate_card"
+    assert rate.json()["effective_rate"]["rate"] == 1020
+
+    estimate = client.get(f"/v1/budget/episodes/{external_episode_id}/estimate-overview")
+    summary = client.get(f"/v1/budget/episodes/{external_episode_id}/summary")
+    assert estimate.status_code == summary.status_code == 200
+    assert estimate.json()["estimate"]["is_locked"] is True
+    assert estimate.json()["estimate"]["original_estimate"] == estimate.json()["estimate"]["current_approved_estimate"]
+    # A supplier invoice is a cost allocation and a PO actual, but must not
+    # inflate the episode actual twice merely because it also appears on a PO.
+    assert summary.json()["summary"]["actual_amount"] == 2750
+    assert summary.json()["summary"]["purchase_orders"]["actual_invoiced_amount"] == 2750
 
 
 def test_show_workspace_contains_only_the_authorized_show_read_model(client: TestClient) -> None:
