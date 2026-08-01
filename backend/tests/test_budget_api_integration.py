@@ -128,7 +128,7 @@ def test_budget_rate_resolution_snapshots_inherited_rate_and_rejects_foreign_res
 ) -> None:
     production_lab.sign_in_as_manager()
     episode_id = _episode_id(production_lab)
-    service_id = _service_rate(production_lab, category="Python budget finishing", unit="day", rate=90)
+    service_id = _service_rate(production_lab, category="Python budget finishing", unit="hour", rate=90)
     _rate_override(production_lab, scope="master", service_rate_id=service_id, rate=100)
     _rate_override(
         production_lab,
@@ -153,7 +153,7 @@ def test_budget_rate_resolution_snapshots_inherited_rate_and_rejects_foreign_res
             "episode_id": episode_id,
             "category": "Ignored because the service is authoritative",
             "planned_quantity": 2,
-            "planned_unit": "day",
+            "planned_unit": "hour",
             "rate_resource_type": "service",
             "rate_resource_id": service_id,
         },
@@ -167,10 +167,10 @@ def test_budget_rate_resolution_snapshots_inherited_rate_and_rejects_foreign_res
         json={
             "episode_id": episode_id,
             "category": "Ignored because the service is authoritative",
-            "description": "Two finishing days.",
+            "description": "Two finishing hours.",
             "budgeted_amount": 1,
             "planned_quantity": 2,
-            "planned_unit": "day",
+            "planned_unit": "hour",
             "rate_resource_type": "service",
             "rate_resource_id": service_id,
         },
@@ -195,7 +195,7 @@ def test_budget_rate_resolution_snapshots_inherited_rate_and_rejects_foreign_res
             "episode_id": episode_id,
             "category": "Python budget finishing",
             "planned_quantity": 2,
-            "planned_unit": "day",
+            "planned_unit": "hour",
             "rate_resource_type": "service",
             "rate_resource_id": service_id,
         },
@@ -208,7 +208,7 @@ def test_budget_rate_resolution_snapshots_inherited_rate_and_rejects_foreign_res
     production_lab.execute(
         """
         INSERT INTO service_rates (id, organization_id, name, category, unit, rate, currency, is_active)
-        VALUES ($1, $2, 'Foreign budget rate', 'Python budget finishing', 'day', 999, 'GBP', true)
+        VALUES ($1, $2, 'Foreign budget rate', 'Python budget finishing', 'hour', 999, 'GBP', true)
         """,
         foreign_service_id,
         production_lab.data.foreign_organization_id,
@@ -219,7 +219,7 @@ def test_budget_rate_resolution_snapshots_inherited_rate_and_rejects_foreign_res
             "episode_id": episode_id,
             "category": "Python budget finishing",
             "planned_quantity": 1,
-            "planned_unit": "day",
+            "planned_unit": "hour",
             "rate_resource_type": "service",
             "rate_resource_id": foreign_service_id,
         },

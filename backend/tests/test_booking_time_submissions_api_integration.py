@@ -70,7 +70,7 @@ def _create_linked_booking(lab: ProductionApiLab) -> tuple[str, str]:
     lab.execute(
         """
         INSERT INTO service_rates (id, organization_id, name, category, unit, rate, currency, is_active)
-        VALUES ($1, $2, 'Python edit suite', 'Edit suite', 'day', 900, 'GBP', true)
+        VALUES ($1, $2, 'Python edit suite', 'Edit suite', 'hour', 100, 'GBP', true)
         """,
         rate_id,
         lab.data.organization_id,
@@ -88,7 +88,7 @@ def _create_budgeted_booking(lab: ProductionApiLab) -> tuple[str, str]:
     lab.execute(
         """
         INSERT INTO service_rates (id, organization_id, name, category, unit, rate, currency, is_active)
-        VALUES ($1, $2, 'Snapshot booking suite', 'Edit suite', 'day', 900, 'GBP', true)
+        VALUES ($1, $2, 'Snapshot booking suite', 'Edit suite', 'hour', 100, 'GBP', true)
         """,
         service_id,
         lab.data.organization_id,
@@ -99,7 +99,7 @@ def _create_budgeted_booking(lab: ProductionApiLab) -> tuple[str, str]:
             "episode_id": episode_id,
             "category": "Edit suite",
             "planned_quantity": 1,
-            "planned_unit": "day",
+            "planned_unit": "hour",
             "rate_resource_type": "service",
             "rate_resource_id": service_id,
         },
@@ -163,8 +163,8 @@ def test_assigned_artist_confirms_linked_booking_actuals_with_live_room_and_pers
             "currency": "GBP",
             "room": {
                 "category": "Edit suite",
-                "rate": 900.0,
-                "unit": "day",
+                "rate": 100.0,
+                "unit": "hour",
                 "source": "facility_rate_card",
                 "cost": 350.0,
             },
@@ -237,7 +237,7 @@ def test_booking_actuals_use_the_active_episode_room_rate_before_the_facility_fa
     production_lab.execute(
         """
         INSERT INTO rate_card_items (id, organization_id, rate_card_id, category, unit, rate)
-        VALUES ($1, $2, $3, 'Edit suite', 'day', 1080)
+        VALUES ($1, $2, $3, 'Edit suite', 'hour', 120)
         """,
         str(uuid4()),
         production_lab.data.organization_id,
@@ -262,8 +262,8 @@ def test_booking_actuals_use_the_active_episode_room_rate_before_the_facility_fa
         "currency": "GBP",
         "room": {
             "category": "Edit suite",
-            "rate": 1080.0,
-            "unit": "day",
+            "rate": 120.0,
+            "unit": "hour",
             "source": "episode_rate_card",
             "cost": 360.0,
         },
@@ -379,7 +379,11 @@ def test_confirmed_time_uses_the_booking_budget_item_saved_rate_snapshot(product
         "amount": "350.00",
         "currency": "GBP",
     }
-    assert production_lab.fetchval("SELECT actual_amount::text FROM budget_lines WHERE id = $1", budget_line_id) == "350.00"
+    budget_actual = production_lab.fetchval(
+        "SELECT actual_amount::text FROM budget_lines WHERE id = $1",
+        budget_line_id,
+    )
+    assert budget_actual == "350.00"
     listed = production_lab.client.get("/v1/bookings")
     row = next(item for item in listed.json()["bookings"] if item["id"] == booking_id)
     assert row["budget_line_id"] == budget_line_id
@@ -487,4 +491,8 @@ def test_work_order_room_reservation_preserves_its_internal_budget_item(producti
     )
 
     assert reserved.status_code == 201, reserved.text
-    assert production_lab.fetchval("SELECT budget_line_id::text FROM bookings WHERE id = $1", reserved.json()["id"]) == budget_line_id
+    booking_budget_item = production_lab.fetchval(
+        "SELECT budget_line_id::text FROM bookings WHERE id = $1",
+        reserved.json()["id"],
+    )
+    assert booking_budget_item == budget_line_id

@@ -10,13 +10,13 @@ FACILITY_DAY_HOURS = Decimal("9")
 # These are service-rate categories, not role names. A post house can alter
 # their rates or use a more-specific rate card without changing this logic.
 BOOKING_RATE_DEFINITIONS: dict[str, tuple[str, str]] = {
-    "edit": ("Edit suite", "day"),
-    "color": ("Colour", "day"),
-    "mix": ("Audio suite", "day"),
+    "edit": ("Edit suite", "hour"),
+    "color": ("Colour", "hour"),
+    "mix": ("Audio suite", "hour"),
     "qc": ("QC", "episode"),
-    "client_review": ("Edit suite", "day"),
-    "ingest": ("Edit suite", "day"),
-    "conform": ("Online conform", "day"),
+    "client_review": ("Edit suite", "hour"),
+    "ingest": ("Edit suite", "hour"),
+    "conform": ("Online conform", "hour"),
 }
 
 

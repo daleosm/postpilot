@@ -452,7 +452,7 @@ async def update_service_rate(
     service_rate_id: str, payload: ServiceRateUpdateRequest, actor: CurrentActor, session: DbSession
 ) -> dict[str, object]:
     await require_permission(session, actor, "manage_commercial")
-    await _service_or_404(session, actor, service_rate_id)
+    existing = await _service_or_404(session, actor, service_rate_id)
     fields = payload.model_fields_set
     values: dict[str, object] = {"updated_at": datetime.now(UTC)}
     for field in ("name", "category", "unit"):
@@ -465,6 +465,19 @@ async def update_service_rate(
     if "notes" in fields:
         values["notes"] = payload.notes.strip() if payload.notes else None
     try:
+        category = values.get("category", existing.category)
+        unit = values.get("unit", existing.unit)
+        if category != existing.category or unit != existing.unit:
+            await session.execute(
+                update(rate_card_items)
+                .where(
+                    and_(
+                        rate_card_items.c.organization_id == actor.organization_id,
+                        rate_card_items.c.service_rate_id == service_rate_id,
+                    )
+                )
+                .values(category=category, unit=unit, updated_at=datetime.now(UTC))
+            )
         updated = await session.execute(
             update(service_rates)
             .where(
@@ -493,6 +506,57 @@ async def update_service_rate(
             detail="A service with that name already exists in this post house.",
         ) from error
     return _service_response(service)
+
+
+@router.delete("/services/{service_rate_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_service_rate(service_rate_id: str, actor: CurrentActor, session: DbSession) -> None:
+    """Remove a catalogue service and every live rate-card entry that depends on it.
+
+    Estimates retain their saved rate snapshots, so removing a service cannot rewrite
+    historical commercial records.
+    """
+    await require_permission(session, actor, "manage_commercial")
+    service = await _service_or_404(session, actor, service_rate_id)
+    linked_items = (
+        await session.execute(
+            select(rate_card_items.c.id).where(
+                and_(
+                    rate_card_items.c.organization_id == actor.organization_id,
+                    rate_card_items.c.service_rate_id == service_rate_id,
+                )
+            )
+        )
+    ).all()
+    await session.execute(
+        delete(rate_card_items).where(
+            and_(
+                rate_card_items.c.organization_id == actor.organization_id,
+                rate_card_items.c.service_rate_id == service_rate_id,
+            )
+        )
+    )
+    await session.execute(
+        delete(service_rates).where(
+            and_(
+                service_rates.c.id == service_rate_id,
+                service_rates.c.organization_id == actor.organization_id,
+            )
+        )
+    )
+    await _audit(
+        session,
+        actor,
+        action="service_rate.removed",
+        entity_type="service_rate",
+        entity_id=service_rate_id,
+        metadata={
+            "name": service.name,
+            "category": service.category,
+            "unit": service.unit,
+            "removedRateCardItems": len(linked_items),
+        },
+    )
+    await session.commit()
 
 
 @router.get("")

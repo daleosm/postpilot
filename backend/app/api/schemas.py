@@ -656,7 +656,10 @@ class ServiceRateCreateRequest(BaseModel):
 
     name: str = Field(min_length=2, max_length=160)
     category: str = Field(min_length=2, max_length=120)
-    unit: str = Field(min_length=2, max_length=40)
+    # The facility service catalogue is hourly by default. Episode and fixed
+    # services remain valid catalogue exceptions; daily service prices are
+    # deliberately not accepted for new rate cards.
+    unit: str = Field(pattern="^(hour|episode|fixed)$")
     rate: Money = Field(ge=0)
     notes: str | None = Field(default=None, max_length=2000)
     is_active: bool = True
@@ -667,7 +670,7 @@ class ServiceRateUpdateRequest(BaseModel):
 
     name: str | None = Field(default=None, min_length=2, max_length=160)
     category: str | None = Field(default=None, min_length=2, max_length=120)
-    unit: str | None = Field(default=None, min_length=2, max_length=40)
+    unit: str | None = Field(default=None, pattern="^(hour|episode|fixed)$")
     rate: Money | None = Field(default=None, ge=0)
     notes: str | None = Field(default=None, max_length=2000)
     is_active: bool | None = None

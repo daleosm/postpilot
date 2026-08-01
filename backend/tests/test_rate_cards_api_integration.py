@@ -78,7 +78,7 @@ def _create_show_episode(
 
 
 def _effective(
-    lab: ProductionApiLab, episode_id: str, *, category: str = "Colourist", unit: str = "day"
+    lab: ProductionApiLab, episode_id: str, *, category: str = "Colourist", unit: str = "hour"
 ) -> dict[str, object]:
     response = lab.client.get(
         "/v1/rate-cards/effective",
@@ -97,7 +97,7 @@ def test_rate_cards_resolve_episode_show_network_client_and_master_in_order(
         production_lab,
         name=f"Python Colourist {uuid4().hex[:8]}",
         category="Colourist",
-        unit="day",
+        unit="hour",
         rate=80,
     )
     _override(production_lab, scope="master", service_rate_id=service_rate_id, rate=100)
@@ -160,7 +160,7 @@ def test_rate_card_service_catalogue_fallback_updates_and_override_removal(
         production_lab,
         name=f"Python Audio suite {uuid4().hex[:8]}",
         category="Audio suite",
-        unit="day",
+        unit="hour",
         rate=650,
     )
     assert _effective(production_lab, episode_id, category="Audio suite")["source"] == "facility_rate_card"
@@ -185,13 +185,112 @@ def test_rate_card_service_catalogue_fallback_updates_and_override_removal(
     }
 
 
+def test_service_catalogue_accepts_hourly_rates_and_rejects_new_daily_rates(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    rejected = production_lab.client.post(
+        "/v1/rate-cards/services",
+        json={
+            "name": "Legacy daily colour suite",
+            "category": "Colour",
+            "unit": "day",
+            "rate": 900,
+        },
+    )
+    created = production_lab.client.post(
+        "/v1/rate-cards/services",
+        json={
+            "name": "Hourly colour suite",
+            "category": "Colour",
+            "unit": "hour",
+            "rate": 100,
+        },
+    )
+
+    assert rejected.status_code == 422
+    assert created.status_code == 201, created.text
+    assert created.json()["unit"] == "hour"
+
+
+def test_service_catalogue_removal_clears_live_overrides_without_touching_tenant_boundaries(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    category = f"Retired suite {uuid4().hex[:8]}"
+    service_rate_id = _service(
+        production_lab,
+        name=f"Python Retired suite {uuid4().hex[:8]}",
+        category=category,
+        unit="hour",
+        rate=95,
+    )
+    _override(production_lab, scope="master", service_rate_id=service_rate_id, rate=100)
+    _override(
+        production_lab,
+        scope="show",
+        service_rate_id=service_rate_id,
+        rate=105,
+        show_id=production_lab.data.show_id,
+    )
+    foreign_service_id = str(uuid4())
+    production_lab.execute(
+        """
+        INSERT INTO service_rates (id, organization_id, name, category, unit, rate, currency, is_active)
+        VALUES ($1, $2, 'Foreign retired suite', 'Foreign suite', 'hour', 95, 'GBP', true)
+        """,
+        foreign_service_id,
+        production_lab.data.foreign_organization_id,
+    )
+
+    removed = production_lab.client.delete(f"/v1/rate-cards/services/{service_rate_id}")
+    services = production_lab.client.get("/v1/rate-cards/services")
+    overrides = production_lab.client.get("/v1/rate-cards/overrides", params={"scope": "master"})
+    foreign_remove = production_lab.client.delete(f"/v1/rate-cards/services/{foreign_service_id}")
+
+    assert removed.status_code == 204, removed.text
+    assert services.status_code == 200
+    assert service_rate_id not in {service["id"] for service in services.json()["service_rates"]}
+    assert overrides.status_code == 200
+    assert f"{category}:hour" not in overrides.json()["overrides"]
+    assert foreign_remove.status_code == 404
+
+
+def test_master_service_edit_keeps_linked_rate_card_entries_in_sync(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    original_category = f"Original suite {uuid4().hex[:8]}"
+    updated_category = f"Updated suite {uuid4().hex[:8]}"
+    service_rate_id = _service(
+        production_lab,
+        name=f"Python renamed suite {uuid4().hex[:8]}",
+        category=original_category,
+        unit="hour",
+        rate=90,
+    )
+    _override(production_lab, scope="master", service_rate_id=service_rate_id, rate=100)
+
+    edited = production_lab.client.patch(
+        f"/v1/rate-cards/services/{service_rate_id}",
+        json={"category": updated_category, "unit": "episode"},
+    )
+    overrides = production_lab.client.get("/v1/rate-cards/overrides", params={"scope": "master"})
+
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["category"] == updated_category
+    assert edited.json()["unit"] == "episode"
+    assert updated_category + ":episode" in overrides.json()["overrides"]
+    assert original_category + ":hour" not in overrides.json()["overrides"]
+
+
 def test_rate_cards_enforce_commercial_permission_and_tenant_scope(production_lab: ProductionApiLab) -> None:
     production_lab.sign_in_as_manager()
     service_rate_id = _service(
         production_lab,
         name=f"Python Editor {uuid4().hex[:8]}",
         category="Editor",
-        unit="day",
+        unit="hour",
         rate=500,
     )
     production_lab.sign_out()
@@ -211,7 +310,7 @@ def test_rate_cards_enforce_commercial_permission_and_tenant_scope(production_la
     production_lab.execute(
         """
         INSERT INTO service_rates (id, organization_id, name, category, unit, rate, currency, is_active)
-        VALUES ($1, $2, 'Foreign Python editor', 'Editor', 'day', 700, 'GBP', true)
+        VALUES ($1, $2, 'Foreign Python editor', 'Editor', 'hour', 700, 'GBP', true)
         """,
         foreign_service_id,
         production_lab.data.foreign_organization_id,
@@ -231,7 +330,7 @@ def test_rate_cards_enforce_commercial_permission_and_tenant_scope(production_la
     )
     foreign_episode = production_lab.client.get(
         "/v1/rate-cards/effective",
-        params={"episode_id": production_lab.data.foreign_episode_id, "category": "Editor", "unit": "day"},
+        params={"episode_id": production_lab.data.foreign_episode_id, "category": "Editor", "unit": "hour"},
     )
 
     assert foreign_service.status_code == foreign_show.status_code == foreign_episode.status_code == 404

@@ -85,21 +85,21 @@ for _permissions in ROLE_PERMISSIONS.values():
     _permissions.append("request_catering")
 
 MASTER_RATES = (
-    ("Edit bay", "Edit suite", "day", 760),
-    ("Senior editor", "Editorial artists", "day", 690),
-    ("Colour suite", "Colour", "day", 980),
-    ("Mix stage", "Sound", "day", 1120),
-    ("Audio suite", "Audio suite", "day", 920),
+    ("Edit bay", "Edit suite", "hour", Decimal("84.44")),
+    ("Senior editor", "Editorial artists", "hour", Decimal("76.67")),
+    ("Colour suite", "Colour", "hour", Decimal("108.89")),
+    ("Mix stage", "Sound", "hour", Decimal("124.44")),
+    ("Audio suite", "Audio suite", "hour", Decimal("102.22")),
     ("Technical QC", "QC", "episode", 485),
     ("VFX turnover", "VFX", "fixed", 3200),
     ("Client review room", "Client review", "hour", 165),
-    ("Online suite", "Online", "day", 1050),
-    ("Post supervisor", "Post supervision", "day", 780),
-    ("Producer", "Production", "day", 720),
-    ("Assistant editor", "Assistant editorial", "day", 510),
-    ("Online editor", "Online editorial", "day", 780),
-    ("Colourist", "Colourist", "day", 820),
-    ("Sound mixer", "Sound mixer", "day", 740),
+    ("Online suite", "Online", "hour", Decimal("116.67")),
+    ("Post supervisor", "Post supervision", "hour", Decimal("86.67")),
+    ("Producer", "Production", "hour", 80),
+    ("Assistant editor", "Assistant editorial", "hour", Decimal("56.67")),
+    ("Online editor", "Online editorial", "hour", Decimal("86.67")),
+    ("Colourist", "Colourist", "hour", Decimal("91.11")),
+    ("Sound mixer", "Sound mixer", "hour", Decimal("82.22")),
     ("QC operator", "QC operator", "hour", 72),
 )
 
@@ -1593,8 +1593,8 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                     "rate_card_id": uid(number, "45", 2),
                     "service_rate_id": uid(number, "36", 12),
                     "category": "Assistant editorial",
-                    "unit": "day",
-                    "rate": Decimal("535") * multiplier,
+                    "unit": "hour",
+                    "rate": Decimal("59.44") * multiplier,
                 },
                 {
                     "id": uid(number, "46", 18),
@@ -1602,8 +1602,8 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                     "rate_card_id": uid(number, "45", 2),
                     "service_rate_id": uid(number, "36", 4),
                     "category": "Sound",
-                    "unit": "day",
-                    "rate": Decimal("1160") * multiplier,
+                    "unit": "hour",
+                    "rate": Decimal("128.89") * multiplier,
                 },
                 {
                     "id": uid(number, "46", 19),
@@ -1620,8 +1620,8 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                     "rate_card_id": uid(number, "45", 4),
                     "service_rate_id": uid(number, "36", 3),
                     "category": "Colour",
-                    "unit": "day",
-                    "rate": Decimal("1020") * multiplier,
+                    "unit": "hour",
+                    "rate": Decimal("113.33") * multiplier,
                 },
             ]
         )

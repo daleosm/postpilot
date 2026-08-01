@@ -237,24 +237,28 @@ def test_seeded_budget_demo_has_rate_snapshots_real_actual_sources_and_separate_
     editorial_episode_id = uid(1, "27", 3)
     editorial = client.get(f"/v1/budget/episodes/{editorial_episode_id}/operational-ledger")
     assert editorial.status_code == 200, editorial.text
-    work_order_actual = next(item for item in editorial.json()["ledger"]["actuals"] if item["source_type"] == "work_order")
+    work_order_actual = next(
+        item for item in editorial.json()["ledger"]["actuals"] if item["source_type"] == "work_order"
+    )
     assert work_order_actual["budget_item"]["category"] == "Editorial artists"
     assert work_order_actual["work_order"]["title"] == "Prepare editorial turnover notes"
 
     external_episode_id = uid(1, "27", 1)
     external = client.get(f"/v1/budget/episodes/{external_episode_id}/operational-ledger")
     assert external.status_code == 200, external.text
-    invoice_actual = next(item for item in external.json()["ledger"]["actuals"] if item["source_type"] == "vendor_invoice")
+    invoice_actual = next(
+        item for item in external.json()["ledger"]["actuals"] if item["source_type"] == "vendor_invoice"
+    )
     assert invoice_actual["budget_item"]["category"] == "External vendors"
     assert invoice_actual["vendor_invoice"]["invoice_number"] == "NORTHSTAR-POST-V-001"
 
     rate = client.get(
         "/v1/rate-cards/effective",
-        params={"episode_id": colour_episode_id, "category": "Colour", "unit": "day"},
+        params={"episode_id": colour_episode_id, "category": "Colour", "unit": "hour"},
     )
     assert rate.status_code == 200, rate.text
     assert rate.json()["effective_rate"]["source"] == "episode_rate_card"
-    assert rate.json()["effective_rate"]["rate"] == 1020
+    assert rate.json()["effective_rate"]["rate"] == 113.33
 
     estimate = client.get(f"/v1/budget/episodes/{external_episode_id}/estimate-overview")
     summary = client.get(f"/v1/budget/episodes/{external_episode_id}/summary")
