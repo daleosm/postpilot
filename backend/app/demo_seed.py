@@ -872,7 +872,9 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
             None,
         ),
         (3, 5, "colorist", -1, 9, -1, 18, "color", "confirmed", False, None, "Grade notes pass", -1, 19),
-        (1, 6, "editor", 2, 11, 2, 15, "client_review", "confirmed", False, None, "Client review session", None, None),
+        # A completed client review for the invoice-ready episode. Actual time
+        # is confirmed, so this is a realistic clean billing example.
+        (1, 6, "editor", -2, 9, -2, 15, "client_review", "confirmed", False, None, "Client review session", -2, 15),
         (4, 7, "sound_mixer", 4, 9, 4, 18, "mix", "confirmed", False, None, "Dialogue and stem review", None, None),
         (5, 8, "qc", 5, 9, 5, 14, "qc", "confirmed", False, None, "Delivery preflight", None, None),
         (
@@ -1636,7 +1638,7 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
             organization_id=organization_id,
             client_company_id=company_id(1),
             show_id=show_id(1),
-            episode_id=episode_id(4),
+            episode_id=episode_id(6),
             po_number=f"{slug.upper()}-CLIENT-PO-001",
             currency=currency,
             approved_amount=billable_amount * Decimal("1.15"),
@@ -1649,16 +1651,11 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
         )
     )
     await connection.execute(
-        update(t.post_work_orders)
-        .where(t.post_work_orders.c.id == uid(number, "38", 7))
-        .values(client_purchase_order_id=client_po_id)
-    )
-    await connection.execute(
         insert(t.billables).values(
             id=billable_id,
             organization_id=organization_id,
             show_id=show_id(1),
-            episode_id=episode_id(4),
+            episode_id=episode_id(6),
             client_purchase_order_id=client_po_id,
             vendor="Client change",
             reference=f"{tenant['shows'][0][1]}-CHANGE-021",
