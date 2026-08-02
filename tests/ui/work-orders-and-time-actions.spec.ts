@@ -154,6 +154,38 @@ test.describe("Work-order reservation and time confirmation UI", () => {
     await expect(page.getByRole("heading", { name: TEST_WORK_ORDER_TITLE })).toHaveCount(0);
   });
 
+  test("routes assigned internal work to linked booking time and overtime entry", async ({ page }) => {
+    const [editor] = await sql<{ id: string }[]>`
+      select id from people where organization_id = ${COPPERLINE_ORGANIZATION_ID} and user_id = 'user_copper_editor' limit 1
+    `;
+    if (!editor) throw new Error("Copperline editor fixture is missing.");
+    await sql`
+      insert into bookings (
+        id, organization_id, episode_id, room_id, person_id, title,
+        starts_at, ends_at, status, booking_type
+      ) values (
+        ${TEST_BOOKING_ID}, ${COPPERLINE_ORGANIZATION_ID}, ${EPISODE_ID},
+        (select id from rooms where organization_id = ${COPPERLINE_ORGANIZATION_ID} order by name limit 1),
+        ${editor.id}, ${TEST_BOOKING_TITLE}, now() - interval '3 hours', now() - interval '2 hours', 'confirmed', 'edit'
+      )
+    `;
+    await sql`
+      insert into post_work_orders (
+        id, organization_id, episode_id, booking_id, work_type, kind, title, priority,
+        is_blocking, status, billing_scope, billing_status, currency, assignee_person_id
+      ) values (
+        ${TEST_WORK_ORDER_ID}, ${COPPERLINE_ORGANIZATION_ID}, ${EPISODE_ID}, ${TEST_BOOKING_ID}, 'internal', 'work_order',
+        ${TEST_WORK_ORDER_TITLE}, 'normal', false, 'in_progress', 'included', 'not_billable', 'USD', ${editor.id}
+      )
+    `;
+
+    await page.goto("/review");
+    const row = page.getByRole("article").filter({ hasText: TEST_WORK_ORDER_TITLE });
+    await expect(row.getByRole("button", { name: "Record time & overtime" })).toBeVisible();
+    await row.getByRole("button", { name: "Record time & overtime" }).click();
+    await expect(page).toHaveURL(new RegExp(`/bookings\\?booking=${TEST_BOOKING_ID}`));
+  });
+
   test("submits actual time and overtime from an artist's personal workspace", async ({ page }) => {
     const [editor] = await sql<{ id: string }[]>`
       select id from people where organization_id = ${COPPERLINE_ORGANIZATION_ID} and user_id = 'user_copper_editor' limit 1

@@ -32,7 +32,7 @@ export default async function MyWorkPage() {
       <PageHeader eyebrow={`My work · ${context?.organization?.organizationName ?? "No workspace"}`} title="My work" description="Your workflow sign-offs, assigned post work, and booked time to confirm." metrics={[{ label: "Sign-offs", value: visibleSignOffs.length, tone: visibleSignOffs.length ? "warning" : "success" }, { label: "Work orders", value: visibleWorkOrders.length }, ...(hasTimeWorkspace ? [{ label: "Time to confirm", value: timeToConfirm, tone: timeToConfirm ? "warning" as const : "success" as const }] : [])]} />
 
       <WorkflowSignOffQueue signOffs={visibleSignOffs} />
-      <WorkOrderQueue workOrders={visibleWorkOrders} canOpenEpisodes />
+      <WorkOrderQueue workOrders={visibleWorkOrders} canOpenEpisodes canRecordTime={hasTimeWorkspace} />
       {hasTimeWorkspace && <MyTimeBoard bookings={timeBookings} />}
     </div>
   );
