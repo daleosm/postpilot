@@ -41,6 +41,12 @@ rds_final_snapshot_identifier = "cutluma-production-final-snapshot"
 # Retain enough application/event logs for operational investigation.
 application_log_retention_days = 30
 
+# Optional, free billing early warnings. Budget/anomaly data is delayed, so
+# these notify rather than shut down resources.
+# cost_alert_email           = "finance@example.com"
+# monthly_cost_budget_usd    = 250
+# cost_anomaly_threshold_usd = 25
+
 # Optional: confirm the resulting SNS subscription email in your inbox after
 # Terraform applies. Set the ALB ARN suffix after Kubernetes creates it.
 # observability_alarm_email = "ops@example.com"

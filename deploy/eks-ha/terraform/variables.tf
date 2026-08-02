@@ -195,6 +195,35 @@ variable "observability_alarm_email" {
   nullable    = true
 }
 
+variable "cost_alert_email" {
+  description = "Optional finance/owner email for free AWS Budget and Cost Anomaly Detection alerts. No cost-monitoring resources are created when unset."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "monthly_cost_budget_usd" {
+  description = "Monthly account cost threshold in USD for the optional facility budget alerts."
+  type        = number
+  default     = 250
+
+  validation {
+    condition     = var.monthly_cost_budget_usd > 0
+    error_message = "monthly_cost_budget_usd must be greater than zero."
+  }
+}
+
+variable "cost_anomaly_threshold_usd" {
+  description = "Minimum unexpected AWS spend increase in USD that triggers the optional immediate anomaly email."
+  type        = number
+  default     = 25
+
+  validation {
+    condition     = var.cost_anomaly_threshold_usd > 0
+    error_message = "cost_anomaly_threshold_usd must be greater than zero."
+  }
+}
+
 variable "public_application_load_balancer_arn_suffix" {
   description = "Optional ARN suffix of the Kubernetes-created public ALB, for example app/postpilot/abc123. Enables ALB 5xx and healthy-target alarms after the Ingress is created."
   type        = string

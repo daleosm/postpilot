@@ -178,9 +178,9 @@ variable "karpenter_max_memory" {
 }
 
 variable "application_log_retention_days" {
-  description = "How long to retain PostPilot application logs in CloudWatch Logs. Seven days is the low-cost demo baseline."
+  description = "How long to retain PostPilot logs, warning events, and standard performance telemetry. Three days is the low-cost demo baseline."
   type        = number
-  default     = 7
+  default     = 3
 
   validation {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365], var.application_log_retention_days)
@@ -193,6 +193,35 @@ variable "observability_alarm_email" {
   type        = string
   default     = null
   nullable    = true
+}
+
+variable "cost_alert_email" {
+  description = "Optional finance/owner email for free AWS Budget and Cost Anomaly Detection alerts. No cost-monitoring resources are created when unset."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "monthly_cost_budget_usd" {
+  description = "Monthly account cost threshold in USD for the optional public-demo budget alerts."
+  type        = number
+  default     = 50
+
+  validation {
+    condition     = var.monthly_cost_budget_usd > 0
+    error_message = "monthly_cost_budget_usd must be greater than zero."
+  }
+}
+
+variable "cost_anomaly_threshold_usd" {
+  description = "Minimum unexpected AWS spend increase in USD that triggers the optional immediate anomaly email."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.cost_anomaly_threshold_usd > 0
+    error_message = "cost_anomaly_threshold_usd must be greater than zero."
+  }
 }
 
 variable "public_application_load_balancer_arn_suffix" {

@@ -57,3 +57,8 @@ until traffic reaches it over HTTPS.
 The profile only controls the AWS topology. Before live use, set
 `POSTPILOT_DEBUG_DEMO=false`, do not run the demo seed, use a real certificate,
 and complete the checklist in [../../docs/self-hosting.md](../../docs/self-hosting.md).
+
+The profile forwards structured application errors and warning-only Kubernetes
+events, while retaining standard node/Pod metrics. Set `cost_alert_email` in
+`terraform.tfvars` to opt into free monthly Budget and Cost Anomaly Detection
+emails; they notify but do not shut down resources.

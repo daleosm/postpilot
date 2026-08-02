@@ -10,7 +10,7 @@ data "aws_caller_identity" "current" {}
 
 # CloudWatch Logs keeps this group encrypted with its service-managed default.
 # No customer-managed KMS key is needed for the standard PostPilot deployment.
-#checkov:skip=CKV_AWS_338:Seven-day retention is an intentional low-cost demo baseline; facilities can raise it if policy requires.
+#checkov:skip=CKV_AWS_338:Three-day retention is an intentional low-cost demo baseline; facilities can raise it if policy requires.
 resource "aws_cloudwatch_log_group" "postpilot_application" {
   name              = "/${var.project_name}/application"
   retention_in_days = var.application_log_retention_days
@@ -84,7 +84,7 @@ resource "aws_iam_role_policy_attachment" "cloudwatch_standard_insights_agent" {
 # Standard Container Insights writes its aggregated, queryable performance
 # events here. The same short retention prevents low-value historic telemetry
 # from quietly accumulating storage cost.
-#checkov:skip=CKV_AWS_338:Seven-day retention is intentional for a small demo cluster.
+#checkov:skip=CKV_AWS_338:Three-day retention is intentional for a small demo cluster.
 resource "aws_cloudwatch_log_group" "postpilot_performance" {
   name              = "/aws/containerinsights/${local.name}/performance"
   retention_in_days = var.application_log_retention_days
@@ -93,7 +93,7 @@ resource "aws_cloudwatch_log_group" "postpilot_performance" {
 # Kubernetes Events are not container logs. A compact in-cluster exporter below
 # forwards Warning Events here so scheduling, image-pull, mount, eviction, and
 # restart failures remain searchable after Kubernetes has discarded them.
-#checkov:skip=CKV_AWS_338:Seven-day retention is intentional for a small demo cluster.
+#checkov:skip=CKV_AWS_338:Three-day retention is intentional for a small demo cluster.
 resource "aws_cloudwatch_log_group" "postpilot_kubernetes_events" {
   name              = "/${var.project_name}/kubernetes-events"
   retention_in_days = var.application_log_retention_days

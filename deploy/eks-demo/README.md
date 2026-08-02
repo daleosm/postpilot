@@ -35,5 +35,10 @@ The demo overlay deliberately creates an HTTP ALB and sets non-secure cookies
 so the generated AWS hostname works without a domain or certificate. Do not
 copy that ingress or cookie configuration into a facility deployment.
 
+For low-cost observability, this profile keeps three days of PostPilot error
+logs, warning-only Kubernetes events, and standard node/Pod metrics. Set
+`cost_alert_email` in `terraform.tfvars` to opt into free monthly Budget and
+Cost Anomaly Detection emails; they notify but do not shut down resources.
+
 For a resilient facility environment, use [`../eks-ha/`](../eks-ha/README.md)
 with a different Terraform state and `project_name`.
