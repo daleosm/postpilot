@@ -3,18 +3,13 @@ import { ArrowRight, Clapperboard, DollarSign } from "lucide-react";
 
 import { ShowFormDialog } from "@/components/show-form-dialog";
 import { PageHeader } from "@/components/operations-ui";
-import { getActiveOrganizationContext, getActiveShowName } from "@/lib/organizations";
+import { getActiveOrganizationContext } from "@/lib/organizations";
 import { can } from "@/lib/permissions";
 import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 
 export default async function ShowsPage() {
   const mayManageShows = await can("manage_shows");
-  const activeShow = await getActiveShowName();
-  const raw = await getShowsData(mayManageShows);
-  const selectedShows = raw?.shows.filter((show) => !activeShow || show.title === activeShow) ?? [];
-  // A user can lose one episode-team assignment while retaining access to
-  // another. Never let a stale show selection hide the remaining show slate.
-  const data = raw ? { ...raw, shows: activeShow && !selectedShows.length ? raw.shows : selectedShows } : null;
+  const data = await getShowsData(mayManageShows);
   if (!data) return <EmptyWorkspace />;
 
   return <div className="pp-page">

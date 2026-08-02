@@ -9,8 +9,6 @@ export type ActiveOrganizationContext = {
   person: ActiveOrganizationPerson | null;
 };
 
-export type ActiveShow = { id: string; title: string };
-
 function apiMemberships(session: NonNullable<Awaited<ReturnType<typeof getPostPilotApiSession>>>): OrganizationMembership[] {
   return session.memberships.map((membership) => ({
     organizationId: membership.organization_id,
@@ -19,20 +17,6 @@ function apiMemberships(session: NonNullable<Awaited<ReturnType<typeof getPostPi
     currency: membership.currency,
     role: membership.role as OrganizationMembership["role"],
   }));
-}
-
-/**
- * Resolves the FastAPI session's show selection against the active tenant.
- * A show selected in a different post house is treated as no selection.
- */
-export async function getActiveShow(organizationId?: string): Promise<ActiveShow | null> {
-  const session = await getPostPilotApiSession();
-  if (!session?.active_show || (organizationId && session.active_organization_id !== organizationId)) return null;
-  return session.active_show;
-}
-
-export async function getActiveShowName() {
-  return (await getActiveShow())?.title ?? null;
 }
 
 /** Resolves the authenticated (or debug) actor without accepting client-supplied identity. */

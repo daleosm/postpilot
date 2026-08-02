@@ -3,15 +3,14 @@ import "./globals.css";
 import { AppSidebar } from "@/components/app-sidebar";
 import { TopBar } from "@/components/top-bar";
 import { getDebugUser, listDebugUsersForOrganization } from "@/lib/debug-user";
-import { getActiveOrganizationContext, getActiveShow } from "@/lib/organizations";
-import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
+import { getActiveOrganizationContext } from "@/lib/organizations";
 
 export const metadata: Metadata = {
   title: "PostPilot · Production operations",
   description: "Post-production operations for episodic television.",
 };
 
-// The shell resolves the authenticated user's tenant, active show and
+// The shell resolves the authenticated user's tenant and
 // permission-aware navigation. It must render per request, including for the
 // generated not-found route, rather than attempting a database/session lookup
 // while Next.js is collecting static page data during a container build.
@@ -20,13 +19,9 @@ export const dynamic = "force-dynamic";
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const [debugUser, organizationContext] = await Promise.all([getDebugUser(), getActiveOrganizationContext()]);
   const activeOrganizationId = organizationContext?.organization?.organizationId;
-  const [showOptions, activeShow, availableDebugUsers] = activeOrganizationId
-    ? await Promise.all([
-      listShellShowOptions(activeOrganizationId),
-      getActiveShow(activeOrganizationId),
-      debugUser ? listDebugUsersForOrganization(activeOrganizationId) : Promise.resolve([]),
-    ])
-    : [[], null, []];
+  const availableDebugUsers = activeOrganizationId && debugUser
+    ? await listDebugUsersForOrganization(activeOrganizationId)
+    : [];
   return (
     <html lang="en">
       <body>
@@ -40,8 +35,6 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               debugMode={Boolean(debugUser)}
               activeOrganization={organizationContext?.organization ?? null}
               organizations={organizationContext?.memberships ?? []}
-              shows={showOptions}
-              activeShow={activeShow}
             />
             <main className="mx-auto max-w-[1540px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">{children}</main>
           </div>
@@ -49,10 +42,4 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       </body>
     </html>
   );
-}
-
-async function listShellShowOptions(organizationId: string) {
-  void organizationId;
-  const response = await postpilotApiServerFetch<{ shows: Array<{ id: string; title: string }> }>("/shows");
-  return response.shows.map(({ id, title }) => ({ id, title }));
 }

@@ -1188,7 +1188,6 @@ api_sessions = Table(
     Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
     Column("impersonated_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
     Column("active_organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="SET NULL")),
-    Column("active_show_id", UUID(as_uuid=False), ForeignKey("shows.id", ondelete="SET NULL"), nullable=True),
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("last_seen_at", DateTime(timezone=True), nullable=False, server_default=func.now()),

@@ -17,7 +17,6 @@ from app.db.tables import (
     organization_role_policies,
     organizations,
     people,
-    shows,
     sso_connections,
     users,
 )
@@ -51,8 +50,6 @@ class Actor:
     person_name: str | None
     person_role: str | None
     permissions: frozenset[str]
-    active_show_id: str | None
-    active_show_title: str | None
 
     @property
     def organization_id(self) -> str:
@@ -373,7 +370,6 @@ async def get_actor_for_token(session: AsyncSession, token: str) -> Actor:
                 api_sessions.c.user_id,
                 api_sessions.c.impersonated_user_id,
                 api_sessions.c.active_organization_id,
-                api_sessions.c.active_show_id,
             )
             .where(and_(api_sessions.c.token_hash == token_hash, api_sessions.c.expires_at > now))
             .limit(1)
@@ -402,28 +398,14 @@ async def get_actor_for_token(session: AsyncSession, token: str) -> Actor:
             )
         ).first()
 
-    active_show = None
-    if active_organization and row.active_show_id:
-        active_show = (
-            await session.execute(
-                select(shows.c.id, shows.c.title).where(
-                    and_(
-                        shows.c.id == row.active_show_id,
-                        shows.c.organization_id == active_organization.organization_id,
-                    )
-                )
-            )
-        ).first()
-
-    # Membership removal and deleted shows must not leave a stale selection in
-    # the session. Repair it as part of resolving the signed-in actor.
+    # Membership removal must not leave a stale tenant selection in the
+    # session. Repair it as part of resolving the signed-in actor.
     await session.execute(
         update(api_sessions)
         .where(api_sessions.c.token_hash == token_hash)
         .values(
             last_seen_at=now,
             active_organization_id=active_organization.organization_id if active_organization else None,
-            active_show_id=active_show.id if active_show else None,
         )
     )
     await session.commit()
@@ -438,8 +420,6 @@ async def get_actor_for_token(session: AsyncSession, token: str) -> Actor:
         person_name=person.name if person else None,
         person_role=person.role if person else None,
         permissions=await _actor_permissions(session, active_organization, person.role if person else None),
-        active_show_id=active_show.id if active_show else None,
-        active_show_title=active_show.title if active_show else None,
     )
 
 
@@ -456,22 +436,7 @@ async def set_active_organization(session: AsyncSession, actor: Actor, organizat
     await session.execute(
         update(api_sessions)
         .where(api_sessions.c.token_hash == actor.session_token_hash)
-        .values(active_organization_id=organization_id, active_show_id=None)
-    )
-    await session.commit()
-
-
-async def set_active_show(session: AsyncSession, actor: Actor, show_id: str | None) -> None:
-    if show_id is not None:
-        record = (
-            await session.execute(
-                select(shows.c.id).where(and_(shows.c.id == show_id, shows.c.organization_id == actor.organization_id))
-            )
-        ).first()
-        if not record:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Show not found.")
-    await session.execute(
-        update(api_sessions).where(api_sessions.c.token_hash == actor.session_token_hash).values(active_show_id=show_id)
+        .values(active_organization_id=organization_id)
     )
     await session.commit()
 
@@ -513,7 +478,7 @@ async def switch_debug_user(session: AsyncSession, actor: Actor, user_id: str | 
     await session.execute(
         update(api_sessions)
         .where(api_sessions.c.token_hash == actor.session_token_hash)
-        .values(impersonated_user_id=user_id, active_organization_id=None, active_show_id=None)
+        .values(impersonated_user_id=user_id, active_organization_id=None)
     )
     await session.commit()
 

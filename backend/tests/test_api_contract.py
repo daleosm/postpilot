@@ -21,7 +21,7 @@ def test_api_exposes_core_tenant_scoped_routes(monkeypatch) -> None:
     assert "/v1/auth/change-password" in paths
     assert not any("otp" in path.lower() or "magic" in path.lower() for path in paths)
     assert "/v1/organizations/active" in paths
-    assert "/v1/organizations/active-show" in paths
+    assert "/v1/organizations/active-show" not in paths
     assert "/v1/dashboard" in paths
     assert "/v1/approvals" in paths
     assert "/v1/bookings" in paths
@@ -115,7 +115,7 @@ def test_microsoft_exchange_is_disabled_by_default(monkeypatch) -> None:
     get_settings.cache_clear()
 
 
-def test_session_contract_contains_resolved_capabilities_and_active_show(monkeypatch) -> None:
+def test_session_contract_contains_resolved_capabilities(monkeypatch) -> None:
     monkeypatch.setenv("POSTPILOT_DATABASE_URL", "postgresql://postpilot:postpilot@localhost:5432/postpilot")
     monkeypatch.setenv("POSTPILOT_SESSION_SECRET", "a-long-enough-test-session-secret-value")
     get_settings.cache_clear()
@@ -138,13 +138,10 @@ def test_session_contract_contains_resolved_capabilities_and_active_show(monkeyp
             person_name="Maya Ortiz",
             person_role="post_supervisor",
             permissions=frozenset({"manage_production", "sign_off_work"}),
-            active_show_id="00000000-0000-4000-8000-000000000201",
-            active_show_title="Northern Line",
         )
     )
 
     assert response.active_organization_id == membership.organization_id
-    assert response.active_show == {"id": "00000000-0000-4000-8000-000000000201", "title": "Northern Line"}
     assert response.permissions == ["manage_production", "sign_off_work"]
     assert not response.debug_can_switch
 

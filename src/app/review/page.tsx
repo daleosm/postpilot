@@ -4,14 +4,13 @@ import { MyTimeBoard, type MyTimeBooking } from "@/components/my-time-board";
 import { PageHeader } from "@/components/operations-ui";
 import { WorkflowSignOffQueue } from "@/components/workflow-approval-queue";
 import { WorkOrderQueue } from "@/components/work-order-queue";
-import { getActiveOrganizationContext, getActiveShow } from "@/lib/organizations";
+import { getActiveOrganizationContext } from "@/lib/organizations";
 import { canRecordBookingActuals, roleHome } from "@/lib/permissions";
 import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 
 export default async function MyWorkPage() {
-  const [context, activeShow, mayRecordActuals] = await Promise.all([
+  const [context, mayRecordActuals] = await Promise.all([
     getActiveOrganizationContext(),
-    getActiveShow(),
     canRecordBookingActuals(),
   ]);
   const [signOffs, workOrders, hasApprovalAccess] = context?.organization
@@ -23,8 +22,8 @@ export default async function MyWorkPage() {
   const [timeBookings] = await Promise.all([
     hasTimeWorkspace ? loadMyTimeBookings() : Promise.resolve([]),
   ]);
-  const visibleSignOffs = activeShow ? signOffs.filter((item) => item.showId === activeShow.id) : signOffs;
-  const visibleWorkOrders = activeShow ? workOrders.filter((item) => item.showId === activeShow.id) : workOrders;
+  const visibleSignOffs = signOffs;
+  const visibleWorkOrders = workOrders;
   const timeToConfirm = timeBookings.filter((booking) => booking.timeStatus === "ready").length;
 
   return (

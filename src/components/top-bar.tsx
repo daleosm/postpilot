@@ -7,7 +7,6 @@ import { usePathname, useRouter } from "next/navigation";
 
 import type { DebugUser } from "@/lib/debug-users";
 import type { OrganizationMembership } from "@/lib/organization-data";
-import type { ActiveShow } from "@/lib/organizations";
 import { postpilotApiFetch } from "@/lib/postpilot-api-client";
 import { ChangePasswordDialog } from "@/components/change-password-dialog";
 
@@ -17,14 +16,9 @@ type TopBarProps = {
   debugMode: boolean;
   activeOrganization: OrganizationMembership | null;
   organizations: OrganizationMembership[];
-  shows: Array<{ id: string; title: string }>;
-  activeShow: ActiveShow | null;
 };
 
-export function TopBar({ debugUser, debugUsers, debugMode, activeOrganization, organizations, shows, activeShow }: TopBarProps) {
-  const [selectedShowId, setSelectedShowId] = useState(activeShow?.id ?? null);
-  const [showOpen, setShowOpen] = useState(false);
-  const [showError, setShowError] = useState<string | null>(null);
+export function TopBar({ debugUser, debugUsers, debugMode, activeOrganization, organizations }: TopBarProps) {
   const [organizationOpen, setOrganizationOpen] = useState(false);
   const [switchingOrganizationId, setSwitchingOrganizationId] = useState<string | null>(null);
   const [organizationError, setOrganizationError] = useState<string | null>(null);
@@ -33,15 +27,12 @@ export function TopBar({ debugUser, debugUsers, debugMode, activeOrganization, o
   const [activeDebugUser, setActiveDebugUser] = useState(debugUser);
   const [switchingDebugUserId, setSwitchingDebugUserId] = useState<string | null>(null);
   const [debugError, setDebugError] = useState<string | null>(null);
-  const showRef = useRef<HTMLDivElement>(null);
   const organizationRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const pathname = usePathname();
   const selectedOrganization = organizations.find((organization) => organization.organizationId === selectedOrganizationId) ?? activeOrganization;
   const organizationName = selectedOrganization?.organizationName ?? "No post house";
-  const selectedShow = shows.find((show) => show.id === selectedShowId) ?? null;
-  const activeShowName = selectedShow?.title ?? "All shows";
   const tenantDebugUsers = debugUsers;
   const canSwitchOrganizations = organizations.length > 1;
   const hasDebugControls = debugMode && activeDebugUser;
@@ -49,27 +40,12 @@ export function TopBar({ debugUser, debugUsers, debugMode, activeOrganization, o
   useEffect(() => {
     const close = (event: MouseEvent) => {
       const target = event.target as Node;
-      if (!showRef.current?.contains(target)) setShowOpen(false);
       if (!organizationRef.current?.contains(target)) setOrganizationOpen(false);
       if (!userRef.current?.contains(target)) setUserOpen(false);
     };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, []);
-
-  async function chooseShow(showId: string | null) {
-    const previousShowId = selectedShowId;
-    setSelectedShowId(showId);
-    setShowError(null);
-    setShowOpen(false);
-    try {
-      await postpilotApiFetch("/organizations/active-show", { method: "POST", body: { show_id: showId } });
-      router.refresh();
-    } catch (error) {
-      setSelectedShowId(previousShowId);
-      setShowError(error instanceof Error ? error.message : "Could not select this show.");
-    }
-  }
 
   async function chooseOrganization(organization: OrganizationMembership) {
     if (organization.organizationId === selectedOrganization?.organizationId || switchingOrganizationId) {
@@ -87,8 +63,6 @@ export function TopBar({ debugUser, debugUsers, debugMode, activeOrganization, o
       if (!result.redirect_to) throw new Error("Could not switch post houses. Please try again.");
 
       setSelectedOrganizationId(organization.organizationId);
-      setSelectedShowId(null);
-      setShowOpen(false);
       setOrganizationOpen(false);
       // Tenant context is read by server components all the way up to the
       // persistent root layout. Reload after the cookie is confirmed so no
@@ -178,14 +152,6 @@ export function TopBar({ debugUser, debugUsers, debugMode, activeOrganization, o
           {organizationError && <p className="absolute left-0 top-10 z-40 mt-1 w-64 rounded-md border border-[#e7c5bd] bg-[#fff8f5] px-2.5 py-2 text-[11px] leading-4 text-[#a44e3b] shadow-sm" role="alert">{organizationError}</p>}
         </div>
 
-        <div className="relative hidden sm:block" ref={showRef}>
-          <Button variant="tertiary" onClick={() => { setShowError(null); setShowOpen((value) => !value); }} className="flex h-8 max-w-[160px] min-w-0 items-center gap-1.5 px-2 py-1 text-xs font-medium text-[#626865] hover:bg-[#f0f0ed]">
-            <span className="truncate">{activeShowName}</span>
-            <ChevronDown size={14} className={`shrink-0 text-[#8b8f8d] transition ${showOpen ? "rotate-180" : ""}`} />
-          </Button>
-          {showOpen && <div className="absolute left-0 top-10 z-30 w-52 rounded-lg border border-[#e1e2de] bg-white p-1 shadow-lg"><Button variant="tertiary" onClick={() => chooseShow(null)} className="flex h-auto w-full justify-between rounded-md px-3 py-2 text-left text-xs text-[#4f5753] hover:bg-[#f1f3f0]"><span>All shows</span>{!selectedShowId && <Check size={14} className="text-[#50786d]" />}</Button>{shows.map((show) => <Button key={show.id} variant="tertiary" onClick={() => chooseShow(show.id)} className="flex h-auto w-full justify-between rounded-md px-3 py-2 text-left text-xs text-[#4f5753] hover:bg-[#f1f3f0]"><span className="truncate">{show.title}</span>{selectedShowId === show.id && <Check size={14} className="text-[#50786d]" />}</Button>)}</div>}
-          {showError && <p className="absolute left-0 top-10 z-40 mt-1 w-64 rounded-md border border-[#e7c5bd] bg-[#fff8f5] px-2.5 py-2 text-[11px] leading-4 text-[#a44e3b] shadow-sm" role="alert">{showError}</p>}
-        </div>
       </div>
 
       <div className="flex shrink-0 items-center gap-2.5">

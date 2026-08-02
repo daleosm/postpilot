@@ -124,7 +124,6 @@ class SessionResponse(BaseModel):
     memberships: list[OrganizationMembershipResponse]
     person: PersonResponse | None
     permissions: list[str]
-    active_show: dict[str, str] | None
     debug_can_switch: bool
     # The API, not the browser, decides whether a tenant switch may retain a
     # nested record route. A client-provided pathname is only a requested
@@ -135,10 +134,6 @@ class SessionResponse(BaseModel):
 class ActiveOrganizationRequest(BaseModel):
     organization_id: str
     pathname: str | None = Field(default=None, max_length=2048)
-
-
-class ActiveShowRequest(BaseModel):
-    show_id: str | None = None
 
 
 class DebugUserRequest(BaseModel):

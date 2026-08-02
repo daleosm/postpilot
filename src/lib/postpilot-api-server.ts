@@ -17,7 +17,6 @@ export type ApiSession = {
   }>;
   person: { id: string; name: string; role: string } | null;
   permissions: string[];
-  active_show: { id: string; title: string } | null;
   debug_can_switch: boolean;
 };
 

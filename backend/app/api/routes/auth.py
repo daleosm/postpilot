@@ -49,11 +49,6 @@ def session_response(actor: Actor, *, redirect_to: str | None = None) -> Session
             else None
         ),
         permissions=sorted(actor.permissions),
-        active_show=(
-            {"id": actor.active_show_id, "title": actor.active_show_title}
-            if actor.active_show_id and actor.active_show_title
-            else None
-        ),
         debug_can_switch=can_switch_debug_user(actor),
         redirect_to=redirect_to,
     )

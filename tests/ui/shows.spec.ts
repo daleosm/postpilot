@@ -22,26 +22,22 @@ test.describe("Shows UI", () => {
     await expect(page.getByText("Shows · Copperline Editorial")).toBeVisible();
     await expect(page.getByRole("link", { name: /Crossing Point/ })).toBeVisible();
     await expect(page.getByRole("link", { name: /Northern Static/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "All shows", exact: true })).toHaveCount(0);
     await expect(page.getByText("City of Ash")).not.toBeVisible();
   });
 
-  test("filters to a show and resets the selection when the tenant changes", async ({ page }) => {
+  test("shows the complete tenant portfolio after a tenant switch", async ({ page }) => {
     await openShows(page);
 
-    await page.getByRole("button", { name: "All shows", exact: true }).click();
-    await page.getByRole("button", { name: "Crossing Point", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Crossing Point", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: /Crossing Point/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Northern Static/ })).not.toBeVisible();
+    await expect(page.getByRole("link", { name: /Northern Static/ })).toBeVisible();
 
     await page.getByRole("button", { name: "Switch debug tenant" }).click();
     await page.getByRole("button", { name: "Lantern Post House admin access" }).click();
     await expect(page.getByText("Shows · Lantern Post House")).toBeVisible();
     await page.waitForTimeout(400);
-    await expect(page.getByRole("button", { name: "All shows", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "All shows", exact: true }).click();
-    await expect(page.getByRole("button", { name: "City of Ash", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Crossing Point", exact: true })).not.toBeVisible();
+    await expect(page.getByRole("link", { name: /City of Ash/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Crossing Point/ })).not.toBeVisible();
   });
 
   test("explains missing required fields before a show can be created", async ({ page }) => {

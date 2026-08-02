@@ -124,22 +124,6 @@ def test_active_tenant_switch_drops_a_nested_show_route_from_the_previous_tenant
     assert client.get(f"/v1/shows/{show_id}/workspace").status_code == 404
 
 
-def test_active_show_selection_is_tenant_scoped_and_persisted_in_the_session(client: TestClient) -> None:
-    session = sign_in_as_maya(client)
-    tenant_a_shows = client.get("/v1/shows")
-    show_id = tenant_a_shows.json()["shows"][0]["id"]
-
-    selected = client.post("/v1/organizations/active-show", json={"show_id": show_id})
-    assert selected.status_code == 200
-    assert selected.json()["active_show"] == {"id": show_id, "title": tenant_a_shows.json()["shows"][0]["title"]}
-
-    client.post(
-        "/v1/organizations/active",
-        json={"organization_id": alternate_membership(session)["organization_id"], "pathname": "/shows"},
-    )
-    assert client.post("/v1/organizations/active-show", json={"show_id": show_id}).status_code == 404
-
-
 def test_show_episode_dashboard_and_form_reads_are_all_active_tenant_scoped(client: TestClient) -> None:
     sign_in_as_maya(client)
 
