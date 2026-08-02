@@ -19,6 +19,7 @@ from app.api.schemas import BillableFromWorkOrderRequest, BillableVoidRequest, C
 from app.auth import require_permission
 from app.billing_logic import invoice_number_prefix, invoice_totals
 from app.budget_logic import decimal_amount, json_safe, monetary
+from app.work_order_billing import overtime_charge
 from app.db.tables import (
     activity_log,
     billables,
@@ -98,6 +99,39 @@ async def _episode_scope(session: DbSession, actor: CurrentActor, episode_id: st
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found.")
     return record
+
+
+async def _work_order_overtime_charge(session: DbSession, actor: CurrentActor, work_order: object) -> Decimal:
+    """Return the billable OT from confirmed time, never a browser total."""
+    if not work_order.allow_overtime_billing:
+        return Decimal("0.00")
+    if not work_order.booking_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Record confirmed booking time before posting overtime-billable work.",
+        )
+    booking = (
+        await session.execute(
+            select(bookings.c.actual_starts_at, bookings.c.actual_ends_at, bookings.c.approved_overtime_minutes)
+            .where(
+                and_(
+                    bookings.c.id == work_order.booking_id,
+                    bookings.c.organization_id == actor.organization_id,
+                )
+            )
+            .limit(1)
+        )
+    ).first()
+    if not booking or not booking.actual_starts_at or not booking.actual_ends_at:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Confirm the linked booking's actual time before posting overtime-billable work.",
+        )
+    return overtime_charge(
+        overtime_minutes=int(booking.approved_overtime_minutes or 0),
+        hourly_base_rate=decimal_amount(work_order.overtime_hourly_base_rate),
+        multiplier=decimal_amount(work_order.overtime_multiplier),
+    )
 
 
 def _episode_value(episode: object) -> dict[str, object]:
@@ -573,11 +607,13 @@ async def create_billable_from_work_order(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="This work order has already been posted to billing."
         )
-    amount = decimal_amount(work_order.client_quote_amount)
-    if amount <= 0:
+    base_amount = decimal_amount(work_order.client_quote_amount)
+    if base_amount <= 0:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="This work order has no approved client quote."
         )
+    overtime_amount = await _work_order_overtime_charge(session, actor, work_order)
+    amount = base_amount + overtime_amount
     episode = await _episode_scope(session, actor, str(work_order.episode_id))
     if not episode.client_company_id:
         raise HTTPException(
@@ -630,6 +666,26 @@ async def create_billable_from_work_order(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="The selected Client PO has no approved work-order commitment.",
             )
+        allocated_total = decimal_amount(
+            await session.scalar(
+                select(func.coalesce(func.sum(client_purchase_order_allocations.c.amount), 0)).where(
+                    and_(
+                        client_purchase_order_allocations.c.organization_id == actor.organization_id,
+                        client_purchase_order_allocations.c.client_purchase_order_id == client_purchase_order.id,
+                    )
+                )
+            )
+        )
+        proposed_total = allocated_total - decimal_amount(po_allocation.amount) + amount
+        overrun = max(Decimal("0.00"), proposed_total - decimal_amount(client_purchase_order.approved_amount))
+        if overrun > 0 and not payload.client_po_overrun_reason:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Confirmed overtime adds {monetary(overtime_amount)} and exceeds the Client PO by "
+                    f"{monetary(overrun)}. Supply an authorised overrun reason before posting."
+                ),
+            )
 
     now = datetime.now(UTC)
     reference = payload.reference.strip() if payload.reference else f"WO-{str(work_order.id)[:8].upper()}"
@@ -647,7 +703,17 @@ async def create_billable_from_work_order(
             currency=actor.active_organization.currency,
             status="approved",
             rate_source="approved_client_change",
-            rate_snapshot={"workOrderId": work_order_id, "clientQuoteAmount": str(amount)},
+            rate_snapshot={
+                "workOrderId": work_order_id,
+                "clientQuoteAmount": str(base_amount),
+                "overtimeAmount": str(overtime_amount),
+                "overtimeHourlyBaseRate": str(work_order.overtime_hourly_base_rate)
+                if work_order.overtime_hourly_base_rate is not None
+                else None,
+                "overtimeMultiplier": str(work_order.overtime_multiplier)
+                if work_order.overtime_multiplier is not None
+                else None,
+            },
             source_work_order_id=work_order.id,
             created_at=now,
             updated_at=now,
@@ -670,6 +736,8 @@ async def create_billable_from_work_order(
                 allocation_type="billable",
                 work_order_id=None,
                 billable_id=billable.id,
+                amount=amount,
+                overrun_authorised=bool(overrun),
                 reference=reference,
                 description=work_order.title,
                 updated_at=now,
@@ -688,7 +756,13 @@ async def create_billable_from_work_order(
         action="billable.posted_from_work_order",
         entity_type="billable",
         entity_id=str(billable.id),
-        metadata={"workOrderId": work_order_id, "episodeId": str(episode.id), "amount": str(amount)},
+        metadata={
+            "workOrderId": work_order_id,
+            "episodeId": str(episode.id),
+            "amount": str(amount),
+            "baseAmount": str(base_amount),
+            "overtimeAmount": str(overtime_amount),
+        },
     )
     if work_order.client_purchase_order_id:
         await _audit(

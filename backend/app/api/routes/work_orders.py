@@ -22,6 +22,7 @@ from app.db.tables import (
     client_purchase_orders,
     crm_companies,
     episodes,
+    organizations,
     people,
     post_work_order_items,
     post_work_orders,
@@ -34,6 +35,7 @@ from app.db.tables import (
     workflow_stages,
 )
 from app.vendor_spend import external_budget_line_for_episode
+from app.work_order_billing import overtime_hourly_base_rate
 
 router = APIRouter(prefix="/work-orders", tags=["work-orders"])
 
@@ -64,6 +66,18 @@ def _work_order_value(row: object, items: list[object] | None = None) -> dict[st
         "status": row.status,
         "billing_scope": row.billing_scope,
         "billing_status": row.billing_status,
+        "planned_duration_quantity": str(row.planned_duration_quantity)
+        if row.planned_duration_quantity is not None
+        else None,
+        "planned_duration_unit": row.planned_duration_unit,
+        "standard_day_hours_snapshot": str(row.standard_day_hours_snapshot)
+        if row.standard_day_hours_snapshot is not None
+        else None,
+        "allow_overtime_billing": row.allow_overtime_billing,
+        "overtime_multiplier": str(row.overtime_multiplier) if row.overtime_multiplier is not None else None,
+        "overtime_hourly_base_rate": str(row.overtime_hourly_base_rate)
+        if row.overtime_hourly_base_rate is not None
+        else None,
         "estimated_amount": str(row.estimated_amount) if row.estimated_amount is not None else None,
         "client_quote_amount": str(row.client_quote_amount) if row.client_quote_amount is not None else None,
         "currency": row.currency,
@@ -149,6 +163,69 @@ async def _episode_scope(session: DbSession, actor: CurrentActor, episode_id: st
     if not episode:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found.")
     return episode
+
+
+async def _standard_day_hours(session: DbSession, actor: CurrentActor) -> Decimal:
+    value = await session.scalar(
+        select(organizations.c.standard_day_hours).where(organizations.c.id == actor.organization_id).limit(1)
+    )
+    return _decimal(value or Decimal("10"))
+
+
+def _overtime_billing_values(
+    *,
+    work_type: str,
+    billing_scope: str,
+    client_quote_amount: Decimal | None,
+    planned_duration_quantity: Decimal | None,
+    planned_duration_unit: str | None,
+    allow_overtime_billing: bool,
+    overtime_multiplier: Decimal | None,
+    standard_day_hours: Decimal,
+) -> dict[str, object]:
+    """Build only server-derived time-block billing fields for a work order."""
+    pair_is_complete = planned_duration_quantity is not None and bool(planned_duration_unit)
+    if (planned_duration_quantity is None) != (planned_duration_unit is None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Enter both planned occupancy quantity and unit.",
+        )
+    if not allow_overtime_billing:
+        return {
+            "planned_duration_quantity": planned_duration_quantity,
+            "planned_duration_unit": planned_duration_unit,
+            "standard_day_hours_snapshot": standard_day_hours if pair_is_complete else None,
+            "allow_overtime_billing": False,
+            "overtime_multiplier": None,
+            "overtime_hourly_base_rate": None,
+        }
+    if work_type != "internal" or billing_scope != "billable_change":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Overtime billing is only available for internal client-billable work.",
+        )
+    if not pair_is_complete or _decimal(client_quote_amount) <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Enter an agreed client charge and planned occupancy before enabling overtime billing.",
+        )
+    try:
+        base_rate = overtime_hourly_base_rate(
+            _decimal(client_quote_amount),
+            _decimal(planned_duration_quantity),
+            str(planned_duration_unit),
+            standard_day_hours,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+    return {
+        "planned_duration_quantity": planned_duration_quantity,
+        "planned_duration_unit": planned_duration_unit,
+        "standard_day_hours_snapshot": standard_day_hours,
+        "allow_overtime_billing": True,
+        "overtime_multiplier": _decimal(overtime_multiplier or Decimal("1.5")),
+        "overtime_hourly_base_rate": base_rate,
+    }
 
 
 async def _validate_create_references(
@@ -706,6 +783,8 @@ async def create_work_order(
         "estimated_amount",
         "budget_line_id",
         "client_quote_amount",
+        "allow_overtime_billing",
+        "overtime_multiplier",
         "billing_notes",
         "items",
         "client_purchase_order_id",
@@ -713,6 +792,16 @@ async def create_work_order(
     if commercial_fields.intersection(payload.model_fields_set):
         await require_permission(session, actor, "manage_commercial")
     episode = await _validate_create_references(session, actor, payload)
+    time_block_billing = _overtime_billing_values(
+        work_type=payload.work_type,
+        billing_scope=payload.billing_scope,
+        client_quote_amount=payload.client_quote_amount,
+        planned_duration_quantity=payload.planned_duration_quantity,
+        planned_duration_unit=payload.planned_duration_unit,
+        allow_overtime_billing=payload.allow_overtime_billing,
+        overtime_multiplier=payload.overtime_multiplier,
+        standard_day_hours=await _standard_day_hours(session, actor),
+    )
     now = datetime.now(UTC)
     blocking = payload.is_blocking if payload.is_blocking is not None else bool(payload.workflow_stage_id)
     result = await session.execute(
@@ -738,6 +827,7 @@ async def create_work_order(
             status="in_progress" if payload.kind == "qc_exception" else "open",
             billing_scope=payload.billing_scope,
             billing_status="draft" if payload.billing_scope == "billable_change" else "not_billable",
+            **time_block_billing,
             estimated_amount=payload.estimated_amount if payload.work_type == "external_vendor" else None,
             client_quote_amount=payload.client_quote_amount,
             currency=actor.active_organization.currency,
@@ -812,6 +902,8 @@ async def update_work_order(
         "billing_scope",
         "estimated_amount",
         "client_quote_amount",
+        "allow_overtime_billing",
+        "overtime_multiplier",
         "billing_notes",
         "priority",
         "is_blocking",
@@ -832,9 +924,16 @@ async def update_work_order(
         "client_purchase_order_id",
         "billing_scope",
         "client_quote_amount",
+        "allow_overtime_billing",
+        "overtime_multiplier",
         "billing_notes",
     }
     changing_commercial_fields = commercial_fields.intersection(payload.model_fields_set)
+    if (
+        work_order.allow_overtime_billing
+        and {"planned_duration_quantity", "planned_duration_unit"}.intersection(payload.model_fields_set)
+    ):
+        changing_commercial_fields = changing_commercial_fields | {"planned_duration_quantity"}
     if work_order.billing_status == "posted" and changing_commercial_fields:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -904,6 +1003,22 @@ async def update_work_order(
     next_client_quote_amount = (
         payload.client_quote_amount if "client_quote_amount" in fields else work_order.client_quote_amount
     )
+    next_planned_duration_quantity = (
+        payload.planned_duration_quantity
+        if "planned_duration_quantity" in fields
+        else work_order.planned_duration_quantity
+    )
+    next_planned_duration_unit = (
+        payload.planned_duration_unit if "planned_duration_unit" in fields else work_order.planned_duration_unit
+    )
+    next_allow_overtime_billing = (
+        payload.allow_overtime_billing
+        if "allow_overtime_billing" in fields
+        else work_order.allow_overtime_billing
+    )
+    next_overtime_multiplier = (
+        payload.overtime_multiplier if "overtime_multiplier" in fields else work_order.overtime_multiplier
+    )
     next_billing_notes = payload.billing_notes if "billing_notes" in fields else work_order.billing_notes
     selected_order = None
     selected_client_order = None
@@ -969,6 +1084,23 @@ async def update_work_order(
             episode=episode,
             client_purchase_order_id=next_client_purchase_order_id,
         )
+
+    # Moving an order out of client-billable internal work automatically
+    # retires its OT policy instead of leaving an unusable commercial charge.
+    if next_work_type != "internal" or next_billing_scope != "billable_change":
+        next_allow_overtime_billing = False
+        next_overtime_multiplier = None
+
+    time_block_billing = _overtime_billing_values(
+        work_type=next_work_type,
+        billing_scope=next_billing_scope,
+        client_quote_amount=next_client_quote_amount,
+        planned_duration_quantity=next_planned_duration_quantity,
+        planned_duration_unit=next_planned_duration_unit,
+        allow_overtime_billing=bool(next_allow_overtime_billing),
+        overtime_multiplier=next_overtime_multiplier,
+        standard_day_hours=await _standard_day_hours(session, actor),
+    )
 
     next_status = payload.status or work_order.status
     approval_decision = (
@@ -1125,6 +1257,10 @@ async def update_work_order(
         "client_purchase_order_id",
         "billing_scope",
         "client_quote_amount",
+        "planned_duration_quantity",
+        "planned_duration_unit",
+        "allow_overtime_billing",
+        "overtime_multiplier",
         "billing_notes",
     ):
         values.pop(field, None)
@@ -1144,6 +1280,7 @@ async def update_work_order(
             if next_client_quote_amount is not None
             else None,
             "billing_notes": next_billing_notes.strip() if next_billing_notes else None,
+            **time_block_billing,
         }
     )
     if "billing_scope" in fields:

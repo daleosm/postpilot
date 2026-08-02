@@ -27,6 +27,7 @@ from app.api.schemas import (
     RoomCreateRequest,
     RoomUpdateRequest,
     SsoConnectionEnabledUpdateRequest,
+    WorkOrderTimeSettingsUpdateRequest,
 )
 from app.auth import require_permission
 from app.budget_logic import json_safe
@@ -168,6 +169,13 @@ async def settings_bootstrap(actor: CurrentActor, session: DbSession) -> dict[st
     """
     await require_permission(session, actor, "manage_settings")
     org = actor.active_organization
+    organization_row = (
+        await session.execute(
+            select(organizations.c.standard_day_hours)
+            .where(organizations.c.id == actor.organization_id)
+            .limit(1)
+        )
+    ).first()
     room_rows = await session.execute(
         select(rooms).where(rooms.c.organization_id == actor.organization_id).order_by(rooms.c.name)
     )
@@ -252,7 +260,12 @@ async def settings_bootstrap(actor: CurrentActor, session: DbSession) -> dict[st
         )
         stages, rules, templates = stages_result.all(), rules_result.all(), templates_result.all()
     return {
-        "organization": {"id": org.organization_id, "name": org.organization_name, "currency": org.currency},
+        "organization": {
+            "id": org.organization_id,
+            "name": org.organization_name,
+            "currency": org.currency,
+            "standard_day_hours": organization_row.standard_day_hours if organization_row else 10,
+        },
         "rooms": [_room(row) for row in room_rows.all()],
         "users": [
             {
@@ -521,6 +534,33 @@ async def update_currency(
     )
     await session.commit()
     return {"ok": True, "currency": payload.currency}
+
+
+@router.patch("/settings/work-order-time")
+async def update_work_order_time_settings(
+    payload: WorkOrderTimeSettingsUpdateRequest, actor: CurrentActor, session: DbSession
+) -> dict[str, object]:
+    """Set the default that new day/half-day/week work orders snapshot.
+
+    Historical work orders retain their own snapshot so changing the policy
+    does not silently revise an agreed client overtime rate.
+    """
+    await require_permission(session, actor, "manage_settings")
+    await session.execute(
+        update(organizations)
+        .where(organizations.c.id == actor.organization_id)
+        .values(standard_day_hours=payload.standard_day_hours)
+    )
+    await _audit(
+        session,
+        actor,
+        "organization.work_order_time_settings_updated",
+        "organization",
+        actor.organization_id,
+        {"standard_day_hours": str(payload.standard_day_hours)},
+    )
+    await session.commit()
+    return {"ok": True, "standard_day_hours": str(payload.standard_day_hours)}
 
 
 @router.patch("/settings/invoicing")

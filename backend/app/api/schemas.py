@@ -257,7 +257,7 @@ class WorkOrderItemRequest(BaseModel):
     type: str = Field(pattern="^(service|material|expense)$")
     description: str = Field(min_length=2, max_length=240)
     quantity: Quantity = Field(gt=0)
-    unit: str = Field(pattern="^(hour|day|unit|fixed)$")
+    unit: str = Field(pattern="^(hour|half_day|day|week|unit|fixed)$")
     unit_rate: Money = Field(ge=0)
     discount_percent: Percentage = Field(default=Decimal("0"), ge=0, le=100)
     notes: str | None = Field(default=None, max_length=1000)
@@ -283,6 +283,10 @@ class WorkOrderCreateRequest(BaseModel):
     billing_scope: str = Field(default="included", pattern="^(included|billable_change|internal)$")
     estimated_amount: Money | None = Field(default=None, ge=0)
     client_quote_amount: Money | None = Field(default=None, ge=0)
+    planned_duration_quantity: Quantity | None = Field(default=None, gt=0)
+    planned_duration_unit: str | None = Field(default=None, pattern="^(hour|half_day|day|week)$")
+    allow_overtime_billing: bool = False
+    overtime_multiplier: Percentage = Field(default=Decimal("1.5"), gt=0, le=10)
     billing_notes: str | None = Field(default=None, max_length=2000)
     items: list[WorkOrderItemRequest] = Field(default_factory=list, max_length=50)
     external_url: str | None = Field(default=None, max_length=2000)
@@ -309,6 +313,15 @@ class WorkOrderCreateRequest(BaseModel):
             raise ValueError("A client PO is only available for internal client-billable work.")
         if self.client_purchase_order_id and (self.client_quote_amount is None or self.client_quote_amount <= 0):
             raise ValueError("Enter a quoted client amount before selecting a client PO.")
+        if bool(self.planned_duration_quantity) != bool(self.planned_duration_unit):
+            raise ValueError("Enter both planned occupancy quantity and unit.")
+        if self.allow_overtime_billing:
+            if self.work_type != "internal" or self.billing_scope != "billable_change":
+                raise ValueError("Overtime billing is only available for internal client-billable work.")
+            if self.client_quote_amount is None or self.client_quote_amount <= 0:
+                raise ValueError("Enter an agreed client charge before enabling overtime billing.")
+            if not self.planned_duration_quantity or not self.planned_duration_unit:
+                raise ValueError("Enter planned occupancy before enabling overtime billing.")
         return self
 
 
@@ -331,6 +344,10 @@ class WorkOrderUpdateRequest(BaseModel):
     billing_scope: str | None = Field(default=None, pattern="^(included|billable_change|internal)$")
     estimated_amount: Money | None = Field(default=None, ge=0)
     client_quote_amount: Money | None = Field(default=None, ge=0)
+    planned_duration_quantity: Quantity | None = Field(default=None, gt=0)
+    planned_duration_unit: str | None = Field(default=None, pattern="^(hour|half_day|day|week)$")
+    allow_overtime_billing: bool | None = None
+    overtime_multiplier: Percentage | None = Field(default=None, gt=0, le=10)
     billing_notes: str | None = Field(default=None, max_length=2000)
     priority: str | None = Field(default=None, pattern="^(blocker|high|normal|low)$")
     is_blocking: bool | None = None
@@ -942,6 +959,7 @@ class BillableFromWorkOrderRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reference: str | None = Field(default=None, max_length=160)
+    client_po_overrun_reason: str | None = Field(default=None, min_length=8, max_length=2000)
 
 
 class BillableVoidRequest(BaseModel):
@@ -1227,6 +1245,12 @@ class CateringSettingsUpdateRequest(BaseModel):
 
 class CurrencySettingsUpdateRequest(BaseModel):
     currency: str = Field(pattern="^(GBP|USD|EUR|CAD|AUD)$")
+
+
+class WorkOrderTimeSettingsUpdateRequest(BaseModel):
+    """Tenant policy used when a work order snapshots day-based occupancy."""
+
+    standard_day_hours: Quantity = Field(ge=1, le=24)
 
 
 class InvoiceSettingsUpdateRequest(BaseModel):

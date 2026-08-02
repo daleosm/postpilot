@@ -110,6 +110,75 @@ def _completed_billable_change(lab: ProductionApiLab, *, client_po_id: str, quot
     return work_order_id
 
 
+def test_client_billable_time_block_adds_only_confirmed_overtime_to_the_server_charge(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    client_po_id = _active_client_po(production_lab, amount=4000)
+    episode_id = _episode_id(production_lab)
+    created = production_lab.client.post(
+        "/v1/work-orders",
+        json={
+            "episode_id": episode_id,
+            "workflow_stage_id": production_lab.data.workflow_stage_id,
+            "title": "Three-day colour client change",
+            "work_type": "internal",
+            "billing_scope": "billable_change",
+            "client_purchase_order_id": client_po_id,
+            "client_quote_amount": 3000,
+            "planned_duration_quantity": 3,
+            "planned_duration_unit": "day",
+            "allow_overtime_billing": True,
+            "overtime_multiplier": 1.5,
+        },
+    )
+    assert created.status_code == 201, created.text
+    work_order_id = created.json()["id"]
+    assert created.json()["overtime_hourly_base_rate"] == "100.0000"
+    assert production_lab.client.patch(
+        f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}
+    ).status_code == 200
+
+    assert production_lab.client.patch(
+        f"/v1/work-orders/{work_order_id}", json={"status": "in_progress"}
+    ).status_code == 200
+    booking_id = str(uuid4())
+    production_lab.execute(
+        """
+        INSERT INTO bookings (
+          id, organization_id, episode_id, room_id, title, starts_at, ends_at,
+          setup_minutes, handover_minutes, approved_overtime_minutes, is_option,
+          status, booking_type, actual_starts_at, actual_ends_at
+        ) VALUES (
+          $1, $2, $3, $4, 'Three-day colour client change',
+          '2035-06-10 09:00:00+00', '2035-06-10 19:00:00+00',
+          0, 0, 120, false, 'confirmed', 'color',
+          '2035-06-10 09:00:00+00', '2035-06-10 19:00:00+00'
+        )
+        """,
+        booking_id,
+        production_lab.data.organization_id,
+        episode_id,
+        production_lab.data.room_id,
+    )
+    production_lab.execute(
+        "UPDATE post_work_orders SET booking_id = $1 WHERE organization_id = $2 AND id = $3",
+        booking_id,
+        production_lab.data.organization_id,
+        work_order_id,
+    )
+    assert production_lab.client.patch(
+        f"/v1/work-orders/{work_order_id}", json={"status": "complete"}
+    ).status_code == 200
+
+    billable = production_lab.client.post(f"/v1/billing/work-orders/{work_order_id}/billables", json={})
+    assert billable.status_code == 201, billable.text
+    assert billable.json()["amount"] == 3300.0
+    snapshot = json.loads(production_lab.fetchval("SELECT rate_snapshot FROM billables WHERE id = $1", billable.json()["id"]))
+    assert snapshot["clientQuoteAmount"] == "3000.00"
+    assert snapshot["overtimeAmount"] == "300.00"
+
+
 def _set_invoice_readiness_prerequisites(lab: ProductionApiLab, episode_id: str) -> None:
     lab.execute(
         "UPDATE episodes SET workflow_status = 'complete' WHERE organization_id = $1 AND id = $2",

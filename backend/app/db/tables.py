@@ -84,6 +84,10 @@ organizations = Table(
     Column("name", Text, nullable=False),
     Column("slug", Text, nullable=False),
     Column("currency", Text, nullable=False),
+    # A tenant operational default, used only when a work order snapshots a
+    # time-block basis for client overtime.  Existing bookings retain their
+    # real start/end times and are not silently rescaled.
+    Column("standard_day_hours", Numeric(5, 2), nullable=False),
 )
 
 # SSO connections are configured per post house.  They deliberately do not
@@ -865,6 +869,14 @@ post_work_orders = Table(
     Column("status", existing_postgres_enum("work_order_status"), nullable=False),
     Column("billing_scope", existing_postgres_enum("work_order_billing_scope"), nullable=False),
     Column("billing_status", existing_postgres_enum("work_order_billing_status"), nullable=False),
+    # Planned occupancy is operational context; it is intentionally separate
+    # from the client's agreed price.
+    Column("planned_duration_quantity", Numeric(12, 2)),
+    Column("planned_duration_unit", Text),
+    Column("standard_day_hours_snapshot", Numeric(5, 2)),
+    Column("allow_overtime_billing", Boolean, nullable=False),
+    Column("overtime_multiplier", Numeric(7, 3)),
+    Column("overtime_hourly_base_rate", Numeric(14, 4)),
     Column("estimated_amount", Numeric(14, 2)),
     Column("client_quote_amount", Numeric(14, 2)),
     Column("actual_amount", Numeric(14, 2)),

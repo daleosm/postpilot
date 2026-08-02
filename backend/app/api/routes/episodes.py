@@ -899,6 +899,18 @@ async def get_episode_workspace(episode_id: str, actor: CurrentActor, session: D
                 "status": item.status,
                 "billing_scope": item.billing_scope,
                 "billing_status": item.billing_status,
+                "planned_duration_quantity": str(item.planned_duration_quantity)
+                if item.planned_duration_quantity is not None
+                else None,
+                "planned_duration_unit": item.planned_duration_unit,
+                "standard_day_hours_snapshot": str(item.standard_day_hours_snapshot)
+                if item.standard_day_hours_snapshot is not None
+                else None,
+                "allow_overtime_billing": item.allow_overtime_billing,
+                "overtime_multiplier": str(item.overtime_multiplier) if item.overtime_multiplier is not None else None,
+                "overtime_hourly_base_rate": str(item.overtime_hourly_base_rate)
+                if item.overtime_hourly_base_rate is not None
+                else None,
                 "estimated_amount": str(item.estimated_amount) if item.estimated_amount is not None else None,
                 "client_quote_amount": str(item.client_quote_amount) if item.client_quote_amount is not None else None,
                 "actual_amount": str(item.actual_amount) if item.actual_amount is not None else None,
