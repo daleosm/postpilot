@@ -150,5 +150,8 @@ resource "helm_release" "postpilot_observability" {
     }
   })]
 
-  depends_on = [kubernetes_storage_class_v1.postpilot_gp3]
+  depends_on = [
+    kubernetes_storage_class_v1.postpilot_gp3,
+    terraform_data.karpenter_nodepool,
+  ]
 }

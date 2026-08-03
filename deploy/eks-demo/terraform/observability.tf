@@ -349,9 +349,6 @@ resource "aws_eks_addon" "cloudwatch_standard_insights" {
     otelContainerInsights = {
       enabled = false
     }
-    admissionWebhooks = {
-      create = false
-    }
     dcgmExporter = {
       enabled = false
     }
@@ -456,17 +453,19 @@ resource "helm_release" "postpilot_log_forwarder" {
       logStreamPrefix   = "postpilot-"
       autoCreateGroup   = false
       autoRetryRequests = true
-      extraOutputs      = <<-EOT
-        [OUTPUT]
-            Name                cloudwatch_logs
-            Match               kubernetes-events.*
-            region              ${var.aws_region}
-            log_group_name      ${aws_cloudwatch_log_group.postpilot_kubernetes_events.name}
-            log_stream_prefix   kubernetes-events-
-            auto_create_group   false
-            auto_retry_requests true
-      EOT
     }
+    # The chart renders cloudWatchLogs.extraOutputs inside its primary output
+    # stanza. A second output must instead use its top-level extension point.
+    additionalOutputs = <<-EOT
+      [OUTPUT]
+          Name                cloudwatch_logs
+          Match               kubernetes-events.*
+          region              ${var.aws_region}
+          log_group_name      ${aws_cloudwatch_log_group.postpilot_kubernetes_events.name}
+          log_stream_prefix   kubernetes-events-
+          auto_create_group   false
+          auto_retry_requests true
+    EOT
     resources = {
       requests = {
         cpu    = "25m"

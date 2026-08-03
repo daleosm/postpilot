@@ -155,5 +155,11 @@ resource "helm_release" "postpilot_observability" {
     }
   })]
 
-  depends_on = [kubernetes_storage_class_v1.postpilot_gp3]
+  # Install the dynamic node pool before the monitoring workload. Prometheus
+  # can then request a small extra Spot node instead of leaving its PVC-backed
+  # Pod Pending on the fixed demo baseline.
+  depends_on = [
+    kubernetes_storage_class_v1.postpilot_gp3,
+    terraform_data.karpenter_nodepool,
+  ]
 }
