@@ -205,6 +205,7 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - name: Run complete Chromium browser suite
         env:
+          DATABASE_URL: postgresql://postpilot:postpilot@localhost:5432/postpilot
           POSTPILOT_API_ORIGIN: http://127.0.0.1:8000
           POSTPILOT_API_INTERNAL_URL: http://127.0.0.1:8000
           POSTPILOT_SESSION_SECRET: postpilot-ci-auth-secret-which-is-long-enough
