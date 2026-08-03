@@ -63,9 +63,9 @@ async def set_debug_user(
 
 @router.delete("/user", status_code=status.HTTP_204_NO_CONTENT)
 async def clear_debug_session(request: Request, response: Response, session: DbSession) -> Response:
-    """End a local debug session without leaving a stale FastAPI cookie behind."""
+    """End a demo session without leaving a stale FastAPI cookie behind."""
     settings = get_settings()
-    if not settings.debug_demo or settings.environment == "production":
+    if not settings.debug_demo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found.")
     await revoke_session(session, request.cookies.get(settings.cookie_name))
     response.delete_cookie(settings.cookie_name, path="/")
@@ -74,9 +74,14 @@ async def clear_debug_session(request: Request, response: Response, session: DbS
 
 @router.post("/bootstrap", response_model=SessionResponse)
 async def bootstrap_local_debug_session(response: Response, session: DbSession) -> SessionResponse:
-    """Convenience login for local development only; never enabled in production."""
+    """Open the explicitly enabled, disposable demo workspace."""
     settings = get_settings()
-    if not settings.debug_demo or settings.environment == "production":
+    # The public demo intentionally runs with production HTTP settings. Its
+    # bootstrap route is nevertheless safe to expose because this endpoint is
+    # gated solely by the explicit debug-demo flag and creates a session for a
+    # seeded disposable account; a real facility deployment leaves that flag
+    # disabled.
+    if not settings.debug_demo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found.")
     exists = (
         await session.execute(select(users.c.id).where(users.c.id == settings.demo_switcher_user_id).limit(1))

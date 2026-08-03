@@ -22,10 +22,17 @@ def test_fastapi_session_and_tenant_boundary_against_seeded_postgres(monkeypatch
     monkeypatch.setenv("POSTPILOT_DATABASE_URL", database_url)
     monkeypatch.setenv("POSTPILOT_SESSION_SECRET", "postpilot-ci-auth-secret-which-is-long-enough")
     monkeypatch.setenv("POSTPILOT_DEBUG_DEMO", "true")
+    # The disposable public demo uses production HTTP settings. Its explicitly
+    # enabled debug bootstrap must still open the seeded workspace.
+    monkeypatch.setenv("POSTPILOT_ENVIRONMENT", "production")
     get_settings.cache_clear()
     from app.main import create_app
 
     with TestClient(create_app()) as client:
+        debug_bootstrap = client.post("/v1/debug/bootstrap")
+        assert debug_bootstrap.status_code == 200
+        assert debug_bootstrap.json()["authenticated_user_id"] == "user_maya"
+
         signed_in = client.post(
             "/v1/auth/sign-in",
             json={"email": "maya@postpilot.debug", "password": "password"},
