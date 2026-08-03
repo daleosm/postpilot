@@ -19,7 +19,6 @@ from app.api.schemas import BillableFromWorkOrderRequest, BillableVoidRequest, C
 from app.auth import require_permission
 from app.billing_logic import invoice_number_prefix, invoice_totals
 from app.budget_logic import decimal_amount, json_safe, monetary
-from app.work_order_billing import overtime_charge
 from app.db.tables import (
     activity_log,
     billables,
@@ -36,6 +35,7 @@ from app.db.tables import (
     seasons,
     shows,
 )
+from app.work_order_billing import overtime_charge
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -437,9 +437,9 @@ async def _episode_invoice_readiness(
         if include_invoice_export_reasons:
             # The register must show a real export lock, not merely hide the
             # download control. Reuse the authoritative reconciliation gate.
-            value["export_blocked_reason"] = (
-                await _invoice_export_readiness(session, actor, str(item.id))
-            )["blocked_reason"]
+            value["export_blocked_reason"] = (await _invoice_export_readiness(session, actor, str(item.id)))[
+                "blocked_reason"
+            ]
         invoice_values.append(value)
 
     return {

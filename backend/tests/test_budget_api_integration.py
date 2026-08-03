@@ -303,9 +303,7 @@ def test_budget_lines_create_live_episode_and_show_rollups_with_po_commitments(
         f"/v1/budget/lines/{external.json()['id']}", json={"actual_amount": 999}
     )
     assert browser_total.status_code == 422
-    allocation_ledger = production_lab.client.get(
-        f"/v1/budget/lines/{external.json()['id']}/actual-allocations"
-    )
+    allocation_ledger = production_lab.client.get(f"/v1/budget/lines/{external.json()['id']}/actual-allocations")
     assert allocation_ledger.status_code == 200
     allocations = allocation_ledger.json()["actual_allocations"]
     assert len(allocations) == 1

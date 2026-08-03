@@ -345,10 +345,7 @@ def test_confirmed_time_uses_the_booking_budget_item_saved_rate_snapshot(product
     booking_id, budget_line_id = _create_budgeted_booking(production_lab)
     resources = production_lab.client.get("/v1/bookings/resources")
     assert resources.status_code == 200, resources.text
-    assert any(
-        item["id"] == budget_line_id and item["has_rate_snapshot"]
-        for item in resources.json()["budget_items"]
-    )
+    assert any(item["id"] == budget_line_id and item["has_rate_snapshot"] for item in resources.json()["budget_items"])
     production_lab.sign_out()
     production_lab.sign_in_as_viewer()
 
@@ -403,11 +400,14 @@ def test_actual_time_without_a_budget_item_is_visible_as_unallocated(production_
         },
     )
     assert submitted.status_code == 201, submitted.text
-    assert production_lab.fetchval(
-        "SELECT count(*) FROM budget_actual_allocations WHERE organization_id = $1 AND booking_id = $2",
-        production_lab.data.organization_id,
-        booking_id,
-    ) == 0
+    assert (
+        production_lab.fetchval(
+            "SELECT count(*) FROM budget_actual_allocations WHERE organization_id = $1 AND booking_id = $2",
+            production_lab.data.organization_id,
+            booking_id,
+        )
+        == 0
+    )
     listed = production_lab.client.get("/v1/bookings")
     row = next(item for item in listed.json()["bookings"] if item["id"] == booking_id)
     assert row["actual_budget_status"] == "unallocated"

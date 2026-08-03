@@ -929,9 +929,8 @@ async def update_work_order(
         "billing_notes",
     }
     changing_commercial_fields = commercial_fields.intersection(payload.model_fields_set)
-    if (
-        work_order.allow_overtime_billing
-        and {"planned_duration_quantity", "planned_duration_unit"}.intersection(payload.model_fields_set)
+    if work_order.allow_overtime_billing and {"planned_duration_quantity", "planned_duration_unit"}.intersection(
+        payload.model_fields_set
     ):
         changing_commercial_fields = changing_commercial_fields | {"planned_duration_quantity"}
     if work_order.billing_status == "posted" and changing_commercial_fields:
@@ -963,7 +962,9 @@ async def update_work_order(
                 detail="A posted client charge cannot move episodes. Void it before changing commercial scope.",
             )
         has_actual = await session.scalar(
-            select(func.count()).select_from(vendor_invoices).where(
+            select(func.count())
+            .select_from(vendor_invoices)
+            .where(
                 and_(
                     vendor_invoices.c.organization_id == actor.organization_id,
                     vendor_invoices.c.work_order_id == work_order_id,
@@ -1012,9 +1013,7 @@ async def update_work_order(
         payload.planned_duration_unit if "planned_duration_unit" in fields else work_order.planned_duration_unit
     )
     next_allow_overtime_billing = (
-        payload.allow_overtime_billing
-        if "allow_overtime_billing" in fields
-        else work_order.allow_overtime_billing
+        payload.allow_overtime_billing if "allow_overtime_billing" in fields else work_order.allow_overtime_billing
     )
     next_overtime_multiplier = (
         payload.overtime_multiplier if "overtime_multiplier" in fields else work_order.overtime_multiplier
@@ -1050,7 +1049,9 @@ async def update_work_order(
             vendor_company_id=next_vendor_company_id,
             purchase_order_id=next_purchase_order_id,
             require_approved_po=bool(
-                {"episode_id", "work_type", "vendor_company_id", "purchase_order_id", "estimated_amount"}.intersection(fields)
+                {"episode_id", "work_type", "vendor_company_id", "purchase_order_id", "estimated_amount"}.intersection(
+                    fields
+                )
                 or (work_order.status == "awaiting_approval" and payload.status == "in_progress")
             ),
         )
@@ -1458,9 +1459,7 @@ async def reserve_work_order_room(
             detail="Only internal work orders can reserve post-house rooms.",
         )
     if work_order.status not in {"in_progress", "ready_for_review"}:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Start this work order before reserving time."
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Start this work order before reserving time.")
     if work_order.booking_id:
         linked = await _tenant_record(session, bookings, actor, str(work_order.booking_id), "Linked booking")
         if linked and linked.status != "cancelled":
@@ -1522,14 +1521,16 @@ async def reserve_work_order_room(
     now = datetime.now(UTC)
     budget_item = (
         await session.execute(
-            select(budget_lines.c.id).where(
+            select(budget_lines.c.id)
+            .where(
                 and_(
                     budget_lines.c.organization_id == actor.organization_id,
                     budget_lines.c.work_order_id == work_order.id,
                     budget_lines.c.episode_id == work_order.episode_id,
                     budget_lines.c.external_cost.is_(False),
                 )
-            ).limit(1)
+            )
+            .limit(1)
         )
     ).first()
     created = await session.execute(
@@ -1573,10 +1574,7 @@ async def reserve_work_order_room(
     if work_order.status == "ready_for_review":
         link_values["status"] = "in_progress"
     linked = await session.execute(
-        update(post_work_orders)
-        .where(and_(*link_conditions))
-        .values(**link_values)
-        .returning(post_work_orders.c.id)
+        update(post_work_orders).where(and_(*link_conditions)).values(**link_values).returning(post_work_orders.c.id)
     )
     if not linked.first():
         await session.rollback()

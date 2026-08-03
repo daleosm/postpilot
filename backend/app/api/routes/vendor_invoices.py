@@ -261,11 +261,13 @@ async def record_vendor_invoice(
                 action="vendor_invoice.recorded",
                 entity_type="vendor_invoice",
                 entity_id=str(invoice_id),
-                metadata=json_safe({
-                    "budgetLineId": str(budget_line.id),
-                    "purchaseOrderId": str(order.id) if order else None,
-                    "purchaseOrderAllocationId": str(allocation_id) if allocation_id else None,
-                }),
+                metadata=json_safe(
+                    {
+                        "budgetLineId": str(budget_line.id),
+                        "purchaseOrderId": str(order.id) if order else None,
+                        "purchaseOrderAllocationId": str(allocation_id) if allocation_id else None,
+                    }
+                ),
             )
         )
         await session.commit()
@@ -354,7 +356,9 @@ async def update_vendor_invoice(
         overrun = decimal_amount(other_actuals) + next_amount - decimal_amount(order.approved_amount)
         if overrun > 0:
             if not payload.overrun_reason:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Explain the PO overrun before saving it.")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Explain the PO overrun before saving it."
+                )
             await require_permission(session, actor, "approve_budget_overruns")
 
     now = datetime.now(UTC)
@@ -428,5 +432,7 @@ async def update_vendor_invoice(
         await session.commit()
     except IntegrityError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Supplier invoice reference already exists.") from error
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Supplier invoice reference already exists."
+        ) from error
     return {"id": str(row.id), "amount": decimal_amount(row.amount), "status": row.status, "actual_amount": next_amount}

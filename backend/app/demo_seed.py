@@ -1277,18 +1277,117 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
     # represents. The same fixed IDs keep the browser demo stable.
     budget_specs = (
         # line, episode, category, description, quantity, unit, rate, source, resource, external
-        (1, 1, "Edit suite", "Editorial bay allowance for assembly and picture review.", 5, "day", 760, "master_rate_card", f"room:{room_id(1)} · {tenant['rooms'][0]}", False),
-        (2, 3, "Editorial artists", "Assistant-editor turnover and editorial support.", 4, "day", 535, "network_rate_card", f"person:{person_id(role_indices['assistant_editor'])} · Assistant editor", False),
-        (3, 2, "VFX", "VFX pulls, graphics turnover, and title review package.", 1, "fixed", 3450, "show_rate_card", f"service:{uid(number, '36', 7)} · VFX turnover", False),
-        (4, 5, "Colour", "Colour suite and supervised grade notes pass.", 2, "day", 1020, "episode_rate_card", f"room:{room_id(3)} · {tenant['rooms'][2]}", False),
-        (5, 7, "Sound", "Mix-stage time for final mix, stems, and review reference.", 3, "day", 1160, "network_rate_card", f"room:{room_id(4)} · {tenant['rooms'][3]}", False),
-        (6, 8, "QC", "Technical QC pass and corrective re-check allowance.", 1, "episode", 485, "master_rate_card", f"room:{room_id(5)} · {tenant['rooms'][4]}", False),
-        (7, 1, "Delivery", "Delivery manifest preparation, metadata, and recipient handoff.", 1, "fixed", 1650, "manual_estimate", f"delivery_profile:{profile_id} · {network} delivery profile", False),
-        (8, 1, "External vendors", "External caption correction and specialist QC support.", 1, "fixed", 3500, "manual_estimate", f"vendor:{company_id(3)} · {tenant['name']} Facilities Vendor", True),
+        (
+            1,
+            1,
+            "Edit suite",
+            "Editorial bay allowance for assembly and picture review.",
+            5,
+            "day",
+            760,
+            "master_rate_card",
+            f"room:{room_id(1)} · {tenant['rooms'][0]}",
+            False,
+        ),
+        (
+            2,
+            3,
+            "Editorial artists",
+            "Assistant-editor turnover and editorial support.",
+            4,
+            "day",
+            535,
+            "network_rate_card",
+            f"person:{person_id(role_indices['assistant_editor'])} · Assistant editor",
+            False,
+        ),
+        (
+            3,
+            2,
+            "VFX",
+            "VFX pulls, graphics turnover, and title review package.",
+            1,
+            "fixed",
+            3450,
+            "show_rate_card",
+            f"service:{uid(number, '36', 7)} · VFX turnover",
+            False,
+        ),
+        (
+            4,
+            5,
+            "Colour",
+            "Colour suite and supervised grade notes pass.",
+            2,
+            "day",
+            1020,
+            "episode_rate_card",
+            f"room:{room_id(3)} · {tenant['rooms'][2]}",
+            False,
+        ),
+        (
+            5,
+            7,
+            "Sound",
+            "Mix-stage time for final mix, stems, and review reference.",
+            3,
+            "day",
+            1160,
+            "network_rate_card",
+            f"room:{room_id(4)} · {tenant['rooms'][3]}",
+            False,
+        ),
+        (
+            6,
+            8,
+            "QC",
+            "Technical QC pass and corrective re-check allowance.",
+            1,
+            "episode",
+            485,
+            "master_rate_card",
+            f"room:{room_id(5)} · {tenant['rooms'][4]}",
+            False,
+        ),
+        (
+            7,
+            1,
+            "Delivery",
+            "Delivery manifest preparation, metadata, and recipient handoff.",
+            1,
+            "fixed",
+            1650,
+            "manual_estimate",
+            f"delivery_profile:{profile_id} · {network} delivery profile",
+            False,
+        ),
+        (
+            8,
+            1,
+            "External vendors",
+            "External caption correction and specialist QC support.",
+            1,
+            "fixed",
+            3500,
+            "manual_estimate",
+            f"vendor:{company_id(3)} · {tenant['name']} Facilities Vendor",
+            True,
+        ),
     )
     budget_rows = []
     budget_actual_rows = []
-    for index, episode_position, category, description, quantity, unit, rate, rate_source, resource_reference, external_cost in budget_specs:
+    for (
+        index,
+        episode_position,
+        category,
+        description,
+        quantity,
+        unit,
+        rate,
+        rate_source,
+        resource_reference,
+        external_cost,
+    ) in budget_specs:
         amount = Decimal(quantity * rate) * multiplier
         line_id = uid(number, "30", index)
         show_position = next(
@@ -1358,9 +1457,7 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
     # Existing demo figures are historical actuals.  Seed them as explicit
     # allocation rows rather than relying on the compatibility cache so every
     # visible actual can be traced back to a ledger entry after the migration.
-    await connection.execute(
-        insert(t.budget_actual_allocations).values(nullable_rows(budget_actual_rows))
-    )
+    await connection.execute(insert(t.budget_actual_allocations).values(nullable_rows(budget_actual_rows)))
     # Freeze an approved baseline for every seeded episode that has planned
     # work. The item snapshots let the demo show original/current estimates
     # and later revisions without treating the mutable budget line as history.

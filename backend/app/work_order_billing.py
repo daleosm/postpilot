@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
 
-
 TIME_BLOCK_UNITS = {"hour", "half_day", "day", "week"}
 WORK_ORDER_ITEM_UNITS = TIME_BLOCK_UNITS | {"fixed", "unit"}
 MONEY = Decimal("0.01")
@@ -50,14 +49,12 @@ def overtime_hourly_base_rate(
     return (client_quote_amount / hours).quantize(RATE, rounding=ROUND_HALF_UP)
 
 
-def overtime_charge(
-    *, overtime_minutes: int, hourly_base_rate: Decimal | None, multiplier: Decimal | None
-) -> Decimal:
+def overtime_charge(*, overtime_minutes: int, hourly_base_rate: Decimal | None, multiplier: Decimal | None) -> Decimal:
     """Calculate one client overtime addition, rounded only at the charge boundary."""
     if overtime_minutes <= 0 or hourly_base_rate is None or multiplier is None:
         return Decimal("0.00")
     if hourly_base_rate < 0 or multiplier <= 0:
         raise ValueError("Overtime billing configuration is invalid.")
-    return (
-        hourly_base_rate * multiplier * Decimal(overtime_minutes) / Decimal("60")
-    ).quantize(MONEY, rounding=ROUND_HALF_UP)
+    return (hourly_base_rate * multiplier * Decimal(overtime_minutes) / Decimal("60")).quantize(
+        MONEY, rounding=ROUND_HALF_UP
+    )

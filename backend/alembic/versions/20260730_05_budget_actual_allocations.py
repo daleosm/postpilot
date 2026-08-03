@@ -42,7 +42,13 @@ def upgrade() -> None:
 
     op.create_table(
         "budget_actual_allocations",
-        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True, nullable=False, server_default=sa.text("gen_random_uuid()")),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=False),
+            primary_key=True,
+            nullable=False,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column("organization_id", postgresql.UUID(as_uuid=False), nullable=False),
         sa.Column("budget_line_id", postgresql.UUID(as_uuid=False), nullable=False),
         sa.Column("source_type", sa.Text(), nullable=False),
@@ -60,10 +66,14 @@ def upgrade() -> None:
         sa.CheckConstraint("amount >= 0", name="budget_actual_allocations_amount_check"),
         sa.CheckConstraint(
             """
-            (source_type IN ('booking', 'time_submission') AND booking_id IS NOT NULL AND work_order_id IS NULL AND vendor_invoice_id IS NULL AND manual_adjustment_reason IS NULL)
-            OR (source_type = 'work_order' AND booking_id IS NULL AND work_order_id IS NOT NULL AND vendor_invoice_id IS NULL AND manual_adjustment_reason IS NULL)
-            OR (source_type = 'vendor_invoice' AND booking_id IS NULL AND work_order_id IS NULL AND vendor_invoice_id IS NOT NULL AND manual_adjustment_reason IS NULL)
-            OR (source_type = 'manual_adjustment' AND booking_id IS NULL AND work_order_id IS NULL AND vendor_invoice_id IS NULL AND manual_adjustment_reason IS NOT NULL)
+            (source_type IN ('booking', 'time_submission') AND booking_id IS NOT NULL
+              AND work_order_id IS NULL AND vendor_invoice_id IS NULL AND manual_adjustment_reason IS NULL)
+            OR (source_type = 'work_order' AND booking_id IS NULL
+              AND work_order_id IS NOT NULL AND vendor_invoice_id IS NULL AND manual_adjustment_reason IS NULL)
+            OR (source_type = 'vendor_invoice' AND booking_id IS NULL
+              AND work_order_id IS NULL AND vendor_invoice_id IS NOT NULL AND manual_adjustment_reason IS NULL)
+            OR (source_type = 'manual_adjustment' AND booking_id IS NULL
+              AND work_order_id IS NULL AND vendor_invoice_id IS NULL AND manual_adjustment_reason IS NOT NULL)
             """,
             name="budget_actual_allocations_one_source_check",
         ),
@@ -74,8 +84,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["vendor_invoice_id"], ["vendor_invoices.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
     )
-    op.create_index("budget_actual_allocations_tenant_line_idx", "budget_actual_allocations", ["organization_id", "budget_line_id"])
-    op.create_index("budget_actual_allocations_tenant_date_idx", "budget_actual_allocations", ["organization_id", "allocation_date"])
+    op.create_index(
+        "budget_actual_allocations_tenant_line_idx", "budget_actual_allocations", ["organization_id", "budget_line_id"]
+    )
+    op.create_index(
+        "budget_actual_allocations_tenant_date_idx", "budget_actual_allocations", ["organization_id", "allocation_date"]
+    )
     op.create_index(
         "budget_actual_allocations_booking_unique",
         "budget_actual_allocations",
@@ -133,7 +147,8 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE TRIGGER budget_actual_allocations_refresh_line AFTER INSERT OR UPDATE OR DELETE ON budget_actual_allocations
+        CREATE TRIGGER budget_actual_allocations_refresh_line
+        AFTER INSERT OR UPDATE OR DELETE ON budget_actual_allocations
         FOR EACH ROW EXECUTE FUNCTION public.postpilot_refresh_budget_line_actual()
         """
     )
@@ -165,5 +180,13 @@ def downgrade() -> None:
     op.drop_table("budget_actual_allocations")
     op.drop_constraint("budget_lines_planned_unit_check", "budget_lines", type_="check")
     op.drop_constraint("budget_lines_estimate_status_check", "budget_lines", type_="check")
-    for column in ("manual_override_reason", "estimate_status", "resource_reference", "rate_source", "rate_snapshot", "planned_unit", "planned_quantity"):
+    for column in (
+        "manual_override_reason",
+        "estimate_status",
+        "resource_reference",
+        "rate_source",
+        "rate_snapshot",
+        "planned_unit",
+        "planned_quantity",
+    ):
         op.drop_column("budget_lines", column)

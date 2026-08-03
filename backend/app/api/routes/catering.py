@@ -161,7 +161,11 @@ async def catering_resources(actor: CurrentActor, session: DbSession) -> dict[st
     return {
         "rooms": [{"id": str(row.id), "name": row.name, "type": row.type} for row in room_rows.all()],
         "active_booking": (
-            {"id": str(active_booking.id), "room_id": str(active_booking.room_id), "room_name": active_booking.room_name}
+            {
+                "id": str(active_booking.id),
+                "room_id": str(active_booking.room_id),
+                "room_name": active_booking.room_name,
+            }
             if active_booking
             else None
         ),
@@ -197,7 +201,9 @@ async def create_catering_request(
         ]
         if actor.active_organization and actor.active_organization.role == "client":
             if not person:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Client account is not linked to a person.")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="Client account is not linked to a person."
+                )
             booking_conditions.extend(
                 [
                     bookings.c.starts_at <= datetime.now(UTC),
@@ -207,17 +213,16 @@ async def create_catering_request(
                 ]
             )
         booking = (
-            await session.execute(
-                select(bookings.c.id, bookings.c.room_id)
-                .where(and_(*booking_conditions))
-                .limit(1)
-            )
+            await session.execute(select(bookings.c.id, bookings.c.room_id).where(and_(*booking_conditions)).limit(1))
         ).first()
         if not booking:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
     if payload.work_order_id:
         if not person or (actor.active_organization and actor.active_organization.role == "client"):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only assigned internal workers can charge catering to a work order.")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only assigned internal workers can charge catering to a work order.",
+            )
         work_order = (
             await session.execute(
                 select(post_work_orders.c.id, post_work_orders.c.episode_id)
@@ -305,7 +310,13 @@ async def update_catering_request(
                     bookings.c.organization_id == actor.organization_id,
                 ),
             )
-            .outerjoin(post_work_orders, and_(post_work_orders.c.id == catering_requests.c.work_order_id, post_work_orders.c.organization_id == actor.organization_id))
+            .outerjoin(
+                post_work_orders,
+                and_(
+                    post_work_orders.c.id == catering_requests.c.work_order_id,
+                    post_work_orders.c.organization_id == actor.organization_id,
+                ),
+            )
             .where(
                 and_(catering_requests.c.id == request_id, catering_requests.c.organization_id == actor.organization_id)
             )
@@ -342,7 +353,10 @@ async def update_catering_request(
             await session.execute(
                 select(episodes.c.id, episodes.c.season_id, seasons.c.show_id)
                 .select_from(episodes)
-                .join(seasons, and_(seasons.c.id == episodes.c.season_id, seasons.c.organization_id == actor.organization_id))
+                .join(
+                    seasons,
+                    and_(seasons.c.id == episodes.c.season_id, seasons.c.organization_id == actor.organization_id),
+                )
                 .join(shows, and_(shows.c.id == seasons.c.show_id, shows.c.organization_id == actor.organization_id))
                 .where(and_(episodes.c.id == episode_id, episodes.c.organization_id == actor.organization_id))
                 .limit(1)
@@ -350,9 +364,9 @@ async def update_catering_request(
         ).first()
         if not episode_scope:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found.")
-        billed_amount = (
-            payload.actual_cost * (Decimal(1) + markup_percent / Decimal(100))
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        billed_amount = (payload.actual_cost * (Decimal(1) + markup_percent / Decimal(100))).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
         # Catering stays operational until the runner records the receipt.
         # At that point it creates/updates one live client billable and one
         # actual episode budget line, exactly like the historical Node route.
@@ -442,13 +456,15 @@ async def update_catering_request(
             action="catering.cost_recorded" if payload.actual_cost is not None else f"catering.{payload.status}",
             entity_type="catering_request",
             entity_id=request_id,
-            metadata=json_safe({
-                "actual_cost": payload.actual_cost,
-                "billable_id": str(billable_id) if billable_id else None,
-                "budget_line_id": str(budget_line_id) if budget_line_id else None,
-            }
-            if payload.actual_cost is not None
-            else {}),
+            metadata=json_safe(
+                {
+                    "actual_cost": payload.actual_cost,
+                    "billable_id": str(billable_id) if billable_id else None,
+                    "budget_line_id": str(budget_line_id) if budget_line_id else None,
+                }
+                if payload.actual_cost is not None
+                else {}
+            ),
         )
     )
     await session.commit()

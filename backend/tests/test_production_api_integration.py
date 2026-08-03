@@ -219,7 +219,17 @@ async def _seed_lab(database_url: str, lab: ProductionLab) -> None:
             """,
             str(uuid4()),
             lab.organization_id,
-            json.dumps(["manage_settings", "manage_production", "do_assigned_work", "sign_off_work", "view_all_operations", "manage_qc_delivery", "manage_commercial"]),
+            json.dumps(
+                [
+                    "manage_settings",
+                    "manage_production",
+                    "do_assigned_work",
+                    "sign_off_work",
+                    "view_all_operations",
+                    "manage_qc_delivery",
+                    "manage_commercial",
+                ]
+            ),
             str(uuid4()),
             json.dumps(["do_assigned_work"]),
         )
@@ -531,13 +541,13 @@ def test_new_user_uses_the_password_selected_by_the_tenant_administrator(product
     assert response.status_code == 201, response.text
     user_id = response.json()["id"]
     production_lab.sign_out()
-    assert production_lab.client.post(
-        "/v1/auth/sign-in", json={"email": email, "password": password}
-    ).status_code == 200
+    assert (
+        production_lab.client.post("/v1/auth/sign-in", json={"email": email, "password": password}).status_code == 200
+    )
     production_lab.sign_out()
-    assert production_lab.client.post(
-        "/v1/auth/sign-in", json={"email": email, "password": "password"}
-    ).status_code == 401
+    assert (
+        production_lab.client.post("/v1/auth/sign-in", json={"email": email, "password": "password"}).status_code == 401
+    )
 
     production_lab.execute("DELETE FROM auth_login_attempts WHERE email = $1", email)
     production_lab.execute("DELETE FROM users WHERE id = $1", user_id)
@@ -557,9 +567,12 @@ def test_user_creation_validates_passwords_and_never_audits_the_secret(productio
 
     assert production_lab.client.post("/v1/settings/users", json=base).status_code == 422
     assert production_lab.client.post("/v1/settings/users", json={**base, "password": "short"}).status_code == 422
-    assert production_lab.fetchval(
-        "SELECT count(*) FROM organization_members WHERE organization_id = $1", production_lab.data.organization_id
-    ) == before
+    assert (
+        production_lab.fetchval(
+            "SELECT count(*) FROM organization_members WHERE organization_id = $1", production_lab.data.organization_id
+        )
+        == before
+    )
 
     password = "never-store-this-password"
     created = production_lab.client.post("/v1/settings/users", json={**base, "password": password})
@@ -601,8 +614,11 @@ def test_user_access_creation_is_permissioned_duplicate_safe_and_preserves_globa
     forbidden = production_lab.client.post(
         "/v1/settings/users",
         json={
-            "name": "Shared Account", "email": email, "password": "attempted-overwrite",
-            "person_role": "production_viewer", "membership_role": "member",
+            "name": "Shared Account",
+            "email": email,
+            "password": "attempted-overwrite",
+            "person_role": "production_viewer",
+            "membership_role": "member",
         },
     )
     assert forbidden.status_code == 403
@@ -611,31 +627,39 @@ def test_user_access_creation_is_permissioned_duplicate_safe_and_preserves_globa
     created = production_lab.client.post(
         "/v1/settings/users",
         json={
-            "name": "Shared Account", "email": email, "password": "attempted-overwrite",
-            "person_role": "production_viewer", "membership_role": "member",
+            "name": "Shared Account",
+            "email": email,
+            "password": "attempted-overwrite",
+            "person_role": "production_viewer",
+            "membership_role": "member",
         },
     )
     assert created.status_code == 201, created.text
     duplicate = production_lab.client.post(
         "/v1/settings/users",
         json={
-            "name": "Changed Name", "email": email, "password": "another-attempt",
-            "person_role": "production_viewer", "membership_role": "member",
+            "name": "Changed Name",
+            "email": email,
+            "password": "another-attempt",
+            "person_role": "production_viewer",
+            "membership_role": "member",
         },
     )
     assert duplicate.status_code == 409
-    assert production_lab.fetchval(
-        "SELECT count(*) FROM organization_members WHERE user_id = $1", user_id
-    ) == 2
+    assert production_lab.fetchval("SELECT count(*) FROM organization_members WHERE user_id = $1", user_id) == 2
 
     production_lab.sign_out()
-    assert production_lab.client.post(
-        "/v1/auth/sign-in", json={"email": email, "password": original_password}
-    ).status_code == 200
+    assert (
+        production_lab.client.post("/v1/auth/sign-in", json={"email": email, "password": original_password}).status_code
+        == 200
+    )
     production_lab.sign_out()
-    assert production_lab.client.post(
-        "/v1/auth/sign-in", json={"email": email, "password": "attempted-overwrite"}
-    ).status_code == 401
+    assert (
+        production_lab.client.post(
+            "/v1/auth/sign-in", json={"email": email, "password": "attempted-overwrite"}
+        ).status_code
+        == 401
+    )
     production_lab.execute("DELETE FROM auth_login_attempts WHERE email = $1", email)
     production_lab.execute("DELETE FROM users WHERE id = $1", user_id)
 
@@ -662,28 +686,31 @@ def test_booking_client_accounts_are_tenant_safe_permissioned_and_can_sign_in(pr
     assert created.status_code == 201, created.text
     user_id = production_lab.fetchval("SELECT id FROM users WHERE email = $1", email)
     assert user_id
-    assert production_lab.fetchval(
-        "SELECT count(*) FROM episode_team_assignments eta JOIN people p ON p.id = eta.person_id "
-        "WHERE eta.organization_id = $1 AND eta.episode_id = $2 AND p.user_id = $3",
-        production_lab.data.organization_id,
-        episode_id,
-        user_id,
-    ) == 1
+    assert (
+        production_lab.fetchval(
+            "SELECT count(*) FROM episode_team_assignments eta JOIN people p ON p.id = eta.person_id "
+            "WHERE eta.organization_id = $1 AND eta.episode_id = $2 AND p.user_id = $3",
+            production_lab.data.organization_id,
+            episode_id,
+            user_id,
+        )
+        == 1
+    )
 
     production_lab.sign_out()
-    assert production_lab.client.post(
-        "/v1/auth/sign-in", json={"email": email, "password": password}
-    ).status_code == 200
+    assert (
+        production_lab.client.post("/v1/auth/sign-in", json={"email": email, "password": password}).status_code == 200
+    )
     listed = production_lab.client.get("/v1/episodes")
     assert listed.status_code == 200
     assert [item["id"] for item in listed.json()["episodes"]] == [episode_id]
-    assert production_lab.client.get(
-        f"/v1/episodes/{production_lab.data.foreign_episode_id}/workspace"
-    ).status_code == 404
+    assert (
+        production_lab.client.get(f"/v1/episodes/{production_lab.data.foreign_episode_id}/workspace").status_code == 404
+    )
     production_lab.sign_out()
-    assert production_lab.client.post(
-        "/v1/auth/sign-in", json={"email": email, "password": "password"}
-    ).status_code == 401
+    assert (
+        production_lab.client.post("/v1/auth/sign-in", json={"email": email, "password": "password"}).status_code == 401
+    )
     production_lab.execute("DELETE FROM auth_login_attempts WHERE email = $1", email)
     production_lab.execute("DELETE FROM users WHERE id = $1", user_id)
 
@@ -721,17 +748,19 @@ def test_adding_an_existing_global_account_as_a_client_preserves_its_password(pr
         },
     )
     assert created.status_code == 201, created.text
-    assert production_lab.fetchval(
-        "SELECT count(*) FROM organization_members WHERE user_id = $1", user_id
-    ) == 2
+    assert production_lab.fetchval("SELECT count(*) FROM organization_members WHERE user_id = $1", user_id) == 2
     production_lab.sign_out()
-    assert production_lab.client.post(
-        "/v1/auth/sign-in", json={"email": email, "password": original_password}
-    ).status_code == 200
+    assert (
+        production_lab.client.post("/v1/auth/sign-in", json={"email": email, "password": original_password}).status_code
+        == 200
+    )
     production_lab.sign_out()
-    assert production_lab.client.post(
-        "/v1/auth/sign-in", json={"email": email, "password": "attempted-client-overwrite"}
-    ).status_code == 401
+    assert (
+        production_lab.client.post(
+            "/v1/auth/sign-in", json={"email": email, "password": "attempted-client-overwrite"}
+        ).status_code
+        == 401
+    )
     production_lab.execute("DELETE FROM auth_login_attempts WHERE email = $1", email)
     production_lab.execute("DELETE FROM users WHERE id = $1", user_id)
 
@@ -747,23 +776,27 @@ def test_password_change_requires_current_password_and_revokes_other_sessions(pr
         other_token_hash,
         production_lab.data.manager_user_id,
     )
-    assert production_lab.client.post(
-        "/v1/auth/change-password",
-        json={"current_password": "incorrect", "new_password": "changed-password"},
-    ).status_code == 401
-    assert production_lab.client.post(
-        "/v1/auth/change-password",
-        json={"current_password": "password", "new_password": "password"},
-    ).status_code == 400
+    assert (
+        production_lab.client.post(
+            "/v1/auth/change-password",
+            json={"current_password": "incorrect", "new_password": "changed-password"},
+        ).status_code
+        == 401
+    )
+    assert (
+        production_lab.client.post(
+            "/v1/auth/change-password",
+            json={"current_password": "password", "new_password": "password"},
+        ).status_code
+        == 400
+    )
     changed = production_lab.client.post(
         "/v1/auth/change-password",
         json={"current_password": "password", "new_password": "changed-password"},
     )
     assert changed.status_code == 204, changed.text
     assert production_lab.client.get("/v1/auth/session").status_code == 200
-    assert production_lab.fetchval(
-        "SELECT count(*) FROM api_sessions WHERE token_hash = $1", other_token_hash
-    ) == 0
+    assert production_lab.fetchval("SELECT count(*) FROM api_sessions WHERE token_hash = $1", other_token_hash) == 0
     activity_metadata = production_lab.fetchval(
         "SELECT metadata::text FROM activity_log WHERE organization_id = $1 "
         "AND entity_id = $2 AND action = 'auth.password_changed' ORDER BY created_at DESC LIMIT 1",
@@ -773,12 +806,18 @@ def test_password_change_requires_current_password_and_revokes_other_sessions(pr
     assert json.loads(str(activity_metadata)) == {"other_sessions_revoked": True}
 
     production_lab.sign_out()
-    assert production_lab.client.post(
-        "/v1/auth/sign-in", json={"email": production_lab.data.manager_email, "password": "password"}
-    ).status_code == 401
-    assert production_lab.client.post(
-        "/v1/auth/sign-in", json={"email": production_lab.data.manager_email, "password": "changed-password"}
-    ).status_code == 200
+    assert (
+        production_lab.client.post(
+            "/v1/auth/sign-in", json={"email": production_lab.data.manager_email, "password": "password"}
+        ).status_code
+        == 401
+    )
+    assert (
+        production_lab.client.post(
+            "/v1/auth/sign-in", json={"email": production_lab.data.manager_email, "password": "changed-password"}
+        ).status_code
+        == 200
+    )
     production_lab.execute("DELETE FROM auth_login_attempts WHERE email = $1", production_lab.data.manager_email)
 
 
@@ -875,9 +914,7 @@ def test_client_episode_workspace_is_complete_for_an_assigned_episode_and_foreig
             "actual_amount": "125.00",
         }
     ]
-    assert [(item["action"], item["metadata"]) for item in payload["activity"]] == [
-        ("workflow.stage_completed", {})
-    ]
+    assert [(item["action"], item["metadata"]) for item in payload["activity"]] == [("workflow.stage_completed", {})]
     assert {item["person_id"] for item in payload["episode_team"]} >= {production_lab.data.client_person_id}
 
     direct = production_lab.client.get(f"/v1/episodes/{episode_id}")
@@ -1110,10 +1147,13 @@ def test_episode_team_signer_is_role_matched_and_used_for_workflow_submission(
     team = production_lab.client.get(f"/v1/episodes/{episode['id']}/team")
     assert team.status_code == 200, team.text
     assert "editor" in team.json()["eligible_signer_roles"]
-    assert production_lab.client.patch(
-        f"/v1/episodes/{episode['id']}/team",
-        json={"assignment_id": first_assignment["id"], "is_signer": True},
-    ).status_code == 200
+    assert (
+        production_lab.client.patch(
+            f"/v1/episodes/{episode['id']}/team",
+            json={"assignment_id": first_assignment["id"], "is_signer": True},
+        ).status_code
+        == 200
+    )
     # This mirrors an approval created by the short-lived arbitrary-slot
     # implementation: it has a rule but no recorded role snapshot yet.
     production_lab.execute(
@@ -1131,10 +1171,13 @@ def test_episode_team_signer_is_role_matched_and_used_for_workflow_submission(
         production_lab.data.editor_person_id,
     )
     # Selecting another editor transfers the single role-level signer tick.
-    assert production_lab.client.patch(
-        f"/v1/episodes/{episode['id']}/team",
-        json={"assignment_id": second_assignment_id, "is_signer": True},
-    ).status_code == 200
+    assert (
+        production_lab.client.patch(
+            f"/v1/episodes/{episode['id']}/team",
+            json={"assignment_id": second_assignment_id, "is_signer": True},
+        ).status_code
+        == 200
+    )
     signer_flags = production_lab.fetchrow(
         """
         SELECT
@@ -1168,10 +1211,13 @@ def test_episode_team_signer_is_role_matched_and_used_for_workflow_submission(
     )
     assert wrong_role.status_code == 409
 
-    assert production_lab.client.post(
-        f"/v1/episodes/{episode['id']}",
-        json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "start"},
-    ).status_code == 200
+    assert (
+        production_lab.client.post(
+            f"/v1/episodes/{episode['id']}",
+            json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "start"},
+        ).status_code
+        == 200
+    )
     submit = production_lab.client.post(
         f"/v1/episodes/{episode['id']}",
         json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "submit"},
@@ -1209,7 +1255,8 @@ def test_signer_lifecycle_requires_the_checked_matching_people_and_advances_the_
     production_lab.execute(
         """
         INSERT INTO organization_role_policies (id, organization_id, role, label, permissions)
-        VALUES ($1, $2, 'production_supervisor', 'Production supervisor', '["do_assigned_work", "sign_off_work"]'::jsonb)
+        VALUES ($1, $2, 'production_supervisor', 'Production supervisor',
+                '["do_assigned_work", "sign_off_work"]'::jsonb)
         """,
         str(uuid4()),
         production_lab.data.organization_id,
@@ -1281,13 +1328,19 @@ def test_signer_lifecycle_requires_the_checked_matching_people_and_advances_the_
     )
 
     # One checked role is insufficient: the second required role blocks submit.
-    assert production_lab.client.patch(
-        f"/v1/episodes/{episode['id']}/team", json={"assignment_id": manager_assignment, "is_signer": True}
-    ).status_code == 200
-    assert production_lab.client.post(
-        f"/v1/episodes/{episode['id']}",
-        json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "start"},
-    ).status_code == 200
+    assert (
+        production_lab.client.patch(
+            f"/v1/episodes/{episode['id']}/team", json={"assignment_id": manager_assignment, "is_signer": True}
+        ).status_code
+        == 200
+    )
+    assert (
+        production_lab.client.post(
+            f"/v1/episodes/{episode['id']}",
+            json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "start"},
+        ).status_code
+        == 200
+    )
     missing = production_lab.client.post(
         f"/v1/episodes/{episode['id']}",
         json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "submit"},
@@ -1295,27 +1348,43 @@ def test_signer_lifecycle_requires_the_checked_matching_people_and_advances_the_
     assert missing.status_code == 409 and "production supervisor" in missing.json()["detail"]
     assert production_lab.fetchval("SELECT workflow_status FROM episodes WHERE id = $1", episode["id"]) == "in_progress"
 
-    assert production_lab.client.patch(
-        f"/v1/episodes/{episode['id']}/team", json={"assignment_id": supervisor_assignment, "is_signer": True}
-    ).status_code == 200
-    assert production_lab.client.post(
-        f"/v1/episodes/{episode['id']}",
-        json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "submit"},
-    ).status_code == 200
+    assert (
+        production_lab.client.patch(
+            f"/v1/episodes/{episode['id']}/team", json={"assignment_id": supervisor_assignment, "is_signer": True}
+        ).status_code
+        == 200
+    )
+    assert (
+        production_lab.client.post(
+            f"/v1/episodes/{episode['id']}",
+            json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "submit"},
+        ).status_code
+        == 200
+    )
 
     # Removing a signer removes their live approval assignment. Selecting an
     # alternate of the same role transfers only that role's pending gate.
-    assert production_lab.client.patch(
-        f"/v1/episodes/{episode['id']}/team", json={"assignment_id": manager_assignment, "is_signer": False}
-    ).status_code == 200
-    assert production_lab.fetchval(
-        "SELECT required_person_id::text FROM episode_workflow_approvals WHERE episode_id = $1 AND approval_rule_id = $2",
-        episode["id"],
-        manager_rule,
-    ) is None
-    assert production_lab.client.patch(
-        f"/v1/episodes/{episode['id']}/team", json={"assignment_id": alternate_assignment, "is_signer": True}
-    ).status_code == 200
+    assert (
+        production_lab.client.patch(
+            f"/v1/episodes/{episode['id']}/team", json={"assignment_id": manager_assignment, "is_signer": False}
+        ).status_code
+        == 200
+    )
+    assert (
+        production_lab.fetchval(
+            "SELECT required_person_id::text FROM episode_workflow_approvals "
+            "WHERE episode_id = $1 AND approval_rule_id = $2",
+            episode["id"],
+            manager_rule,
+        )
+        is None
+    )
+    assert (
+        production_lab.client.patch(
+            f"/v1/episodes/{episode['id']}/team", json={"assignment_id": alternate_assignment, "is_signer": True}
+        ).status_code
+        == 200
+    )
 
     production_lab.sign_in(alternate_email)
     alternate_inbox = production_lab.client.get("/v1/approvals")
@@ -1335,14 +1404,17 @@ def test_signer_lifecycle_requires_the_checked_matching_people_and_advances_the_
     assert wrong_signer.status_code == 403
 
     production_lab.sign_in(alternate_email)
-    assert production_lab.client.post(
-        f"/v1/episodes/{episode['id']}",
-        json={
-            "workflow_stage_id": production_lab.data.workflow_stage_id,
-            "approval_rule_id": manager_rule,
-            "action": "sign_off",
-        },
-    ).status_code == 200
+    assert (
+        production_lab.client.post(
+            f"/v1/episodes/{episode['id']}",
+            json={
+                "workflow_stage_id": production_lab.data.workflow_stage_id,
+                "approval_rule_id": manager_rule,
+                "action": "sign_off",
+            },
+        ).status_code
+        == 200
+    )
     production_lab.sign_in(supervisor_email)
     completed = production_lab.client.post(
         f"/v1/episodes/{episode['id']}",
@@ -1430,10 +1502,13 @@ def test_optional_sign_off_does_not_block_workflow_submission(production_lab: Pr
         production_lab.data.organization_id,
         production_lab.data.workflow_stage_id,
     )
-    assert production_lab.client.post(
-        f"/v1/episodes/{episode['id']}",
-        json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "start"},
-    ).status_code == 200
+    assert (
+        production_lab.client.post(
+            f"/v1/episodes/{episode['id']}",
+            json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "start"},
+        ).status_code
+        == 200
+    )
     submitted = production_lab.client.post(
         f"/v1/episodes/{episode['id']}",
         json={"workflow_stage_id": production_lab.data.workflow_stage_id, "action": "submit"},
@@ -1487,7 +1562,8 @@ def test_workflow_settings_api_validates_roles_persists_the_order_and_protects_t
     )
     assert rule and dict(rule) == {"approver_role": "production_manager", "label": "Production manager sign-off"}
     positions = production_lab.fetchrow(
-        "SELECT min(position) AS first_position, max(position) AS last_position FROM workflow_stages WHERE workflow_id = $1",
+        "SELECT min(position) AS first_position, max(position) AS last_position "
+        "FROM workflow_stages WHERE workflow_id = $1",
         workflow["id"],
     )
     assert positions and dict(positions) == {"first_position": 1, "last_position": 2}
@@ -1524,7 +1600,8 @@ def test_workflow_settings_api_validates_roles_persists_the_order_and_protects_t
     )
     assert multiple_terminals.status_code == 400
     no_qc = production_lab.client.patch(
-        f"/v1/workflows/{workflow['id']}", json={**payload, "stages": [{**item, "requires_qc_pass": False} for item in stages]}
+        f"/v1/workflows/{workflow['id']}",
+        json={**payload, "stages": [{**item, "requires_qc_pass": False} for item in stages]},
     )
     assert no_qc.status_code == 409
     delete_referenced = production_lab.client.patch(
@@ -1541,7 +1618,10 @@ def test_workflow_settings_api_validates_roles_persists_the_order_and_protects_t
         json={**payload, "rules": [{**payload["rules"][0], "approver_role": "client"}]},
     )
     assert client_rule.status_code == 200
-    assert production_lab.fetchval("SELECT label FROM workflow_stage_approval_rules WHERE id = $1", rule_id) == "Client sign-off"
+    assert (
+        production_lab.fetchval("SELECT label FROM workflow_stage_approval_rules WHERE id = $1", rule_id)
+        == "Client sign-off"
+    )
 
     production_lab.sign_in_as_viewer()
     assert production_lab.client.patch(f"/v1/workflows/{workflow['id']}", json=payload).status_code == 403
@@ -1563,7 +1643,19 @@ def test_role_settings_cannot_remove_a_workflow_role_and_renaming_updates_its_la
         production_lab.data.workflow_stage_id,
     )
     base_policies = [
-        {"role": "production_manager", "label": "Production manager", "permissions": ["manage_settings", "manage_production", "do_assigned_work", "sign_off_work", "view_all_operations", "manage_qc_delivery", "manage_commercial"]},
+        {
+            "role": "production_manager",
+            "label": "Production manager",
+            "permissions": [
+                "manage_settings",
+                "manage_production",
+                "do_assigned_work",
+                "sign_off_work",
+                "view_all_operations",
+                "manage_qc_delivery",
+                "manage_commercial",
+            ],
+        },
         {"role": "production_viewer", "label": "Production viewer", "permissions": ["do_assigned_work"]},
         {"role": "editor", "label": "Editor", "permissions": ["do_assigned_work", "sign_off_work"]},
         {"role": "colourist", "label": "Colourist", "permissions": ["do_assigned_work", "sign_off_work"]},
@@ -1571,9 +1663,13 @@ def test_role_settings_cannot_remove_a_workflow_role_and_renaming_updates_its_la
     ]
     renamed = production_lab.client.patch("/v1/settings/role-policies", json={"policies": base_policies})
     assert renamed.status_code == 200, renamed.text
-    assert production_lab.fetchval("SELECT label FROM workflow_stage_approval_rules WHERE id = $1", rule_id) == "Final creative approver sign-off"
+    assert (
+        production_lab.fetchval("SELECT label FROM workflow_stage_approval_rules WHERE id = $1", rule_id)
+        == "Final creative approver sign-off"
+    )
     removal = production_lab.client.patch(
-        "/v1/settings/role-policies", json={"policies": [item for item in base_policies if item["role"] != "approval_only"]}
+        "/v1/settings/role-policies",
+        json={"policies": [item for item in base_policies if item["role"] != "approval_only"]},
     )
     assert removal.status_code == 409
     assert "workflow sign-offs" in removal.json()["detail"]

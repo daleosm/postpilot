@@ -558,7 +558,12 @@ episode_budget_estimate_items = Table(
     metadata,
     Column("id", UUID(as_uuid=False), primary_key=True),
     Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
-    Column("estimate_id", UUID(as_uuid=False), ForeignKey("episode_budget_estimates.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "estimate_id",
+        UUID(as_uuid=False),
+        ForeignKey("episode_budget_estimates.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
     # Deliberately not an FK: a later revision can remove a working budget
     # line without making an approved historical estimate disappear.
     Column("source_budget_line_id", UUID(as_uuid=False)),

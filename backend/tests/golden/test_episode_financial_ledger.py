@@ -52,9 +52,7 @@ def _project_actual(item: dict[str, object]) -> dict[str, object]:
         "source_type": item["source_type"],
         "amount": item["amount"],
         "category": item["budget_item"]["category"],
-        "reference": "booking-actual"
-        if item["source_type"] == "booking"
-        else item["reference"],
+        "reference": "booking-actual" if item["source_type"] == "booking" else item["reference"],
     }
 
 
@@ -202,10 +200,13 @@ def test_golden_episode_ledger_and_invoice_match_the_checked_in_penny_fixture(
     assert work_order.status_code == 201, work_order.text
     work_order_id = work_order.json()["id"]
     assert lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}).status_code == 200
-    assert lab.client.patch(
-        f"/v1/work-orders/{work_order_id}",
-        json={"status": "in_progress", "approval_note": "Golden change approved."},
-    ).status_code == 200
+    assert (
+        lab.client.patch(
+            f"/v1/work-orders/{work_order_id}",
+            json={"status": "in_progress", "approval_note": "Golden change approved."},
+        ).status_code
+        == 200
+    )
     assert lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "complete"}).status_code == 200
     billable = lab.client.post(
         f"/v1/billing/work-orders/{work_order_id}/billables",

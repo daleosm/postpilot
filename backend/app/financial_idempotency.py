@@ -92,9 +92,7 @@ async def financial_idempotency_middleware(
             financial_idempotency_keys.c.idempotency_key == key,
         )
         await idempotency_session.execute(
-            delete(financial_idempotency_keys).where(
-                and_(lookup, financial_idempotency_keys.c.expires_at < now)
-            )
+            delete(financial_idempotency_keys).where(and_(lookup, financial_idempotency_keys.c.expires_at < now))
         )
         inserted = await idempotency_session.execute(
             pg_insert(financial_idempotency_keys)

@@ -55,9 +55,9 @@ async def record_budget_actual(
 
     line = (
         await session.execute(
-            select(budget_lines.c.id).where(
-                and_(budget_lines.c.id == budget_line_id, budget_lines.c.organization_id == organization_id)
-            ).limit(1)
+            select(budget_lines.c.id)
+            .where(and_(budget_lines.c.id == budget_line_id, budget_lines.c.organization_id == organization_id))
+            .limit(1)
         )
     ).first()
     if not line:
@@ -94,13 +94,15 @@ async def record_budget_actual(
                 select(
                     budget_actual_allocations.c.id,
                     budget_actual_allocations.c.budget_line_id,
-                ).where(
+                )
+                .where(
                     and_(
                         budget_actual_allocations.c.organization_id == organization_id,
                         budget_actual_allocations.c.source_type.in_(source_types),
                         source_column == source_id,
                     )
-                ).limit(1)
+                )
+                .limit(1)
             )
         ).first()
     elif source_type == "manual_adjustment" and source_reference:
@@ -109,14 +111,16 @@ async def record_budget_actual(
                 select(
                     budget_actual_allocations.c.id,
                     budget_actual_allocations.c.budget_line_id,
-                ).where(
+                )
+                .where(
                     and_(
                         budget_actual_allocations.c.organization_id == organization_id,
                         budget_actual_allocations.c.budget_line_id == budget_line_id,
                         budget_actual_allocations.c.source_type == source_type,
                         budget_actual_allocations.c.source_reference == source_reference,
                     )
-                ).limit(1)
+                )
+                .limit(1)
             )
         ).first()
     if existing:

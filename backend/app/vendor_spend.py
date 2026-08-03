@@ -29,14 +29,16 @@ async def external_budget_line_for_episode(
         )
     line = (
         await session.execute(
-            select(budget_lines).where(
+            select(budget_lines)
+            .where(
                 and_(
                     budget_lines.c.id == budget_line_id,
                     budget_lines.c.organization_id == organization_id,
                     budget_lines.c.episode_id == episode_id,
                     budget_lines.c.external_cost.is_(True),
                 )
-            ).limit(1)
+            )
+            .limit(1)
         )
     ).first()
     if not line:

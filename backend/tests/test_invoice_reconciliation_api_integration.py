@@ -124,9 +124,7 @@ def create_confirmed_booking(lab: ProductionApiLab, current_episode_id: str, bud
     return created.json()["id"]
 
 
-def approve_client_change(
-    lab: ProductionApiLab, current_episode_id: str, booking_id: str, client_po_id: str
-) -> str:
+def approve_client_change(lab: ProductionApiLab, current_episode_id: str, booking_id: str, client_po_id: str) -> str:
     created = lab.client.post(
         "/v1/work-orders",
         json={
@@ -188,11 +186,14 @@ def test_full_invoice_lifecycle_reconciles_every_live_ledger_to_the_penny(produc
     )
     assert actual.status_code == 201, actual.text
     assert money(actual.json()["cost"]["actual_hours"]) == Decimal("2.75")
-    assert production_lab.fetchval(
-        "SELECT amount::text FROM budget_actual_allocations WHERE organization_id = $1 AND booking_id = $2",
-        production_lab.data.organization_id,
-        booking_id,
-    ) == "350.27"
+    assert (
+        production_lab.fetchval(
+            "SELECT amount::text FROM budget_actual_allocations WHERE organization_id = $1 AND booking_id = $2",
+            production_lab.data.organization_id,
+            booking_id,
+        )
+        == "350.27"
+    )
 
     # Moving the planned window afterwards cannot duplicate or alter confirmed actuals.
     moved_booking = production_lab.client.patch(
@@ -234,7 +235,10 @@ def test_full_invoice_lifecycle_reconciles_every_live_ledger_to_the_penny(produc
     )
     assert vendor_po.status_code == 201, vendor_po.text
     vendor_po_id = vendor_po.json()["id"]
-    assert production_lab.client.patch(f"/v1/purchase-orders/{vendor_po_id}", json={"status": "approved"}).status_code == 200
+    assert (
+        production_lab.client.patch(f"/v1/purchase-orders/{vendor_po_id}", json={"status": "approved"}).status_code
+        == 200
+    )
     vendor_budget = production_lab.client.post(
         "/v1/budget/lines",
         json={
@@ -282,7 +286,11 @@ def test_full_invoice_lifecycle_reconciles_every_live_ledger_to_the_penny(produc
     retry_invoice = production_lab.client.post("/v1/billing/invoices", json={"episode_id": current_episode_id})
     assert issued.status_code == 201, issued.text
     assert retry_invoice.status_code == 409
-    assert (money(issued.json()["subtotal_amount"]), money(issued.json()["tax_amount"]), money(issued.json()["total_amount"])) == (
+    assert (
+        money(issued.json()["subtotal_amount"]),
+        money(issued.json()["tax_amount"]),
+        money(issued.json()["total_amount"]),
+    ) == (
         Decimal("19.99"),
         Decimal("4.00"),
         Decimal("23.99"),
@@ -301,14 +309,19 @@ def test_full_invoice_lifecycle_reconciles_every_live_ledger_to_the_penny(produc
     assert money(payload["invoice"]["subtotal_amount"]) + money(payload["invoice"]["tax_amount"]) == money(
         payload["invoice"]["total_amount"]
     )
-    assert production_lab.fetchval(
-        "SELECT count(*) FROM client_invoice_items WHERE organization_id = $1 AND client_invoice_id = $2",
-        production_lab.data.organization_id,
-        invoice_id,
-    ) == 1
+    assert (
+        production_lab.fetchval(
+            "SELECT count(*) FROM client_invoice_items WHERE organization_id = $1 AND client_invoice_id = $2",
+            production_lab.data.organization_id,
+            invoice_id,
+        )
+        == 1
+    )
 
 
-def test_vendor_invoice_correction_and_billable_void_reconcile_without_duplicate_rows(production_lab: ProductionApiLab) -> None:
+def test_vendor_invoice_correction_and_billable_void_reconcile_without_duplicate_rows(
+    production_lab: ProductionApiLab,
+) -> None:
     production_lab.sign_in_as_manager()
     current_episode_id = episode_id(production_lab)
     vendor_id = make_vendor(production_lab)
@@ -327,7 +340,12 @@ def test_vendor_invoice_correction_and_billable_void_reconcile_without_duplicate
     assert production_lab.client.patch(f"/v1/purchase-orders/{po_id}", json={"status": "approved"}).status_code == 200
     line = production_lab.client.post(
         "/v1/budget/lines",
-        json={"episode_id": current_episode_id, "category": "Vendor VFX", "external_cost": True, "budgeted_amount": "1000.00"},
+        json={
+            "episode_id": current_episode_id,
+            "category": "Vendor VFX",
+            "external_cost": True,
+            "budgeted_amount": "1000.00",
+        },
     )
     assert line.status_code == 201
     recorded = production_lab.client.post(
@@ -353,9 +371,12 @@ def test_vendor_invoice_correction_and_billable_void_reconcile_without_duplicate
     counts = production_lab.fetchrow(
         """
         SELECT
-          (SELECT count(*)::int FROM budget_actual_allocations WHERE organization_id = $1 AND vendor_invoice_id = $2) AS actual_count,
-          (SELECT count(*)::int FROM purchase_order_allocations WHERE organization_id = $1 AND vendor_invoice_id = $2) AS po_count,
-          (SELECT amount::text FROM budget_actual_allocations WHERE organization_id = $1 AND vendor_invoice_id = $2) AS actual_amount
+          (SELECT count(*)::int FROM budget_actual_allocations
+           WHERE organization_id = $1 AND vendor_invoice_id = $2) AS actual_count,
+          (SELECT count(*)::int FROM purchase_order_allocations
+           WHERE organization_id = $1 AND vendor_invoice_id = $2) AS po_count,
+          (SELECT amount::text FROM budget_actual_allocations
+           WHERE organization_id = $1 AND vendor_invoice_id = $2) AS actual_amount
         """,
         production_lab.data.organization_id,
         recorded.json()["invoice_id"],
@@ -389,7 +410,8 @@ def test_vendor_invoice_correction_and_billable_void_reconcile_without_duplicate
     assert readiness.status_code == 200
     assert readiness.json()["ready_to_issue"] is False
     remaining_commitment = production_lab.fetchval(
-        "SELECT count(*) FROM client_purchase_order_allocations WHERE organization_id = $1 AND client_purchase_order_id = $2",
+        "SELECT count(*) FROM client_purchase_order_allocations "
+        "WHERE organization_id = $1 AND client_purchase_order_id = $2",
         production_lab.data.organization_id,
         client_po_id,
     )
@@ -436,7 +458,9 @@ def test_export_reconciliation_blocks_tampered_source_and_cross_tenant_ids(produ
     assert blocked_export.status_code == 409
 
     foreign_invoice = production_lab.client.get(f"/v1/billing/invoices/{uuid4()}/export-readiness")
-    foreign_episode = production_lab.client.post("/v1/billing/invoices", json={"episode_id": production_lab.data.foreign_episode_id})
+    foreign_episode = production_lab.client.post(
+        "/v1/billing/invoices", json={"episode_id": production_lab.data.foreign_episode_id}
+    )
     assert foreign_invoice.status_code == foreign_episode.status_code == 404
 
 
@@ -473,11 +497,21 @@ def test_moving_uninvoiced_vendor_work_rehomes_its_single_commitment_once(
     assert production_lab.client.patch(f"/v1/purchase-orders/{po_id}", json={"status": "approved"}).status_code == 200
     old_line = production_lab.client.post(
         "/v1/budget/lines",
-        json={"episode_id": old_episode_id, "category": "External VFX", "external_cost": True, "budgeted_amount": "100.00"},
+        json={
+            "episode_id": old_episode_id,
+            "category": "External VFX",
+            "external_cost": True,
+            "budgeted_amount": "100.00",
+        },
     )
     new_line = production_lab.client.post(
         "/v1/budget/lines",
-        json={"episode_id": new_episode_id, "category": "External VFX", "external_cost": True, "budgeted_amount": "100.00"},
+        json={
+            "episode_id": new_episode_id,
+            "category": "External VFX",
+            "external_cost": True,
+            "budgeted_amount": "100.00",
+        },
     )
     assert old_line.status_code == new_line.status_code == 201
     work_order = production_lab.client.post(
@@ -495,7 +529,12 @@ def test_moving_uninvoiced_vendor_work_rehomes_its_single_commitment_once(
     )
     assert work_order.status_code == 201, work_order.text
     work_order_id = work_order.json()["id"]
-    assert production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}).status_code == 200
+    assert (
+        production_lab.client.patch(
+            f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}
+        ).status_code
+        == 200
+    )
     approved = production_lab.client.patch(
         f"/v1/work-orders/{work_order_id}", json={"status": "in_progress", "approval_note": "Vendor scope approved."}
     )

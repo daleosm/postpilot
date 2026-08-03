@@ -74,7 +74,9 @@ def test_estimate_overview_obeys_actual_forecast_and_variance_equations(producti
     assert (remaining_planned, forecast, variance) == (Decimal("66.68"), Decimal("100.01"), Decimal("0.00"))
 
 
-def test_vendor_po_invoice_retries_remain_single_and_reduce_remaining_authorisation(production_lab: ProductionApiLab) -> None:
+def test_vendor_po_invoice_retries_remain_single_and_reduce_remaining_authorisation(
+    production_lab: ProductionApiLab,
+) -> None:
     production_lab.sign_in_as_manager()
     episode_id = _episode_id(production_lab)
     vendor_id = _vendor(production_lab)
@@ -128,7 +130,9 @@ def test_vendor_po_invoice_retries_remain_single_and_reduce_remaining_authorisat
     assert len([row for row in values["allocations"] if row["allocation_type"] == "vendor_invoice"]) == 1
 
 
-def test_client_po_ledger_reconciles_committed_and_invoiced_values_to_the_penny(production_lab: ProductionApiLab) -> None:
+def test_client_po_ledger_reconciles_committed_and_invoiced_values_to_the_penny(
+    production_lab: ProductionApiLab,
+) -> None:
     production_lab.sign_in_as_manager()
     episode_id = _episode_id(production_lab)
     po = production_lab.client.post(
@@ -143,7 +147,9 @@ def test_client_po_ledger_reconciles_committed_and_invoiced_values_to_the_penny(
     )
     assert po.status_code == 201, po.text
     po_id = po.json()["id"]
-    assert production_lab.client.patch(f"/v1/client-purchase-orders/{po_id}", json={"status": "active"}).status_code == 200
+    assert (
+        production_lab.client.patch(f"/v1/client-purchase-orders/{po_id}", json={"status": "active"}).status_code == 200
+    )
 
     invoice_id = str(uuid4())
     production_lab.execute(

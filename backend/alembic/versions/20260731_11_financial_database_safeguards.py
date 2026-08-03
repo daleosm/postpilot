@@ -93,8 +93,7 @@ def upgrade() -> None:
         (
             "client_invoice_items",
             "client_invoice_items_financial_amounts_check",
-            "quantity > 0 AND unit_amount >= 0 AND amount >= 0 AND "
-            "amount = round(quantity * unit_amount, 2)",
+            "quantity > 0 AND unit_amount >= 0 AND amount >= 0 AND amount = round(quantity * unit_amount, 2)",
         ),
         (
             "post_work_orders",

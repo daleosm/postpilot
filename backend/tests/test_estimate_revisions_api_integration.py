@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-
 from test_production_api_integration import ProductionApiLab
 
 pytestmark = pytest.mark.skipif(
@@ -46,7 +45,11 @@ def test_initial_estimate_is_immutable_and_revision_forecast_uses_actual_plus_re
 
     original = production_lab.client.post(
         f"/v1/budget/episodes/{episode_id}/estimate-revisions",
-        json={"name": "Original episode estimate", "reason": "Approved baseline for editorial finishing.", "approve_immediately": True},
+        json={
+            "name": "Original episode estimate",
+            "reason": "Approved baseline for editorial finishing.",
+            "approve_immediately": True,
+        },
     )
     assert original.status_code == 201, original.text
     estimate = original.json()["estimate"]
@@ -103,7 +106,8 @@ def test_initial_estimate_is_immutable_and_revision_forecast_uses_actual_plus_re
     assert [revision["status"] for revision in estimate["revisions"]] == ["approved", "superseded"]
 
     action = production_lab.fetchval(
-        "SELECT action FROM activity_log WHERE organization_id = $1 AND entity_id = $2 ORDER BY created_at DESC LIMIT 1",
+        "SELECT action FROM activity_log WHERE organization_id = $1 AND entity_id = $2 "
+        "ORDER BY created_at DESC LIMIT 1",
         production_lab.data.organization_id,
         str(draft_id),
     )

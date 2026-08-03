@@ -95,7 +95,7 @@ def _booking_values(row: object, *, include_commercial_context: bool = False) ->
                 "display_status": getattr(row, "workflow_status", None),
             }
             if getattr(row, "episode_id", None)
-        else None
+            else None
         ),
     }
     if getattr(row, "budget_line_id", None) and getattr(row, "budget_item_label", None):
@@ -392,12 +392,14 @@ async def _validate_references(session: DbSession, actor: CurrentActor, payload:
                     budget_lines.c.id,
                     budget_lines.c.episode_id,
                     budget_lines.c.external_cost,
-                ).where(
+                )
+                .where(
                     and_(
                         budget_lines.c.id == payload.budget_line_id,
                         budget_lines.c.organization_id == actor.organization_id,
                     )
-                ).limit(1)
+                )
+                .limit(1)
             )
         ).first()
         if not item:
@@ -429,12 +431,14 @@ async def _booking_budget_item(session: DbSession, actor: CurrentActor, booking:
                 budget_lines.c.planned_unit,
                 budget_lines.c.currency,
                 budget_lines.c.external_cost,
-            ).where(
+            )
+            .where(
                 and_(
                     budget_lines.c.id == booking.budget_line_id,
                     budget_lines.c.organization_id == actor.organization_id,
                 )
-            ).limit(1)
+            )
+            .limit(1)
         )
     ).first()
     if not item or item.external_cost or str(item.episode_id or "") != str(booking.episode_id or ""):
@@ -827,8 +831,7 @@ async def booking_resources(actor: CurrentActor, session: DbSession) -> dict[str
             {"id": str(row.id), "name": row.name, "role": row.role, "email": row.email} for row in guest_rows
         ],
         "episodes": [
-            {"id": str(row.id), "label": f"{row.show_title} · E{row.number:02d} {row.title}"}
-            for row in episode_rows
+            {"id": str(row.id), "label": f"{row.show_title} · E{row.number:02d} {row.title}"} for row in episode_rows
         ],
         "budget_items": [
             {
@@ -1135,10 +1138,9 @@ async def update_booking(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
     previous = _payload_from_booking(existing)
     await _validate_references(session, actor, payload)
-    if (
-        (existing.actual_starts_at is not None or existing.actual_ends_at is not None)
-        and str(existing.budget_line_id or "") != str(payload.budget_line_id or "")
-    ):
+    if (existing.actual_starts_at is not None or existing.actual_ends_at is not None) and str(
+        existing.budget_line_id or ""
+    ) != str(payload.budget_line_id or ""):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A booking's budget item cannot change after actual time has been confirmed.",

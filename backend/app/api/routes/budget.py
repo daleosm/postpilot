@@ -105,20 +105,20 @@ async def _episode_scope(session: DbSession, actor: CurrentActor, episode_id: st
     return episode
 
 
-async def _vendor_reference(
-    session: DbSession, actor: CurrentActor, vendor_company_id: str | None
-) -> str | None:
+async def _vendor_reference(session: DbSession, actor: CurrentActor, vendor_company_id: str | None) -> str | None:
     if not vendor_company_id:
         return None
     vendor = (
         await session.execute(
-            select(crm_companies.c.id, crm_companies.c.name).where(
+            select(crm_companies.c.id, crm_companies.c.name)
+            .where(
                 and_(
                     crm_companies.c.id == vendor_company_id,
                     crm_companies.c.organization_id == actor.organization_id,
                     crm_companies.c.type == "vendor",
                 )
-            ).limit(1)
+            )
+            .limit(1)
         )
     ).first()
     if not vendor:
@@ -659,13 +659,16 @@ async def _assert_plan_editable(session: DbSession, actor: CurrentActor, episode
 async def _estimate_overview(session: DbSession, actor: CurrentActor, episode_id: str) -> dict[str, object]:
     rows = await _revision_rows(session, actor, episode_id)
     current = next((row for row in rows if row.status == "approved"), None)
-    approved_history = sorted((row for row in rows if row.status in {"approved", "superseded"}), key=lambda row: row.revision_number)
+    approved_history = sorted(
+        (row for row in rows if row.status in {"approved", "superseded"}), key=lambda row: row.revision_number
+    )
     original = approved_history[0] if approved_history else None
     draft = next((row for row in rows if row.status == "draft"), None)
     line_rows = (
         await session.execute(
-            select(budget_lines.c.id, budget_lines.c.budgeted_amount, budget_lines.c.actual_amount, budget_lines.c.currency)
-            .where(
+            select(
+                budget_lines.c.id, budget_lines.c.budgeted_amount, budget_lines.c.actual_amount, budget_lines.c.currency
+            ).where(
                 and_(budget_lines.c.organization_id == actor.organization_id, budget_lines.c.episode_id == episode_id)
             )
         )
@@ -677,8 +680,7 @@ async def _estimate_overview(session: DbSession, actor: CurrentActor, episode_id
     if current:
         current_items = (
             await session.execute(
-                select(episode_budget_estimate_items)
-                .where(
+                select(episode_budget_estimate_items).where(
                     and_(
                         episode_budget_estimate_items.c.organization_id == actor.organization_id,
                         episode_budget_estimate_items.c.estimate_id == current.id,
@@ -693,14 +695,21 @@ async def _estimate_overview(session: DbSession, actor: CurrentActor, episode_id
     if current_items and not draft:
         remaining_planned = sum(
             (
-                max(Decimal(0), decimal_amount(item.planned_amount) - actual_by_line.get(str(item.source_budget_line_id), Decimal(0)))
+                max(
+                    Decimal(0),
+                    decimal_amount(item.planned_amount)
+                    - actual_by_line.get(str(item.source_budget_line_id), Decimal(0)),
+                )
                 for item in current_items
             ),
             Decimal(0),
         )
     else:
         remaining_planned = sum(
-            (max(Decimal(0), decimal_amount(line.budgeted_amount) - decimal_amount(line.actual_amount)) for line in line_rows),
+            (
+                max(Decimal(0), decimal_amount(line.budgeted_amount) - decimal_amount(line.actual_amount))
+                for line in line_rows
+            ),
             Decimal(0),
         )
     forecast = actual + remaining_planned
@@ -736,7 +745,9 @@ async def _estimate_overview(session: DbSession, actor: CurrentActor, episode_id
                 "name": row.name,
                 "reason": row.reason,
                 "status": row.status,
-                "approved_amount": monetary(decimal_amount(row.approved_amount)) if row.approved_amount is not None else None,
+                "approved_amount": monetary(decimal_amount(row.approved_amount))
+                if row.approved_amount is not None
+                else None,
                 "approved_at": row.approved_at,
                 "created_at": row.created_at,
                 "item_count": item_counts.get(str(row.id), 0),
@@ -803,9 +814,7 @@ async def _approve_estimate_revision(
     )
     await session.execute(
         update(budget_lines)
-        .where(
-            and_(budget_lines.c.organization_id == actor.organization_id, budget_lines.c.episode_id == episode_id)
-        )
+        .where(and_(budget_lines.c.organization_id == actor.organization_id, budget_lines.c.episode_id == episode_id))
         .values(estimate_status="approved", updated_at=now)
     )
     await session.execute(
@@ -815,14 +824,16 @@ async def _approve_estimate_revision(
             action="budget_estimate_revision.approved",
             entity_type="episode_budget_estimate",
             entity_id=str(revision.id),
-            metadata={"episodeId": episode_id, "revisionNumber": revision.revision_number, "approvedAmount": monetary(approved_amount)},
+            metadata={
+                "episodeId": episode_id,
+                "revisionNumber": revision.revision_number,
+                "approvedAmount": monetary(approved_amount),
+            },
         )
     )
 
 
-async def _episode_operational_ledger(
-    session: DbSession, actor: CurrentActor, episode_id: str
-) -> dict[str, object]:
+async def _episode_operational_ledger(session: DbSession, actor: CurrentActor, episode_id: str) -> dict[str, object]:
     """Expose the sources behind every commercial number for one episode.
 
     This is intentionally a read model: it joins the allocation ledger to
@@ -876,8 +887,12 @@ async def _episode_operational_ledger(
                     post_work_orders.c.title.label("linked_work_order_title"),
                     post_work_orders.c.status.label("linked_work_order_status"),
                 )
-                .outerjoin(rooms, and_(rooms.c.id == bookings.c.room_id, rooms.c.organization_id == actor.organization_id))
-                .outerjoin(people, and_(people.c.id == bookings.c.person_id, people.c.organization_id == actor.organization_id))
+                .outerjoin(
+                    rooms, and_(rooms.c.id == bookings.c.room_id, rooms.c.organization_id == actor.organization_id)
+                )
+                .outerjoin(
+                    people, and_(people.c.id == bookings.c.person_id, people.c.organization_id == actor.organization_id)
+                )
                 .outerjoin(
                     post_work_orders,
                     and_(
@@ -885,17 +900,14 @@ async def _episode_operational_ledger(
                         post_work_orders.c.organization_id == actor.organization_id,
                     ),
                 )
-                .where(
-                    and_(bookings.c.organization_id == actor.organization_id, bookings.c.id.in_(booking_ids))
-                )
+                .where(and_(bookings.c.organization_id == actor.organization_id, bookings.c.id.in_(booking_ids)))
             )
         ).all()
     work_order_rows = []
     if work_order_ids:
         work_order_rows = (
             await session.execute(
-                select(post_work_orders.c.id, post_work_orders.c.title, post_work_orders.c.status)
-                .where(
+                select(post_work_orders.c.id, post_work_orders.c.title, post_work_orders.c.status).where(
                     and_(
                         post_work_orders.c.organization_id == actor.organization_id,
                         post_work_orders.c.id.in_(work_order_ids),
@@ -1001,10 +1013,15 @@ async def _episode_operational_ledger(
                 budget_lines.c.planned_unit,
             )
             .outerjoin(rooms, and_(rooms.c.id == bookings.c.room_id, rooms.c.organization_id == actor.organization_id))
-            .outerjoin(people, and_(people.c.id == bookings.c.person_id, people.c.organization_id == actor.organization_id))
+            .outerjoin(
+                people, and_(people.c.id == bookings.c.person_id, people.c.organization_id == actor.organization_id)
+            )
             .outerjoin(
                 budget_lines,
-                and_(budget_lines.c.id == bookings.c.budget_line_id, budget_lines.c.organization_id == actor.organization_id),
+                and_(
+                    budget_lines.c.id == bookings.c.budget_line_id,
+                    budget_lines.c.organization_id == actor.organization_id,
+                ),
             )
             .where(
                 and_(
@@ -1012,7 +1029,11 @@ async def _episode_operational_ledger(
                     bookings.c.episode_id == episode_id,
                     bookings.c.actual_starts_at.is_not(None),
                     bookings.c.actual_ends_at.is_not(None),
-                    or_(bookings.c.budget_line_id.is_(None), budget_lines.c.rate_snapshot.is_(None), budget_lines.c.planned_unit.is_(None)),
+                    or_(
+                        bookings.c.budget_line_id.is_(None),
+                        budget_lines.c.rate_snapshot.is_(None),
+                        budget_lines.c.planned_unit.is_(None),
+                    ),
                 )
             )
             .order_by(bookings.c.actual_starts_at.desc(), bookings.c.id)
@@ -1187,7 +1208,9 @@ async def approve_estimate_revision(
     if not revision:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Estimate revision not found.")
     if revision.status != "draft":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only an open estimate revision can be approved.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Only an open estimate revision can be approved."
+        )
     await _approve_estimate_revision(session, actor, revision=revision, episode_id=episode_id)
     await session.commit()
     return {"estimate": await _estimate_overview(session, actor, episode_id)}
@@ -1354,8 +1377,7 @@ async def update_budget_line(
             detail="Choose both a budget resource type and resource.",
         )
     needs_snapshot = bool(resource_id) and bool(
-        {"rate_resource_type", "rate_resource_id", "planned_quantity", "planned_unit", "manual_rate_override"}
-        & fields
+        {"rate_resource_type", "rate_resource_id", "planned_quantity", "planned_unit", "manual_rate_override"} & fields
         or ("estimate_status" in fields and payload.estimate_status == "approved")
     )
     rate_snapshot = None
@@ -1374,8 +1396,10 @@ async def update_budget_line(
                 payload.manual_override_reason if "manual_override_reason" in fields else line.manual_override_reason
             ),
         )
-    final_estimate = rate_snapshot.estimate if rate_snapshot else decimal_amount(
-        payload.budgeted_amount if "budgeted_amount" in fields else line.budgeted_amount
+    final_estimate = (
+        rate_snapshot.estimate
+        if rate_snapshot
+        else decimal_amount(payload.budgeted_amount if "budgeted_amount" in fields else line.budgeted_amount)
     )
     if final_po_id and final_estimate <= 0:
         raise HTTPException(
@@ -1391,8 +1415,10 @@ async def update_budget_line(
         episode=episode,
     )
     existing = await _existing_allocation(session, actor, budget_line_id)
-    final_category = rate_snapshot.category if rate_snapshot else (
-        payload.category.strip() if "category" in fields and payload.category else line.category
+    final_category = (
+        rate_snapshot.category
+        if rate_snapshot
+        else (payload.category.strip() if "category" in fields and payload.category else line.category)
     )
     final_description = (
         payload.description.strip() if payload.description else None if "description" in fields else line.description
@@ -1567,7 +1593,10 @@ async def delete_budget_line(budget_line_id: str, actor: CurrentActor, session: 
     if decimal_amount(line.actual_amount) != 0:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A budget line with recorded actuals cannot be deleted. Keep it for the audit trail or create a revision.",
+            detail=(
+                "A budget line with recorded actuals cannot be deleted. "
+                "Keep it for the audit trail or create a revision."
+            ),
         )
     allocation = await _existing_allocation(session, actor, budget_line_id)
     if allocation:

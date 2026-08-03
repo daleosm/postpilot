@@ -21,7 +21,13 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.create_table(
         "episode_budget_estimates",
-        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True, nullable=False, server_default=sa.text("gen_random_uuid()")),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=False),
+            primary_key=True,
+            nullable=False,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column("organization_id", postgresql.UUID(as_uuid=False), nullable=False),
         sa.Column("episode_id", postgresql.UUID(as_uuid=False), nullable=False),
         sa.Column("revision_number", sa.Integer(), nullable=False),
@@ -34,12 +40,16 @@ def upgrade() -> None:
         sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
-        sa.CheckConstraint("status IN ('draft', 'approved', 'superseded')", name="episode_budget_estimates_status_check"),
+        sa.CheckConstraint(
+            "status IN ('draft', 'approved', 'superseded')", name="episode_budget_estimates_status_check"
+        ),
         sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["episode_id"], ["episodes.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["approved_by_user_id"], ["users.id"], ondelete="SET NULL"),
-        sa.UniqueConstraint("organization_id", "episode_id", "revision_number", name="episode_budget_estimates_org_episode_revision_key"),
+        sa.UniqueConstraint(
+            "organization_id", "episode_id", "revision_number", name="episode_budget_estimates_org_episode_revision_key"
+        ),
     )
     op.create_index(
         "episode_budget_estimates_tenant_episode_status_idx",
@@ -62,7 +72,13 @@ def upgrade() -> None:
     )
     op.create_table(
         "episode_budget_estimate_items",
-        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True, nullable=False, server_default=sa.text("gen_random_uuid()")),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=False),
+            primary_key=True,
+            nullable=False,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column("organization_id", postgresql.UUID(as_uuid=False), nullable=False),
         sa.Column("estimate_id", postgresql.UUID(as_uuid=False), nullable=False),
         sa.Column("source_budget_line_id", postgresql.UUID(as_uuid=False), nullable=True),

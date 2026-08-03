@@ -135,13 +135,17 @@ def test_client_billable_time_block_adds_only_confirmed_overtime_to_the_server_c
     assert created.status_code == 201, created.text
     work_order_id = created.json()["id"]
     assert created.json()["overtime_hourly_base_rate"] == "100.0000"
-    assert production_lab.client.patch(
-        f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}
-    ).status_code == 200
+    assert (
+        production_lab.client.patch(
+            f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}
+        ).status_code
+        == 200
+    )
 
-    assert production_lab.client.patch(
-        f"/v1/work-orders/{work_order_id}", json={"status": "in_progress"}
-    ).status_code == 200
+    assert (
+        production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "in_progress"}).status_code
+        == 200
+    )
     booking_id = str(uuid4())
     production_lab.execute(
         """
@@ -167,14 +171,16 @@ def test_client_billable_time_block_adds_only_confirmed_overtime_to_the_server_c
         production_lab.data.organization_id,
         work_order_id,
     )
-    assert production_lab.client.patch(
-        f"/v1/work-orders/{work_order_id}", json={"status": "complete"}
-    ).status_code == 200
+    assert (
+        production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "complete"}).status_code == 200
+    )
 
     billable = production_lab.client.post(f"/v1/billing/work-orders/{work_order_id}/billables", json={})
     assert billable.status_code == 201, billable.text
     assert billable.json()["amount"] == 3300.0
-    snapshot = json.loads(production_lab.fetchval("SELECT rate_snapshot FROM billables WHERE id = $1", billable.json()["id"]))
+    snapshot = json.loads(
+        production_lab.fetchval("SELECT rate_snapshot FROM billables WHERE id = $1", billable.json()["id"])
+    )
     assert snapshot["clientQuoteAmount"] == "3000.00"
     assert snapshot["overtimeAmount"] == "300.00"
 

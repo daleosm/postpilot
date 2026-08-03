@@ -59,13 +59,15 @@ async def resolve_budget_rate_snapshot(
     if resource_type == "service":
         service = (
             await session.execute(
-                select(service_rates).where(
+                select(service_rates)
+                .where(
                     and_(
                         service_rates.c.id == resource_id,
                         service_rates.c.organization_id == actor.organization_id,
                         service_rates.c.is_active.is_(True),
                     )
-                ).limit(1)
+                )
+                .limit(1)
             )
         ).first()
         if not service:
@@ -74,9 +76,9 @@ async def resolve_budget_rate_snapshot(
     elif resource_type == "room":
         room = (
             await session.execute(
-                select(rooms.c.name).where(
-                    and_(rooms.c.id == resource_id, rooms.c.organization_id == actor.organization_id)
-                ).limit(1)
+                select(rooms.c.name)
+                .where(and_(rooms.c.id == resource_id, rooms.c.organization_id == actor.organization_id))
+                .limit(1)
             )
         ).first()
         if not room:
@@ -85,9 +87,9 @@ async def resolve_budget_rate_snapshot(
     else:
         person = (
             await session.execute(
-                select(people.c.name).where(
-                    and_(people.c.id == resource_id, people.c.organization_id == actor.organization_id)
-                ).limit(1)
+                select(people.c.name)
+                .where(and_(people.c.id == resource_id, people.c.organization_id == actor.organization_id))
+                .limit(1)
             )
         ).first()
         if not person:

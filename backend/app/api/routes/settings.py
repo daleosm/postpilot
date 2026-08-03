@@ -171,9 +171,7 @@ async def settings_bootstrap(actor: CurrentActor, session: DbSession) -> dict[st
     org = actor.active_organization
     organization_row = (
         await session.execute(
-            select(organizations.c.standard_day_hours)
-            .where(organizations.c.id == actor.organization_id)
-            .limit(1)
+            select(organizations.c.standard_day_hours).where(organizations.c.id == actor.organization_id).limit(1)
         )
     ).first()
     room_rows = await session.execute(

@@ -103,9 +103,7 @@ def test_vendor_po_remaining_reconciles_commitments_and_supplier_actuals_without
     # commitment plus supplier actuals consume authorisation.
     assert balance["open_commitment_amount"] == max(commitments - supplier_actuals, Decimal("0"))
     assert balance["uncommitted_actual_amount"] == max(supplier_actuals - commitments, Decimal("0"))
-    assert balance["remaining_amount"] == (
-        authorised - balance["open_commitment_amount"] - supplier_actuals
-    )
+    assert balance["remaining_amount"] == (authorised - balance["open_commitment_amount"] - supplier_actuals)
     assert balance["remaining_amount"] == Decimal("399.99")
 
     uncommitted_actual = balance_snapshot(authorised, Decimal("250.02"), Decimal("600.01"))
@@ -123,9 +121,7 @@ def test_client_po_remaining_reconciles_billable_commitments_and_invoices_withou
 
     assert balance["open_billable_commitment_amount"] == max(billable_commitments - invoiced_values, Decimal("0"))
     assert balance["uncommitted_invoiced_amount"] == max(invoiced_values - billable_commitments, Decimal("0"))
-    assert balance["remaining_amount"] == (
-        authorised - balance["open_billable_commitment_amount"] - invoiced_values
-    )
+    assert balance["remaining_amount"] == (authorised - balance["open_billable_commitment_amount"] - invoiced_values)
     assert balance["remaining_amount"] == Decimal("399.99")
 
 

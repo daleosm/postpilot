@@ -204,7 +204,9 @@ def test_work_order_create_defaults_stage_work_to_blocking_and_keeps_item_ledger
     assert work_order_id in {item["id"] for item in production_lab.client.get("/v1/work-orders").json()["work_orders"]}
 
 
-def test_work_order_lifecycle_allows_the_creator_with_approval_capability_to_approve(production_lab: ProductionApiLab) -> None:
+def test_work_order_lifecycle_allows_the_creator_with_approval_capability_to_approve(
+    production_lab: ProductionApiLab,
+) -> None:
     production_lab.sign_in_as_manager()
     created = production_lab.client.post("/v1/work-orders", json=_payload(production_lab, title="Review an ADR pickup"))
     assert created.status_code == 201, created.text
@@ -753,9 +755,7 @@ def test_booking_an_unbooked_ready_for_review_internal_work_order_resumes_it(
 
     # Seed the historical state directly: it mirrors records created before
     # the booking-first completion rule was introduced.
-    production_lab.execute(
-        "UPDATE post_work_orders SET status = 'ready_for_review' WHERE id = $1", work_order_id
-    )
+    production_lab.execute("UPDATE post_work_orders SET status = 'ready_for_review' WHERE id = $1", work_order_id)
     reserved = production_lab.client.post(
         f"/v1/work-orders/{work_order_id}/booking",
         json={

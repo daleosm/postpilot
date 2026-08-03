@@ -301,7 +301,12 @@ def test_external_vendor_work_can_use_no_po_and_posts_invoices_to_its_budget_ite
     assert created.status_code == 201, created.text
     work_order_id = created.json()["id"]
     assert created.json()["budget_line_id"] == budget_line_id
-    assert production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}).status_code == 200
+    assert (
+        production_lab.client.patch(
+            f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}
+        ).status_code
+        == 200
+    )
     approved = production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "in_progress"})
     assert approved.status_code == 200, approved.text
     assert production_lab.fetchval("SELECT actual_amount FROM budget_lines WHERE id = $1", budget_line_id) == 0
@@ -354,8 +359,16 @@ def test_partial_vendor_invoices_update_one_budget_item_without_counting_po_comm
     )
     assert work_order.status_code == 201, work_order.text
     work_order_id = work_order.json()["id"]
-    assert production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}).status_code == 200
-    assert production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "in_progress"}).status_code == 200
+    assert (
+        production_lab.client.patch(
+            f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}
+        ).status_code
+        == 200
+    )
+    assert (
+        production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "in_progress"}).status_code
+        == 200
+    )
 
     for reference, amount in (("PY-PARTIAL-001", 125), ("PY-PARTIAL-002", 175)):
         invoice = production_lab.client.post(
@@ -380,7 +393,8 @@ def test_partial_vendor_invoices_update_one_budget_item_without_counting_po_comm
     assert production_lab.fetchval("SELECT actual_amount FROM post_work_orders WHERE id = $1", work_order_id) == 300
     assert (
         production_lab.fetchval(
-            "SELECT count(*) FROM budget_actual_allocations WHERE budget_line_id = $1 AND source_type = 'vendor_invoice'",
+            "SELECT count(*) FROM budget_actual_allocations "
+            "WHERE budget_line_id = $1 AND source_type = 'vendor_invoice'",
             budget_line_id,
         )
         == 2
@@ -508,7 +522,8 @@ def test_purchase_order_supplier_actual_creates_one_invoice_allocation_and_budge
     assert duplicate.status_code == 409
     invoice = production_lab.fetchrow(
         """
-        SELECT vendor_company_id::text, show_id::text, episode_id::text, budget_line_id::text, invoice_number, amount::text,
+        SELECT vendor_company_id::text, show_id::text, episode_id::text,
+               budget_line_id::text, invoice_number, amount::text,
                external_document_url
         FROM vendor_invoices WHERE id = $1
         """,
