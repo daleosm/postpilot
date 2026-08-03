@@ -190,15 +190,15 @@ variable "karpenter_instance_types" {
 }
 
 variable "karpenter_max_cpu" {
-  description = "Maximum aggregate vCPU capacity Karpenter may provision. The fixed managed node group remains outside this cap. Four t3.small nodes leave room for the two-replica application alongside the demo monitoring stack."
+  description = "Maximum aggregate vCPU capacity Karpenter may provision. The fixed managed node group remains outside this cap. Five t3.small nodes leave room for the two-replica application, monitoring stack, and a rolling-update or migration Pod."
   type        = number
-  default     = 8
+  default     = 10
 }
 
 variable "karpenter_max_memory" {
   description = "Maximum aggregate memory capacity Karpenter may provision, expressed in Kubernetes quantity syntax."
   type        = string
-  default     = "16Gi"
+  default     = "20Gi"
 }
 
 variable "application_log_retention_days" {
