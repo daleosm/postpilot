@@ -420,7 +420,10 @@ resource "aws_launch_template" "spot" {
     spec:
       kubelet:
         config:
-          maxPods: 16
+          # Prefix delegation is enabled on the VPC CNI add-on below. Give
+          # each medium worker enough Pod slots for the compact demo stack
+          # without asking Karpenter to start additional small instances.
+          maxPods: 58
     --NODEADM--
   EOT
   )
@@ -428,7 +431,7 @@ resource "aws_launch_template" "spot" {
 
 resource "aws_eks_node_group" "spot" {
   cluster_name    = aws_eks_cluster.this.name
-  node_group_name = local.is_ha_profile ? "on-demand-private" : "spot-small-public"
+  node_group_name = local.is_ha_profile ? "on-demand-private" : "spot-medium-public"
   node_role_arn   = aws_iam_role.node.arn
   subnet_ids      = local.worker_subnet_ids
 

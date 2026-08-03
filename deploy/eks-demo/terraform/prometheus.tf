@@ -81,6 +81,10 @@ resource "helm_release" "postpilot_observability" {
     grafana = {
       service = { type = "ClusterIP" }
       ingress = { enabled = false }
+      # Grafana uses a single ReadWriteOnce volume in the demo. Recreate
+      # avoids a rolling update briefly trying to attach that volume to two
+      # Pods, which can otherwise hold a Terraform Helm upgrade open.
+      deploymentStrategy = { type = "Recreate" }
       persistence = {
         enabled          = true
         type             = "pvc"

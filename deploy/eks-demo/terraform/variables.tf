@@ -59,9 +59,9 @@ variable "cluster_endpoint_public_access_cidrs" {
 }
 
 variable "node_instance_types" {
-  description = "x86_64 managed-node instance types. The demo profile uses Spot capacity; the ha profile uses On-Demand capacity in private subnets."
+  description = "x86_64 managed-node instance types. The compact demo uses two t3.medium Spot workers; the ha profile uses On-Demand capacity in private subnets."
   type        = list(string)
-  default     = ["t3a.small"]
+  default     = ["t3.medium"]
 }
 
 variable "node_min_size" {
@@ -190,15 +190,15 @@ variable "karpenter_instance_types" {
 }
 
 variable "karpenter_max_cpu" {
-  description = "Maximum aggregate vCPU capacity Karpenter may provision. The fixed managed node group remains outside this cap. Five t3.small nodes leave room for the two-replica application, monitoring stack, and a rolling-update or migration Pod."
+  description = "Maximum aggregate vCPU capacity Karpenter may provision. The compact demo reserves its capacity for the two managed medium workers; this deliberately prevents Karpenter from adding a further worker."
   type        = number
-  default     = 10
+  default     = 1
 }
 
 variable "karpenter_max_memory" {
-  description = "Maximum aggregate memory capacity Karpenter may provision, expressed in Kubernetes quantity syntax."
+  description = "Maximum aggregate memory capacity Karpenter may provision. A t3.medium exceeds this compact-demo limit, so Karpenter remains installed but cannot add a third worker."
   type        = string
-  default     = "20Gi"
+  default     = "2Gi"
 }
 
 variable "application_log_retention_days" {

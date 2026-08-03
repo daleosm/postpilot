@@ -9,7 +9,9 @@ spec:
     kind: Deployment
     name: postpilot-api
   minReplicas: 2
-  maxReplicas: 4
+  # The compact two-worker demo has deliberate fixed capacity. Keep the API
+  # available across both workers without creating extra Pods.
+  maxReplicas: 2
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 0

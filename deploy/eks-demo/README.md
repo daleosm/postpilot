@@ -5,7 +5,7 @@ public demo, EKS learning, or disposable testing—not live facility work.
 
 It uses:
 
-- two small Spot worker nodes in public subnets;
+- two `t3.medium` Spot worker nodes in public subnets;
 - public ALB ingress;
 - a private, single-AZ RDS PostgreSQL instance;
 - no NAT Gateway; and
@@ -38,9 +38,11 @@ copy that ingress or cookie configuration into a facility deployment.
 For low-cost observability, this profile keeps three days of PostPilot error
 logs, warning-only Kubernetes events, standard node/Pod metrics, and a small
 in-cluster Prometheus and Grafana installation. The monitoring stack has
-seven-day metric retention and persistent gp3 volumes. It can make Karpenter
-launch additional Spot capacity, so it is intentionally useful for learning
-and demos rather than the lowest possible monthly cost.
+seven-day metric retention and persistent gp3 volumes. The two medium workers
+use VPC CNI prefix delegation for enough Pod addresses to host the compact
+application and monitoring footprint. Karpenter remains installed for learning
+and Spot interruption handling, but its demo NodePool has no usable capacity
+budget, so it cannot add a third worker automatically.
 
 Grafana is not public. After Terraform has applied, access it locally:
 
