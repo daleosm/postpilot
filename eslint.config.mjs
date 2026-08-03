@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     ".next-playwright*/**",
     "out/**",
     "build/**",
+    // The standalone site has its own generated Next/static output.
+    // Linting these bundles produces framework noise rather than source errors.
+    "site/.next/**",
+    "site/out/**",
     "next-env.d.ts",
   ]),
 ]);

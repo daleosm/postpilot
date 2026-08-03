@@ -18,6 +18,9 @@ on:
 
 permissions:
   contents: read
+  # CodeQL uploads SARIF findings to GitHub code scanning. The publish job
+  # overrides this with the narrower permissions it needs for GitOps.
+  security-events: write
 
 concurrency:
   group: postpilot-${{ github.workflow }}-${{ github.ref }}
@@ -66,9 +69,30 @@ jobs:
               --var-file "/repo/$root/terraform.tfvars.example"
           done
 
+  sast:
+    name: CodeQL SAST
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      # JavaScript/TypeScript and Python use CodeQL's dependency-aware
+      # extraction. There is no application build step to run for either
+      # language, which keeps this gate ahead of the longer integration suite.
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript, python
+          build-mode: none
+          queries: security-extended
+      - name: Analyse source with CodeQL
+        uses: github/codeql-action/analyze@v4
+
   validate:
     name: App test suite
-    needs: security
+    needs: [security, sast]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -151,9 +175,59 @@ jobs:
           POSTPILOT_API_INTERNAL_URL: http://127.0.0.1:8000
           POSTPILOT_SESSION_SECRET: postpilot-ci-auth-secret-which-is-long-enough
         run: pnpm test:all
+      # A passive baseline scans a disposable production-mode runtime only. It neither
+      # authenticates nor sends active attack payloads, so it is safe on the
+      # main-branch CI path while still catching common HTTP/web misconfiguration.
+      - name: Build production frontend for passive DAST
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          POSTPILOT_API_ORIGIN: http://127.0.0.1:8000
+          POSTPILOT_API_INTERNAL_URL: http://127.0.0.1:8000
+          POSTPILOT_SESSION_SECRET: postpilot-ci-auth-secret-which-is-long-enough
+        run: pnpm build
+      - name: Start production frontend for passive DAST
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          POSTPILOT_API_ORIGIN: http://127.0.0.1:8000
+          POSTPILOT_API_INTERNAL_URL: http://127.0.0.1:8000
+          POSTPILOT_SESSION_SECRET: postpilot-ci-auth-secret-which-is-long-enough
+        run: |
+          pnpm exec next start --port 5003 > "$RUNNER_TEMP/postpilot-dast-ui.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/postpilot-dast-ui.pid"
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:5003/sign-in > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/postpilot-dast-ui.log"
+          exit 1
+      - name: Run OWASP ZAP passive baseline
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p "$RUNNER_TEMP/zap"
+          docker run --rm --network host \
+            -v "$RUNNER_TEMP/zap:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy@sha256:8d387b1a63e3425beef4846e39719f5af2a787753af2d8b6558c6257d7a577a2 \
+            zap-baseline.py \
+              -t http://127.0.0.1:5003/sign-in \
+              -m 1 \
+              -I \
+              -J zap-report.json \
+              -r zap-report.html
+      - name: Upload passive DAST report
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-baseline-report
+          path: ${{ runner.temp }}/zap/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Print FastAPI browser-runtime log on failure
         if: failure()
-        run: cat "$RUNNER_TEMP/postpilot-api.log"
+        run: |
+          cat "$RUNNER_TEMP/postpilot-api.log"
+          test ! -f "$RUNNER_TEMP/postpilot-dast-ui.log" || cat "$RUNNER_TEMP/postpilot-dast-ui.log"
 
   publish:
     name: Build, scan, and deploy

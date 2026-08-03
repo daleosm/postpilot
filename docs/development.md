@@ -71,6 +71,31 @@ See [tests/README.md](../tests/README.md) for browser-suite ownership and
 test layers. FastAPI backend coverage is run with `pytest`; its focused tests
 live in `backend/tests/`.
 
+## CI security checks
+
+GitHub Actions runs the quick security gate before the full app test suite:
+
+- Trivy scans dependencies and tracked secrets, then scans production images.
+- Checkov validates the two EKS Terraform configurations.
+- CodeQL scans the TypeScript and Python source with the `security-extended`
+  query suite; findings are published to GitHub code scanning.
+- Pushes to `main` also run an OWASP ZAP **passive baseline** against an
+  ephemeral production-mode Next.js/FastAPI runtime. Its HTML and JSON reports
+  are CI artifacts. This scan is unauthenticated and does not send active
+  attack payloads.
+
+The frontend applies a nonce-based Content Security Policy, clickjacking
+protection, MIME sniffing protection, referrer and browser-feature policies,
+and removes the `X-Powered-By` framework header. The opener policy deliberately
+uses `same-origin-allow-popups` so Microsoft Entra sign-in remains functional.
+COEP is intentionally not enabled: an overly strict cross-origin embedder
+policy can prevent MSAL's silent-authentication iframe from using the existing
+Entra browser session.
+
+An authenticated active DAST scan belongs in a separate scheduled workflow
+against an isolated staging environment with dedicated test users and an
+approved scan policy. Never point active DAST at a real facility deployment.
+
 ## How to investigate a problem
 
 Start at the boundary that is failing.
