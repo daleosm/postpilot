@@ -1,11 +1,11 @@
-name: Test and deploy PostPilot
+name: PostPilot CI
 
 on:
   pull_request:
   push:
     branches: [main]
-    # The publish job writes only these immutable image references. Argo CD
-    # reconciles that GitOps commit, so it does not need another test/build run.
+    # The deployment workflow writes only immutable GitOps image references.
+    # Argo CD reconciles those commits; they do not need another CI run.
     paths-ignore:
       - deploy/eks-demo/kubernetes/deployment.yaml
       - deploy/eks-demo/kubernetes/api-deployment.yaml
@@ -16,20 +16,79 @@ on:
       - deploy/eks-ha/kubernetes/api-migration-job.yaml
   workflow_dispatch:
 
+# Jobs elevate only the permissions they require.
 permissions:
   contents: read
-  # CodeQL uploads SARIF findings to GitHub code scanning. The publish job
-  # overrides this with the narrower permissions it needs for GitOps.
-  security-events: write
 
+# A new revision supersedes an older validation run. Deployments are handled by
+# a separate workflow and are never cancelled by this group.
 concurrency:
-  group: postpilot-${{ github.workflow }}-${{ github.ref }}
-  # Do not cancel a production deploy that has already passed its test gate.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: postpilot-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  frontend:
+    name: Frontend quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec next typegen
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm lint
+      - run: pnpm test:client
+
+  backend:
+    name: FastAPI PostgreSQL suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: postpilot
+          POSTGRES_USER: postpilot
+          POSTGRES_PASSWORD: postpilot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postpilot -d postpilot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install locked backend tooling and dependencies
+        working-directory: backend
+        run: python -m pip install -e '.[dev]'
+      - name: Lint, migrate, seed, and test FastAPI
+        working-directory: backend
+        env:
+          POSTPILOT_DATABASE_URL: postgresql://postpilot:postpilot@localhost:5432/postpilot
+          POSTPILOT_SESSION_SECRET: postpilot-ci-auth-secret-which-is-long-enough
+          POSTPILOT_RUN_DB_TESTS: "true"
+        run: |
+          ruff format --check .
+          ruff check .
+          alembic upgrade head
+          python -m app.demo_seed
+          pytest
+
   security:
-    name: Security and infrastructure gate
+    name: Dependency, secret, and Terraform security
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -45,16 +104,14 @@ jobs:
           exit-code: "1"
           skip-dirs: node_modules,.next,.next-playwright,test-results
       - uses: hashicorp/setup-terraform@v3
-      - name: Check Terraform formatting
+      - name: Check and validate Terraform roots
         run: |
           terraform fmt -check -recursive deploy/eks-demo/terraform
           terraform fmt -check -recursive deploy/eks-ha/terraform
-      - name: Validate EKS Terraform roots
-        run: |
-          terraform -chdir=deploy/eks-demo/terraform init -backend=false
-          terraform -chdir=deploy/eks-demo/terraform validate
-          terraform -chdir=deploy/eks-ha/terraform init -backend=false
-          terraform -chdir=deploy/eks-ha/terraform validate
+          for root in deploy/eks-demo/terraform deploy/eks-ha/terraform; do
+            terraform -chdir="$root" init -backend=false
+            terraform -chdir="$root" validate
+          done
       - name: Scan Terraform policy with Checkov
         run: |
           for root in deploy/eks-demo/terraform deploy/eks-ha/terraform; do
@@ -78,23 +135,17 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-      # JavaScript/TypeScript and Python use CodeQL's dependency-aware
-      # extraction. There is no application build step to run for either
-      # language, which keeps this gate ahead of the longer integration suite.
-      - name: Initialise CodeQL
-        uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript, python
           build-mode: none
           queries: security-extended
-      - name: Analyse source with CodeQL
-        uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@v4
 
-  validate:
-    name: App test suite
-    needs: [security, sast]
+  browser:
+    name: Playwright Chromium journeys
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16-alpine
@@ -109,9 +160,6 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
-    env:
-      DATABASE_URL: postgres://postpilot:postpilot@localhost:5432/postpilot
-      POSTPILOT_DEBUG_DEMO: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -121,35 +169,24 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec next typegen
-      - run: pnpm exec tsc --noEmit
-      - run: pnpm lint
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/pyproject.toml
-      # FastAPI pytest is the authoritative server-side suite. It runs against
-      # the migrated PostgreSQL service before any browser journey starts.
-      - name: Validate FastAPI backend (authoritative PostgreSQL suite)
+      - run: pnpm install --frozen-lockfile
+      - name: Install backend test runtime
+        working-directory: backend
+        run: python -m pip install -e '.[dev]'
+      - name: Migrate and seed isolated browser-test data
         working-directory: backend
         env:
           POSTPILOT_DATABASE_URL: postgresql://postpilot:postpilot@localhost:5432/postpilot
           POSTPILOT_SESSION_SECRET: postpilot-ci-auth-secret-which-is-long-enough
-          POSTPILOT_RUN_DB_TESTS: "true"
         run: |
-          python -m pip install -e '.[dev]'
-          ruff format --check .
-          ruff check .
           alembic upgrade head
           python -m app.demo_seed
-          pytest
-      # Keep browser journeys on the same runtime boundary as deployment:
-      # Next serves UI/RSC while browser API requests use FastAPI directly.
-      # This prevents the frontend from masking a missing Python endpoint or
-      # session/tenant regression.
-      - name: Start FastAPI for browser journeys
+      - name: Start FastAPI browser runtime
         working-directory: backend
         env:
           POSTPILOT_DATABASE_URL: postgresql://postpilot:postpilot@localhost:5432/postpilot
@@ -159,168 +196,155 @@ jobs:
         run: |
           python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/postpilot-api.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/postpilot-api.pid"
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:8000/healthz > /dev/null; then
-              exit 0
-            fi
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/healthz > /dev/null; then exit 0; fi
             sleep 1
           done
           cat "$RUNNER_TEMP/postpilot-api.log"
           exit 1
-      - name: Install browser test runtime
-        run: pnpm exec playwright install --with-deps chromium
-      - name: Run Playwright browser journeys
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Run complete Chromium browser suite
         env:
           POSTPILOT_API_ORIGIN: http://127.0.0.1:8000
           POSTPILOT_API_INTERNAL_URL: http://127.0.0.1:8000
           POSTPILOT_SESSION_SECRET: postpilot-ci-auth-secret-which-is-long-enough
-        run: pnpm test:all
-      # A passive baseline scans a disposable production-mode runtime only. It neither
-      # authenticates nor sends active attack payloads, so it is safe on the
-      # main-branch CI path while still catching common HTTP/web misconfiguration.
-      - name: Build production frontend for passive DAST
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: pnpm test:e2e
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diagnostics-${{ github.run_id }}
+          path: |
+            test-results/
+            ${{ runner.temp }}/postpilot-api.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  passive_dast:
+    name: Passive DAST on disposable production runtime
+    needs: [frontend, backend, browser, security, sast]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
         env:
-          POSTPILOT_API_ORIGIN: http://127.0.0.1:8000
-          POSTPILOT_API_INTERNAL_URL: http://127.0.0.1:8000
+          POSTGRES_DB: postpilot
+          POSTGRES_USER: postpilot
+          POSTGRES_PASSWORD: postpilot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postpilot -d postpilot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - run: pnpm install --frozen-lockfile
+      - name: Install and seed API runtime
+        working-directory: backend
+        env:
+          POSTPILOT_DATABASE_URL: postgresql://postpilot:postpilot@localhost:5432/postpilot
           POSTPILOT_SESSION_SECRET: postpilot-ci-auth-secret-which-is-long-enough
-        run: pnpm build
-      - name: Start production frontend for passive DAST
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          python -m pip install -e .
+          alembic upgrade head
+          python -m app.demo_seed
+          POSTPILOT_DEBUG_DEMO=true POSTPILOT_FRONTEND_ORIGINS=http://localhost:5003 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/postpilot-dast-api.log" 2>&1 &
+      - name: Build and start disposable production frontend
         env:
           POSTPILOT_API_ORIGIN: http://127.0.0.1:8000
           POSTPILOT_API_INTERNAL_URL: http://127.0.0.1:8000
           POSTPILOT_SESSION_SECRET: postpilot-ci-auth-secret-which-is-long-enough
         run: |
+          pnpm build
           pnpm exec next start --port 5003 > "$RUNNER_TEMP/postpilot-dast-ui.log" 2>&1 &
-          echo $! > "$RUNNER_TEMP/postpilot-dast-ui.pid"
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:5003/sign-in > /dev/null; then
-              exit 0
-            fi
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:5003/sign-in > /dev/null; then exit 0; fi
             sleep 1
           done
+          cat "$RUNNER_TEMP/postpilot-dast-api.log"
           cat "$RUNNER_TEMP/postpilot-dast-ui.log"
           exit 1
       - name: Run OWASP ZAP passive baseline
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           mkdir -p "$RUNNER_TEMP/zap"
           docker run --rm --network host \
             -v "$RUNNER_TEMP/zap:/zap/wrk:rw" \
             ghcr.io/zaproxy/zaproxy@sha256:8d387b1a63e3425beef4846e39719f5af2a787753af2d8b6558c6257d7a577a2 \
-            zap-baseline.py \
-              -t http://127.0.0.1:5003/sign-in \
-              -m 1 \
-              -I \
-              -J zap-report.json \
-              -r zap-report.html
+            zap-baseline.py -t http://127.0.0.1:5003/sign-in -m 1 -I -J zap-report.json -r zap-report.html
       - name: Upload passive DAST report
-        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zap-baseline-report
-          path: ${{ runner.temp }}/zap/
+          name: zap-passive-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/zap/
+            ${{ runner.temp }}/postpilot-dast-api.log
+            ${{ runner.temp }}/postpilot-dast-ui.log
           if-no-files-found: warn
           retention-days: 14
-      - name: Print FastAPI browser-runtime log on failure
-        if: failure()
-        run: |
-          cat "$RUNNER_TEMP/postpilot-api.log"
-          test ! -f "$RUNNER_TEMP/postpilot-dast-ui.log" || cat "$RUNNER_TEMP/postpilot-dast-ui.log"
 
-  publish:
-    name: Build, scan, and deploy
-    needs: validate
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+  build:
+    name: Build and scan verified runtime images
+    needs: [frontend, backend, browser, security, sast, passive_dast]
+    if: >-
+      always() &&
+      needs.frontend.result == 'success' &&
+      needs.backend.result == 'success' &&
+      needs.browser.result == 'success' &&
+      needs.security.result == 'success' &&
+      needs.sast.result == 'success' &&
+      (needs.passive_dast.result == 'success' || needs.passive_dast.result == 'skipped')
     runs-on: ubuntu-latest
-    environment: production
-    timeout-minutes: 45
-    permissions:
-      contents: write
-      id-token: write
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: ${{ vars.AWS_ECR_PUBLISH_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-      - name: Resolve the ECR repository name
-        id: image
-        run: |
-          echo "name=${{ vars.ECR_REPOSITORY_URL }}" >> "$GITHUB_OUTPUT"
-          # ECR tags are immutable. The run ID makes a retry or a separately
-          # dispatched build of the same commit publishable without replacing
-          # an existing image, while retaining the commit SHA for traceability.
-          echo "tag=${GITHUB_SHA}-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
-      - uses: aws-actions/amazon-ecr-login@v2
-        id: ecr-login
-        with:
-          mask-password: true
-      - uses: docker/build-push-action@v6
+      - uses: docker/setup-buildx-action@v3
+      - name: Build frontend runtime image
+        uses: docker/build-push-action@v6
         with:
           context: .
           target: runtime
-          push: true
-          tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
-      - uses: docker/build-push-action@v6
+          load: true
+          push: false
+          tags: postpilot-ui:ci-${{ github.sha }}
+      - name: Build FastAPI runtime image
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: backend/Dockerfile
           target: runtime
-          push: true
-          tags: ${{ steps.image.outputs.name }}:api-${{ steps.image.outputs.tag }}
-      - name: Scan the published runtime image with Trivy
+          load: true
+          push: false
+          tags: postpilot-api:ci-${{ github.sha }}
+      - name: Scan frontend runtime image
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           scan-type: image
-          image-ref: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+          image-ref: postpilot-ui:ci-${{ github.sha }}
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
-      - name: Scan the published FastAPI image with Trivy
+      - name: Scan FastAPI runtime image
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           scan-type: image
-          image-ref: ${{ steps.image.outputs.name }}:api-${{ steps.image.outputs.tag }}
+          image-ref: postpilot-api:ci-${{ github.sha }}
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: backend/Dockerfile
-          target: migrations
-          push: true
-          tags: ${{ steps.image.outputs.name }}:api-migrations-${{ steps.image.outputs.tag }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: backend/Dockerfile
-          target: seed
-          push: true
-          tags: ${{ steps.image.outputs.name }}:api-seed-${{ steps.image.outputs.tag }}
-      - name: Commit the immutable image references for Argo CD
-        env:
-          IMAGE: ${{ steps.image.outputs.name }}
-          IMAGE_TAG: ${{ steps.image.outputs.tag }}
-        run: |
-          # Replace the value of each image field, whether it is still the
-          # local placeholder or an immutable ECR reference from a prior run.
-          for manifest in deploy/eks-demo/kubernetes/deployment.yaml deploy/eks-ha/kubernetes/deployment.yaml; do
-            sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:${IMAGE_TAG}|" "$manifest"
-          done
-          for manifest in deploy/eks-demo/kubernetes/api-deployment.yaml deploy/eks-ha/kubernetes/api-deployment.yaml; do
-            sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:api-${IMAGE_TAG}|" "$manifest"
-          done
-          for manifest in deploy/eks-demo/kubernetes/api-migration-job.yaml deploy/eks-ha/kubernetes/api-migration-job.yaml; do
-            sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:api-migrations-${IMAGE_TAG}|" "$manifest"
-          done
-          sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:api-seed-${IMAGE_TAG}|" deploy/eks-demo/kubernetes/demo-seed.yaml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add deploy/eks-demo/kubernetes/deployment.yaml deploy/eks-demo/kubernetes/api-deployment.yaml deploy/eks-demo/kubernetes/api-migration-job.yaml deploy/eks-demo/kubernetes/demo-seed.yaml deploy/eks-ha/kubernetes/deployment.yaml deploy/eks-ha/kubernetes/api-deployment.yaml deploy/eks-ha/kubernetes/api-migration-job.yaml
-          git diff --cached --quiet || git commit -m "chore(deploy): postpilot ${IMAGE_TAG}"
-          git push

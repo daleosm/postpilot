@@ -1,0 +1,112 @@
+name: Deploy PostPilot
+
+on:
+  workflow_run:
+    workflows: [PostPilot CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit SHA, branch, or tag to deploy
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+# Never cancel an in-flight production publication or GitOps hand-off.
+concurrency:
+  group: postpilot-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish immutable images and update GitOps manifests
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.event.workflow_run.head_sha }}
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ECR_PUBLISH_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Resolve immutable image references
+        id: image
+        run: |
+          echo "name=${{ vars.ECR_REPOSITORY_URL }}" >> "$GITHUB_OUTPUT"
+          echo "tag=$(git rev-parse HEAD)-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: true
+      - name: Publish frontend runtime
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+      - name: Publish FastAPI runtime and operational job targets
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: runtime
+          push: true
+          tags: ${{ steps.image.outputs.name }}:api-${{ steps.image.outputs.tag }}
+      - name: Scan published runtime images
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Publish migration image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: migrations
+          push: true
+          tags: ${{ steps.image.outputs.name }}:api-migrations-${{ steps.image.outputs.tag }}
+      - name: Publish demo-seed image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: seed
+          push: true
+          tags: ${{ steps.image.outputs.name }}:api-seed-${{ steps.image.outputs.tag }}
+      - name: Commit immutable image references for Argo CD
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          for manifest in deploy/eks-demo/kubernetes/deployment.yaml deploy/eks-ha/kubernetes/deployment.yaml; do
+            sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:${IMAGE_TAG}|" "$manifest"
+          done
+          for manifest in deploy/eks-demo/kubernetes/api-deployment.yaml deploy/eks-ha/kubernetes/api-deployment.yaml; do
+            sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:api-${IMAGE_TAG}|" "$manifest"
+          done
+          for manifest in deploy/eks-demo/kubernetes/api-migration-job.yaml deploy/eks-ha/kubernetes/api-migration-job.yaml; do
+            sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:api-migrations-${IMAGE_TAG}|" "$manifest"
+          done
+          sed -i -E "s|^([[:space:]]*image:)[[:space:]]+[^[:space:]]+|\\1 ${IMAGE}:api-seed-${IMAGE_TAG}|" deploy/eks-demo/kubernetes/demo-seed.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/eks-demo/kubernetes/deployment.yaml deploy/eks-demo/kubernetes/api-deployment.yaml deploy/eks-demo/kubernetes/api-migration-job.yaml deploy/eks-demo/kubernetes/demo-seed.yaml deploy/eks-ha/kubernetes/deployment.yaml deploy/eks-ha/kubernetes/api-deployment.yaml deploy/eks-ha/kubernetes/api-migration-job.yaml
+          git diff --cached --quiet || git commit -m "chore(deploy): postpilot ${IMAGE_TAG}"
+          git push origin HEAD:main

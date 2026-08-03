@@ -1,0 +1,94 @@
+name: PostPilot active DAST
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly against an isolated, disposable runtime. Do not target production.
+    - cron: "37 2 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: postpilot-active-dast
+  cancel-in-progress: false
+
+jobs:
+  active_dast:
+    name: OWASP ZAP active scan (isolated runtime)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: postpilot
+          POSTGRES_USER: postpilot
+          POSTGRES_PASSWORD: postpilot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postpilot -d postpilot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - run: pnpm install --frozen-lockfile
+      - name: Start an isolated seeded application runtime
+        working-directory: backend
+        env:
+          POSTPILOT_DATABASE_URL: postgresql://postpilot:postpilot@localhost:5432/postpilot
+          POSTPILOT_SESSION_SECRET: postpilot-active-dast-secret-which-is-long-enough
+        run: |
+          python -m pip install -e .
+          alembic upgrade head
+          python -m app.demo_seed
+          POSTPILOT_DEBUG_DEMO=true POSTPILOT_FRONTEND_ORIGINS=http://localhost:5003 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/postpilot-active-dast-api.log" 2>&1 &
+      - name: Build and start isolated production frontend
+        env:
+          POSTPILOT_API_ORIGIN: http://127.0.0.1:8000
+          POSTPILOT_API_INTERNAL_URL: http://127.0.0.1:8000
+          POSTPILOT_SESSION_SECRET: postpilot-active-dast-secret-which-is-long-enough
+        run: |
+          pnpm build
+          pnpm exec next start --port 5003 > "$RUNNER_TEMP/postpilot-active-dast-ui.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:5003/sign-in > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/postpilot-active-dast-api.log"
+          cat "$RUNNER_TEMP/postpilot-active-dast-ui.log"
+          exit 1
+      # This intentionally scans only the public sign-in surface. A later
+      # authenticated ZAP context can safely widen scope to protected routes.
+      - name: Run ZAP active scan
+        run: |
+          mkdir -p "$RUNNER_TEMP/zap-active"
+          docker run --rm --network host \
+            -v "$RUNNER_TEMP/zap-active:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy@sha256:8d387b1a63e3425beef4846e39719f5af2a787753af2d8b6558c6257d7a577a2 \
+            zap-full-scan.py -t http://127.0.0.1:5003/sign-in -m 2 -I -J zap-active-report.json -r zap-active-report.html
+      - name: Upload active DAST report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-active-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/zap-active/
+            ${{ runner.temp }}/postpilot-active-dast-api.log
+            ${{ runner.temp }}/postpilot-active-dast-ui.log
+          if-no-files-found: warn
+          retention-days: 30
