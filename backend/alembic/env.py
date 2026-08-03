@@ -10,7 +10,10 @@ from app.config import get_settings
 from app.db.tables import metadata
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().sqlalchemy_database_url)
+# ConfigParser interprets ``%`` as interpolation. A correctly URL-encoded
+# database password can contain percent escapes, so preserve it literally when
+# passing the runtime URL through Alembic's INI-backed configuration.
+config.set_main_option("sqlalchemy.url", get_settings().sqlalchemy_database_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

@@ -224,13 +224,12 @@ resource "terraform_data" "karpenter_nodepool" {
     }
   }
 
-  provisioner "local-exec" {
-    when    = destroy
-    command = "printf '%s' \"$KARPENTER_NODEPOOL_MANIFEST\" | kubectl delete --ignore-not-found -f -"
-
-    environment = {
-      KARPENTER_NODEPOOL_MANIFEST = self.input
-    }
+  # A changed input replaces terraform_data. Keep the live Karpenter objects
+  # through that replacement: the create step uses server-side apply to patch
+  # their limits, while deleting the old bookkeeping resource must never drain
+  # a running application just because a capacity limit changed.
+  lifecycle {
+    create_before_destroy = true
   }
 
   depends_on = [
