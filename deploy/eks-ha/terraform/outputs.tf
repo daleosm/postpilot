@@ -24,7 +24,7 @@ output "grafana_port_forward_command" {
 }
 
 output "prometheus_port_forward_command" {
-  value       = "kubectl -n monitoring port-forward svc/postpilot-observability-kube-prometheus-prometheus 9090:9090"
+  value       = "kubectl -n monitoring port-forward svc/postpilot-observability-ku-prometheus 9090:9090"
   description = "Cluster-internal Prometheus access for troubleshooting and query inspection."
 }
 

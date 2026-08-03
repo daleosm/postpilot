@@ -12,7 +12,7 @@ data:
       "editable": false,
       "panels": [
         {
-          "datasource": {"type": "prometheus", "uid": "postpilot-prometheus"},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
           "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
           "id": 1,
@@ -22,7 +22,7 @@ data:
           "type": "stat"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "postpilot-prometheus"},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
           "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0},
           "id": 2,
@@ -32,7 +32,7 @@ data:
           "type": "stat"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "postpilot-prometheus"},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
           "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
           "id": 3,
@@ -42,7 +42,7 @@ data:
           "type": "stat"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "postpilot-prometheus"},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "fieldConfig": {"defaults": {"min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
           "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
           "id": 4,

@@ -9,7 +9,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/name: postpilot-api
+      postpilot.io/metrics: api
   endpoints:
     - port: http
       path: /metrics

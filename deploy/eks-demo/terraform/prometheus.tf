@@ -81,14 +81,6 @@ resource "helm_release" "postpilot_observability" {
     grafana = {
       service = { type = "ClusterIP" }
       ingress = { enabled = false }
-      additionalDataSources = [{
-        name     = "PostPilot Prometheus"
-        type     = "prometheus"
-        uid      = "postpilot-prometheus"
-        url      = "http://postpilot-observability-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
-        access   = "proxy"
-        editable = false
-      }]
       persistence = {
         enabled          = true
         type             = "pvc"
