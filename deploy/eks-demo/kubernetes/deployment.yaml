@@ -37,7 +37,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: postpilot
-          image: 778183943831.dkr.ecr.eu-west-1.amazonaws.com/postpilot:6bc8da233fb2df45d9708601ed031d38cec721ff-30856795555
+          image: 778183943831.dkr.ecr.eu-west-1.amazonaws.com/postpilot:5abcab59e3ae0c5f015f36769be159e90dfd54ee-30858585171
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
