@@ -37,7 +37,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: api
-          image: 778183943831.dkr.ecr.eu-west-1.amazonaws.com/postpilot:api-78ebaf548ff92daf4a44c0ef9a5e99d7f39e3713-30849057094
+          image: 778183943831.dkr.ecr.eu-west-1.amazonaws.com/postpilot:api-60471264bbb3a8d5025b00064bcbfcdd045c4dda-30850370689
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
