@@ -129,11 +129,11 @@ test.describe("Commercial register actions", () => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ overrides: {}, inherited: {} }) });
     });
     await page.getByRole("button", { name: "Manage rate card" }).click();
-    await page.getByRole("button", { name: "Set master price" }).first().click();
-    await page.getByRole("spinbutton", { name: "Rate", exact: true }).fill("999");
+    await page.getByRole("button", { name: "Edit", exact: true }).first().click();
+    await page.getByRole("spinbutton", { name: "Master rate", exact: true }).fill("999");
     const requestBody = await captureJsonWrite(page, "**/v1/rate-cards/overrides");
 
-    await page.getByRole("button", { name: "Save master price" }).click();
+    await page.getByRole("button", { name: "Save master rate" }).click();
 
     await expect.poll(requestBody).toMatchObject({ scope: "master", rate: 999 });
   });

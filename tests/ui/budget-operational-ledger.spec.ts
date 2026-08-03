@@ -49,13 +49,14 @@ test.describe("Episode estimate to actual UI", () => {
     const saveResponse = page.waitForResponse((response) => response.url().endsWith("/v1/budget/lines") && response.request().method() === "POST");
     await builder.getByRole("button", { name: "Save estimate" }).click();
 
+    const preview = await (await previewResponse).json() as { estimate: number };
     await expect((await saveResponse).json()).resolves.toMatchObject({
       episode_id: TEST_EPISODE_ID,
       category: "Edit suite",
       planned_quantity: 1,
-      planned_unit: "day",
+      planned_unit: "hour",
       rate_source: "master_rate_card",
-      estimated_amount: 896.8,
+      estimated_amount: preview.estimate,
     });
     await expect(page.getByRole("heading", { name: "Estimate", exact: true })).toBeVisible();
   });

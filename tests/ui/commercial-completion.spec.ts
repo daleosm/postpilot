@@ -1,9 +1,26 @@
 import { expect, test } from "@playwright/test";
+import postgres from "postgres";
 
 import { establishDebugSession } from "../fixtures/debug-session";
 import { captureJsonWrite } from "../fixtures/ui-api";
 
 const COPPERLINE_ORGANIZATION_ID = "10000000-0000-4000-8000-000000000005";
+const COPPERLINE_SEASON_ID = "26500000-0000-4000-8000-000000000001";
+const ESTIMATE_EPISODE_ID = "fa200000-0000-4000-8000-000000000001";
+
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) throw new Error("DATABASE_URL is required for commercial UI tests.");
+const sql = postgres(databaseUrl, { prepare: false });
+
+test.afterEach(async () => {
+  await sql`delete from budget_actual_allocations where budget_line_id in (select id from budget_lines where episode_id = ${ESTIMATE_EPISODE_ID})`;
+  await sql`delete from budget_lines where episode_id = ${ESTIMATE_EPISODE_ID}`;
+  await sql`delete from episodes where id = ${ESTIMATE_EPISODE_ID}`;
+});
+
+test.afterAll(async () => {
+  await sql.end();
+});
 
 test.beforeEach(async ({ context }) => {
   await establishDebugSession(context, "user_maya", COPPERLINE_ORGANIZATION_ID);
@@ -76,25 +93,28 @@ test.describe("Commercial completion journeys", () => {
     await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
   });
 
-  test("adds an episode budget line through the commercial drill-down", async ({ page }) => {
-    await page.goto("/budget");
-    const network = page.locator('a[href^="/budget?network="]').first();
-    await Promise.all([page.waitForURL(/network=/), network.click()]);
-    const show = page.locator('a[href^="/budget?network="][href*="show="]').first();
-    await Promise.all([page.waitForURL(/show=/), show.click()]);
-    const episode = page.locator('a[href*="&episode="]').first();
+  test("builds an episode estimate through the commercial drill-down", async ({ page }) => {
+    await sql`
+      insert into episodes (id, organization_id, season_id, number, production_code, title, status, workflow_status, qc_status)
+      values (${ESTIMATE_EPISODE_ID}, ${COPPERLINE_ORGANIZATION_ID}, ${COPPERLINE_SEASON_ID}, 98, 'CP198', 'Commercial estimate test', 'development', 'not_started', 'not_started')
+    `;
+    await page.goto("/budget?network=Slate%2B&show=Crossing%20Point");
+    const episode = page.locator(`a[href*="episode=${ESTIMATE_EPISODE_ID}"]`);
     await Promise.all([page.waitForURL(/episode=/), episode.click()]);
-    await page.getByRole("button", { name: "Add episode budget" }).click();
-    const form = page.getByRole("heading", { name: "Add episode budget line" }).locator("xpath=ancestor::form[1]");
-    await form.getByLabel("Category").selectOption("sound");
-    await form.getByLabel("Description").fill("UI final mix stem delivery");
-    await form.getByLabel(/Estimated cost/).fill("840");
-    await form.getByLabel(/Actual cost/).fill("420");
+    await page.getByRole("button", { name: "Build estimate" }).click();
+    const builder = page.getByRole("dialog", { name: "Build episode estimate" });
+    await builder.getByRole("combobox").nth(2).selectOption({ label: "Mix stage" });
     const body = await captureJsonWrite(page, "**/v1/budget/lines", { id: "fb000000-0000-4000-8000-000000000005" }, 201);
 
-    await form.getByRole("button", { name: "Save line" }).click();
+    await builder.getByRole("button", { name: "Save estimate" }).click();
 
-    await expect.poll(body).toMatchObject({ category: "sound", description: "UI final mix stem delivery", budgeted_amount: 840, actual_amount: 420, external_cost: false });
+    await expect.poll(body).toMatchObject({
+      category: "Sound",
+      planned_quantity: 1,
+      planned_unit: "hour",
+      rate_resource_type: "service",
+      external_cost: false,
+    });
   });
 
   test("sets a network service-price exception without changing the master rate", async ({ page }) => {
