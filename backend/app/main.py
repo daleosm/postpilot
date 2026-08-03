@@ -10,6 +10,7 @@ from app.api.router import api_router, root_router
 from app.config import get_settings
 from app.db.session import get_engine, get_session_factory
 from app.financial_idempotency import financial_idempotency_middleware
+from app.metrics import instrument_http_request, metrics_response
 
 
 @asynccontextmanager
@@ -42,8 +43,10 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "X-Request-Id", "Idempotency-Key"],
     )
     app.middleware("http")(financial_idempotency_middleware)
+    app.middleware("http")(instrument_http_request)
     app.include_router(root_router)
     app.include_router(api_router)
+    app.add_api_route("/metrics", metrics_response, methods=["GET"], include_in_schema=False)
     return app
 
 

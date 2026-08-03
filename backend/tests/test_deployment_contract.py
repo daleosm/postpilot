@@ -74,3 +74,18 @@ def test_kubernetes_maps_legacy_secret_source_keys_to_fastapi_runtime_keys() -> 
         assert "key: POSTPILOT_FRONTEND_ORIGINS" in manifest
         assert 'path: "POSTPILOT_SESSION_SECRET || NEXTAUTH_SECRET"' in manifest
         assert 'path: "POSTPILOT_FRONTEND_ORIGINS || NEXTAUTH_URL"' in manifest
+
+
+def test_both_eks_profiles_keep_prometheus_internal_and_use_distinct_health_probes() -> None:
+    for profile in ("eks-demo", "eks-ha"):
+        api_deployment = (ROOT / f"deploy/{profile}/kubernetes/api-deployment.yaml").read_text()
+        service_monitor = (ROOT / f"deploy/{profile}/kubernetes/api-service-monitor.yaml").read_text()
+        observability = (ROOT / f"deploy/{profile}/terraform/prometheus.tf").read_text()
+
+        assert "path: /ready" in api_deployment
+        assert "path: /live" in api_deployment
+        assert "path: /metrics" in service_monitor
+        assert "serviceMonitorSelector" in observability
+        assert 'service = { type = "ClusterIP" }' in observability
+        assert "ingress = { enabled = false }" in observability
+        assert "postpilot-gp3" in observability

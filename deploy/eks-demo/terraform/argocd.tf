@@ -103,5 +103,7 @@ resource "terraform_data" "postpilot_argocd_application" {
     }
   }
 
-  depends_on = [helm_release.argocd]
+  # The application manifests include a ServiceMonitor, so wait until the
+  # Prometheus Operator has installed its CRDs before Argo first syncs them.
+  depends_on = [helm_release.argocd, helm_release.postpilot_observability]
 }

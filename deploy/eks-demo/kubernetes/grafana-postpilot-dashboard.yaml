@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postpilot-api-dashboard
+  namespace: postpilot
+  labels:
+    grafana_dashboard: "1"
+data:
+  postpilot-api.json: |
+    {
+      "annotations": {"list": []},
+      "editable": false,
+      "panels": [
+        {
+          "datasource": {"type": "prometheus", "uid": "postpilot-prometheus"},
+          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+          "id": 1,
+          "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+          "targets": [{"expr": "sum(rate(postpilot_http_requests_total[5m]))", "refId": "A"}],
+          "title": "API request rate",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "postpilot-prometheus"},
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0},
+          "id": 2,
+          "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+          "targets": [{"expr": "histogram_quantile(0.95, sum(rate(postpilot_http_request_duration_seconds_bucket[5m])) by (le))", "refId": "A"}],
+          "title": "API p95 latency",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "postpilot-prometheus"},
+          "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
+          "id": 3,
+          "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+          "targets": [{"expr": "sum(rate(postpilot_http_requests_total{status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(postpilot_http_requests_total[5m])), 1)", "refId": "A"}],
+          "title": "API 5xx rate",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "postpilot-prometheus"},
+          "fieldConfig": {"defaults": {"min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+          "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+          "id": 4,
+          "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+          "targets": [{"expr": "postpilot_database_ready", "refId": "A"}],
+          "title": "Database readiness",
+          "type": "stat"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 41,
+      "tags": ["postpilot", "operations"],
+      "templating": {"list": []},
+      "time": {"from": "now-6h", "to": "now"},
+      "timezone": "browser",
+      "title": "PostPilot API",
+      "uid": "postpilot-api",
+      "version": 1
+    }

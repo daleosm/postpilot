@@ -16,6 +16,8 @@ resources:
   - kubernetes-event-exporter.yaml
   - service.yaml
   - api-service.yaml
+  - api-service-monitor.yaml
+  - grafana-postpilot-dashboard.yaml
   - ingress.yaml
 
 labels:

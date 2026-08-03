@@ -18,6 +18,16 @@ output "argocd_port_forward_command" {
   description = "Cost-free local access path to the Argo CD UI; it intentionally avoids creating a public load balancer."
 }
 
+output "grafana_port_forward_command" {
+  value       = "kubectl -n monitoring port-forward svc/postpilot-observability-grafana 3000:80"
+  description = "Cluster-internal Grafana access; no public monitoring load balancer is created."
+}
+
+output "prometheus_port_forward_command" {
+  value       = "kubectl -n monitoring port-forward svc/postpilot-observability-kube-prometheus-prometheus 9090:9090"
+  description = "Cluster-internal Prometheus access for troubleshooting and query inspection."
+}
+
 output "rds_endpoint" {
   value       = aws_db_instance.postgres.address
   description = "Private PostgreSQL hostname reachable from the EKS cluster."

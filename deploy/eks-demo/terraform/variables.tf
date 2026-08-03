@@ -147,6 +147,30 @@ variable "metrics_server_chart_version" {
   default     = "3.13.1"
 }
 
+variable "kube_prometheus_stack_chart_version" {
+  description = "Pinned kube-prometheus-stack Helm chart version for Prometheus, Grafana, and Kubernetes metrics. Upgrade deliberately after reviewing its release notes."
+  type        = string
+  default     = "88.1.3"
+}
+
+variable "prometheus_retention" {
+  description = "Prometheus metric retention for this disposable demo cluster."
+  type        = string
+  default     = "7d"
+}
+
+variable "prometheus_storage_size" {
+  description = "Persistent gp3 volume size for demo Prometheus metrics."
+  type        = string
+  default     = "10Gi"
+}
+
+variable "grafana_storage_size" {
+  description = "Persistent gp3 volume size for demo Grafana dashboards and configuration."
+  type        = string
+  default     = "5Gi"
+}
+
 variable "aws_for_fluent_bit_chart_version" {
   description = "Pinned AWS for Fluent Bit chart used for PostPilot-only CloudWatch log forwarding. This intentionally replaces the broad CloudWatch Observability add-on."
   type        = string

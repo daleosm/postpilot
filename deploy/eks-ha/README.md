@@ -59,6 +59,21 @@ The profile only controls the AWS topology. Before live use, set
 and complete the checklist in [../../docs/self-hosting.md](../../docs/self-hosting.md).
 
 The profile forwards structured application errors and warning-only Kubernetes
-events, while retaining standard node/Pod metrics. Set `cost_alert_email` in
-`terraform.tfvars` to opt into free monthly Budget and Cost Anomaly Detection
-emails; they notify but do not shut down resources.
+events, while retaining standard node/Pod metrics. It also installs
+Prometheus and Grafana with 15-day metric retention and gp3-backed persistent
+volumes. Grafana and Prometheus are cluster-internal; they are not exposed on
+the public ALB.
+
+Access Grafana locally after Terraform has applied:
+
+```bash
+kubectl -n monitoring port-forward svc/postpilot-observability-grafana 3000:80
+kubectl -n monitoring get secret postpilot-observability-grafana \
+  -o jsonpath='{.data.admin-password}' | base64 -d; echo
+```
+
+Open `http://localhost:3000` as `admin`, then use the printed password. The
+included PostPilot API dashboard shows request rate, p95 latency, 5xx rate,
+and database readiness. Set `cost_alert_email` in `terraform.tfvars` to opt
+into free monthly Budget and Cost Anomaly Detection emails; they notify but do
+not shut down resources.

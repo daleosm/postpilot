@@ -98,6 +98,26 @@ def test_api_exposes_core_tenant_scoped_routes(monkeypatch) -> None:
     get_settings.cache_clear()
 
 
+def test_operational_endpoints_expose_liveness_and_prometheus_metrics(monkeypatch) -> None:
+    monkeypatch.setenv("POSTPILOT_DATABASE_URL", "postgresql://postpilot:postpilot@localhost:5432/postpilot")
+    monkeypatch.setenv("POSTPILOT_SESSION_SECRET", "a-long-enough-test-session-secret-value")
+    get_settings.cache_clear()
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    with TestClient(create_app()) as client:
+        live = client.get("/live")
+        metrics = client.get("/metrics", follow_redirects=False)
+
+    assert live.status_code == 200
+    assert live.json()["status"] == "ok"
+    assert metrics.status_code == 200
+    assert "postpilot_http_requests_total" in metrics.text
+    assert "postpilot_database_ready" in metrics.text
+    get_settings.cache_clear()
+
+
 def test_microsoft_exchange_is_disabled_by_default(monkeypatch) -> None:
     monkeypatch.setenv("POSTPILOT_DATABASE_URL", "postgresql://postpilot:postpilot@localhost:5432/postpilot")
     monkeypatch.setenv("POSTPILOT_SESSION_SECRET", "a-long-enough-test-session-secret-value")
