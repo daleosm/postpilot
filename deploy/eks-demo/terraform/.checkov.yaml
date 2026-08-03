@@ -12,6 +12,10 @@ skip-check:
   # KMS envelope encryption and full EKS control-plane logs add recurring cost.
   - CKV_AWS_58
   - CKV_AWS_37
+  # CloudWatch Logs and Secrets Manager use AWS-managed service keys. A
+  # customer-managed KMS key is intentionally not required for this demo.
+  - CKV_AWS_158
+  - CKV_AWS_149
   # RDS is a low-cost, single-AZ demo database. These are production hardening
   # controls to enable before handling real customer data.
   - CKV_AWS_118
