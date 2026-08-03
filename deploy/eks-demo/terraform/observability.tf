@@ -238,7 +238,14 @@ resource "aws_eks_addon" "secrets_store_csi" {
   # Rotation keeps that mirror aligned with AWS Secrets Manager; restarting the
   # Deployment remains necessary for a process to receive new environment vars.
   configuration_values = jsonencode({
+    # The driver, rather than the AWS provider sidecar, owns the Kubernetes
+    # Secret mirror used by the application envFrom references.
+    driverWritesSecrets = true
     "secrets-store-csi-driver" = {
+      # Enables the SecretProviderClass secretObjects mirror used by envFrom.
+      syncSecret = {
+        enabled = true
+      }
       enableSecretRotation = true
       rotationPollInterval = "2m"
     }
