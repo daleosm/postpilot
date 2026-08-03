@@ -77,6 +77,9 @@ jobs:
       - name: Run ZAP active scan
         run: |
           mkdir -p "$RUNNER_TEMP/zap-active"
+          # The pinned ZAP image runs as its unprivileged `zap` user, while
+          # GitHub creates RUNNER_TEMP as the runner user.
+          chmod 777 "$RUNNER_TEMP/zap-active"
           docker run --rm --network host \
             -v "$RUNNER_TEMP/zap-active:/zap/wrk:rw" \
             ghcr.io/zaproxy/zaproxy@sha256:8d387b1a63e3425beef4846e39719f5af2a787753af2d8b6558c6257d7a577a2 \
