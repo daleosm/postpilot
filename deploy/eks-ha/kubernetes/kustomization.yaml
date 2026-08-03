@@ -5,7 +5,7 @@ resources:
   - namespace.yaml
   - service-account.yaml
   - secret-provider-class.yaml
-  - secrets-sync-job.yaml
+  - secrets-sync.yaml
   - api-migration-job.yaml
   - deployment.yaml
   - api-deployment.yaml
