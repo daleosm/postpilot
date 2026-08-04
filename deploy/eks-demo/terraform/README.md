@@ -22,4 +22,10 @@ terraform apply
 Run `terraform destroy` only when the demo is disposable. The database uses no
 final snapshot by default, so this intentionally removes demo data.
 
+During destroy, Terraform first asks Argo CD to prune the application. If that
+takes too long, it safely prunes only the `postpilot` namespace while Argo CD
+and the AWS Load Balancer Controller are still online, then removes the Argo CD
+Application. It fails rather than tearing down the cluster if namespace pruning
+does not finish, avoiding orphaned load-balancer resources.
+
 This directory contains the complete demo Terraform configuration.

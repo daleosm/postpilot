@@ -23,4 +23,10 @@ terraform apply
 The example enables deletion protection and a final RDS snapshot. Keep those
 settings for a facility database and regularly rehearse backup restoration.
 
+During destroy, Terraform first asks Argo CD to prune the application. If that
+takes too long, it safely prunes only the `postpilot` namespace while Argo CD
+and the AWS Load Balancer Controller are still online, then removes the Argo CD
+Application. It fails rather than tearing down the cluster if namespace pruning
+does not finish, avoiding orphaned load-balancer resources.
+
 This directory contains the complete two-AZ Terraform configuration.

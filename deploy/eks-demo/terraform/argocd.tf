@@ -101,17 +101,58 @@ resource "terraform_data" "postpilot_argocd_application" {
   }
 
   provisioner "local-exec" {
-    when    = destroy
-    command = <<-EOT
-      # Do not let `kubectl delete` wait forever without explaining which
-      # resource is stuck. The Application finalizer prunes its managed
-      # resources (including the ALB-backed Ingress) before Terraform tears
-      # down the controllers that make that possible.
+    when        = destroy
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      # Ask Argo CD to prune first, while the controllers that own the
+      # Application resources (especially the ALB controller) are still up.
+      # Poll rather than using `kubectl wait`: an interrupted Kubernetes watch
+      # previously left Terraform waiting indefinitely during destroy.
+      set -euo pipefail
       aws eks update-kubeconfig --region ${self.input.aws_region} --name ${self.input.cluster_name}
       printf '%s' "$APPLICATION_MANIFEST" | kubectl delete --ignore-not-found --wait=false -f -
-      if kubectl -n argocd get application postpilot >/dev/null 2>&1; then
-        kubectl -n argocd wait --for=delete application/postpilot --timeout=15m
+
+      for attempt in $(seq 1 30); do
+        if ! kubectl -n argocd get application postpilot >/dev/null 2>&1; then
+          break
+        fi
+        sleep 10
+      done
+
+      if kubectl get namespace postpilot >/dev/null 2>&1; then
+        # A remaining namespace means one of the application resources still
+        # needs pruning. Delete only that namespace while Argo CD and the AWS
+        # Load Balancer Controller are still available. Do not remove the
+        # Application finalizer until the namespace is gone; that would risk
+        # orphaning an ALB or another cloud resource.
+        echo "Pruning the remaining postpilot namespace before removing the Argo CD Application."
+        kubectl delete namespace postpilot --ignore-not-found --wait=false
+        for attempt in $(seq 1 60); do
+          if ! kubectl get namespace postpilot >/dev/null 2>&1; then
+            break
+          fi
+          sleep 10
+        done
       fi
+
+      if kubectl get namespace postpilot >/dev/null 2>&1; then
+        echo "PostPilot namespace did not finish pruning; refusing to remove the Argo CD finalizer." >&2
+        exit 1
+      fi
+
+      if kubectl -n argocd get application postpilot >/dev/null 2>&1; then
+        kubectl -n argocd patch application postpilot --type=merge -p '{"metadata":{"finalizers":[]}}'
+      fi
+
+      for attempt in $(seq 1 12); do
+        if ! kubectl -n argocd get application postpilot >/dev/null 2>&1; then
+          exit 0
+        fi
+        sleep 5
+      done
+
+      echo "Argo CD Application still exists after namespace pruning." >&2
+      exit 1
     EOT
 
     environment = {
