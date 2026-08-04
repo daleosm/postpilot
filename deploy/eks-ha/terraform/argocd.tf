@@ -75,7 +75,13 @@ resource "helm_release" "argocd" {
 # included in that same release's manifest. Apply it only after the CRD is
 # established. kubectl uses the operator's existing AWS SSO credentials.
 resource "terraform_data" "postpilot_argocd_application" {
-  input = local.postpilot_argocd_application
+  # Store the values the destroy provisioner needs on this resource. Terraform
+  # only permits `self` references in destroy-time provisioners.
+  input = {
+    application_manifest = local.postpilot_argocd_application
+    aws_region           = var.aws_region
+    cluster_name         = aws_eks_cluster.this.name
+  }
 
   triggers_replace = [
     helm_release.argocd.id,
@@ -84,7 +90,7 @@ resource "terraform_data" "postpilot_argocd_application" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      aws eks update-kubeconfig --region ${var.aws_region} --name ${aws_eks_cluster.this.name}
+      aws eks update-kubeconfig --region ${self.input.aws_region} --name ${self.input.cluster_name}
       kubectl wait --for=condition=established --timeout=180s crd/applications.argoproj.io
       printf '%s' "$APPLICATION_MANIFEST" | kubectl apply --server-side -f -
     EOT
@@ -96,14 +102,37 @@ resource "terraform_data" "postpilot_argocd_application" {
 
   provisioner "local-exec" {
     when    = destroy
-    command = "printf '%s' \"$APPLICATION_MANIFEST\" | kubectl delete --ignore-not-found -f -"
+    command = <<-EOT
+      # Do not let `kubectl delete` wait forever without explaining which
+      # resource is stuck. The Application finalizer prunes its managed
+      # resources (including the ALB-backed Ingress) before Terraform tears
+      # down the controllers that make that possible.
+      aws eks update-kubeconfig --region ${self.input.aws_region} --name ${self.input.cluster_name}
+      printf '%s' "$APPLICATION_MANIFEST" | kubectl delete --ignore-not-found --wait=false -f -
+      if kubectl -n argocd get application postpilot >/dev/null 2>&1; then
+        kubectl -n argocd wait --for=delete application/postpilot --timeout=15m
+      fi
+    EOT
 
     environment = {
-      APPLICATION_MANIFEST = self.input
+      APPLICATION_MANIFEST = self.input.application_manifest
     }
   }
 
-  # The application manifests include a ServiceMonitor, so wait until the
-  # Prometheus Operator has installed its CRDs before Argo first syncs them.
-  depends_on = [helm_release.argocd, helm_release.postpilot_observability]
+  # Keep every controller required to create and delete the application's
+  # resources alive until Argo has pruned them. In particular, the AWS Load
+  # Balancer Controller must remove the Ingress finalizer and ALB before its
+  # Helm release is destroyed. These creation dependencies reverse naturally
+  # during `terraform destroy`.
+  #
+  # The application also mounts Secrets Manager values through the CSI driver,
+  # so keep that driver and its Pod Identity association available while the
+  # application Pods are terminating.
+  depends_on = [
+    helm_release.argocd,
+    helm_release.postpilot_observability,
+    helm_release.aws_load_balancer_controller,
+    aws_eks_addon.secrets_store_csi,
+    aws_eks_pod_identity_association.postpilot_secrets,
+  ]
 }
