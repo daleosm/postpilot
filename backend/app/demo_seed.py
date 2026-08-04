@@ -756,6 +756,12 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
 
     assignments = []
     signer_rows = []
+    # `episode_team_assignments.is_lead` is the persisted workflow-signer
+    # choice.  Every demo episode has one person for each seeded sign-off
+    # role, so make that person the selected signer as the fixtures are built.
+    # This keeps the demo's actionable approvals aligned with the named people
+    # shown in Edit episode → Episode team.
+    workflow_signer_roles = {stage[3] for stage in STAGES}
     for episode in episode_rows:
         roles = {
             "producer",
@@ -781,7 +787,7 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                         "organization_id": organization_id,
                         "episode_id": episode["id"],
                         "person_id": person_id(person_position),
-                        "is_lead": False,
+                        "is_lead": role in workflow_signer_roles,
                     }
                 )
         for stage_position, (_, _, _, role) in enumerate(STAGES, start=1):
@@ -796,7 +802,13 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                         "person_id": person_id(person_position),
                     }
                 )
-    await connection.execute(insert(t.episode_team_assignments).values(assignments))
+    assignment_insert = pg_insert(t.episode_team_assignments).values(assignments)
+    await connection.execute(
+        assignment_insert.on_conflict_do_update(
+            index_elements=["episode_id", "person_id"],
+            set_={"is_lead": assignment_insert.excluded.is_lead},
+        )
+    )
     await connection.execute(insert(t.episode_workflow_signers).values(signer_rows))
     approval_rows = []
     stage_positions = {stage_id(position): position for position in range(1, len(STAGES) + 1)}

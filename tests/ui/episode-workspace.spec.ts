@@ -24,15 +24,17 @@ test.describe("Episode operational workspace UI", () => {
     await expect(page.getByText("Episode actions", { exact: true })).toBeVisible();
   });
 
-  test("keeps workflow in a compact ordered path with a single selected-stage panel", async ({ page }) => {
+  test("guides workflow users with one clear current action and an ordered path", async ({ page }) => {
     await openEpisode(page);
     await page.getByRole("button", { name: "Workflow", exact: true }).click();
 
-    await expect(page.getByLabel("Episode workflow")).toBeVisible();
+    await expect(page.getByLabel("What needs to happen now")).toBeVisible();
+    await expect(page.getByText("What needs to happen now", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Episode workflow path")).toBeVisible();
     await expect(page.getByText(/Stage \d+ of \d+/)).toBeVisible();
     const stageButtons = page.getByRole("button", { name: /^Select / });
     expect(await stageButtons.count()).toBeGreaterThan(3);
-    await stageButtons.nth(1).click();
+    await page.locator('button[aria-label^="Select "][aria-pressed="false"]').first().click();
     await expect(page.getByText("Selected stage", { exact: true })).toBeVisible();
   });
 

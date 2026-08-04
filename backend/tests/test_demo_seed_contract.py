@@ -35,6 +35,15 @@ def test_demo_seed_uses_short_human_names_for_supplemental_debug_users() -> None
     assert all("Post" not in name and "Finish" not in name and "Editorial" not in name for name in names)
 
 
+def test_demo_seed_marks_named_workflow_roles_as_episode_signers() -> None:
+    """Seeded approvals must be actionable by their named episode-team person."""
+    source = (Path(__file__).resolve().parents[1] / "app/demo_seed.py").read_text()
+
+    assert "workflow_signer_roles = {stage[3] for stage in STAGES}" in source
+    assert '"is_lead": role in workflow_signer_roles' in source
+    assert "on_conflict_do_update" in source
+
+
 def test_demo_seed_documents_transparent_cost_plans_and_linked_actual_sources() -> None:
     source = (Path(__file__).resolve().parents[1] / "app/demo_seed.py").read_text()
 

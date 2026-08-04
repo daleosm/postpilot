@@ -107,7 +107,7 @@ test.describe("Workflow operational actions", () => {
     await page.getByRole("button", { name: "Workflow", exact: true }).click();
 
     await expect(page.getByText(/\d+ active work orders?/, { exact: false })).toBeVisible();
-    const activeWork = page.getByRole("region", { name: /Active work orders for/ });
+    const activeWork = page.getByRole("region", { name: "Active work orders" });
     await expect(activeWork.getByText(TEST_WORK_ORDER_TITLE, { exact: true })).toBeVisible();
   });
 });

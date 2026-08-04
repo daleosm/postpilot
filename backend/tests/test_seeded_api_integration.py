@@ -283,6 +283,36 @@ def test_debug_switching_keeps_the_authenticator_but_resolves_the_selected_users
     assert context["active_organization_id"] in {item["organization_id"] for item in context["memberships"]}
 
 
+def test_debug_switching_from_an_inaccessible_episode_uses_my_work_as_a_safe_fallback(client: TestClient) -> None:
+    sign_in_as_maya(client)
+    # This stable episode belongs to Northstar.  The Copperline producer has
+    # no membership or team assignment there.
+    episode_id = uid(1, "27", 1)
+    assumed = client.put(
+        "/v1/debug/user",
+        # This Copperline-only user cannot access Maya's default Northstar
+        # episode, so the debug switcher must choose its safe work queue.
+        json={"user_id": "user_copper_producer", "pathname": f"/episodes/{episode_id}"},
+    )
+
+    assert assumed.status_code == 200
+    assert assumed.json()["redirect_to"] == "/review"
+
+
+def test_seeded_episode_team_nominates_the_configured_online_editor_as_workflow_signer(client: TestClient) -> None:
+    sign_in_as_maya(client)
+    copperline_id = "10000000-0000-4000-8000-000000000005"
+    selected = client.post("/v1/organizations/active", json={"organization_id": copperline_id, "pathname": "/"})
+    assert selected.status_code == 200
+
+    workspace = client.get(f"/v1/episodes/{uid(5, '27', 1)}/workspace")
+    assert workspace.status_code == 200, workspace.text
+    online_signers = [signer for signer in workspace.json()["workflow_signers"] if signer["role"] == "online_editor"]
+
+    assert len(online_signers) == 1
+    assert online_signers[0]["name"] == "Skyler Dean"
+
+
 def test_debug_switcher_refuses_unknown_people(client: TestClient) -> None:
     sign_in_as_maya(client)
 

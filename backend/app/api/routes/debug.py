@@ -58,7 +58,14 @@ async def set_debug_user(
     if not token:
         raise RuntimeError("Authenticated request lost its session cookie.")
     next_actor = await get_actor_for_token(session, token)
-    return session_response(next_actor, redirect_to=await tenant_redirect(session, next_actor, payload.pathname))
+    redirect_to = await tenant_redirect(session, next_actor, payload.pathname)
+    # A debug user is deliberately allowed to come from any demo post house.
+    # If the current nested page is not available to that person, keep the
+    # access boundary and take them to their actionable queue instead of the
+    # generic dashboard root.
+    if redirect_to == "/" and payload.pathname and payload.pathname != "/":
+        redirect_to = "/review"
+    return session_response(next_actor, redirect_to=redirect_to)
 
 
 @router.delete("/user", status_code=status.HTTP_204_NO_CONTENT)
