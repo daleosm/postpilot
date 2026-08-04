@@ -631,9 +631,9 @@ catering_requests = Table(
     ),
 )
 
-# Rate cards are the facility's live room/service price source. Person rates
-# remain on the tenant person record, so time confirmations can calculate an
-# internal cost without accepting a browser-supplied amount.
+# Rate cards are the facility's live commercial price source. A card item can
+# target a generic service, one room, or one named person. The target is
+# explicit so a named artist is never silently added to every rate card.
 service_rates = Table(
     "service_rates",
     metadata,
@@ -676,12 +676,26 @@ rate_card_items = Table(
     Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
     Column("rate_card_id", UUID(as_uuid=False), ForeignKey("rate_cards.id", ondelete="CASCADE"), nullable=False),
     Column("service_rate_id", UUID(as_uuid=False)),
+    Column("target_type", String(16), nullable=False, server_default="service"),
+    Column("room_id", UUID(as_uuid=False), ForeignKey("rooms.id", ondelete="CASCADE")),
+    Column("person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="CASCADE")),
     Column("category", Text, nullable=False),
     Column("unit", Text, nullable=False),
     Column("rate", Numeric(14, 2), nullable=False),
+    Column("internal_cost_rate", Numeric(14, 2)),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
     CheckConstraint("rate >= 0", name="rate_card_items_rate_non_negative_check"),
+    CheckConstraint(
+        "internal_cost_rate IS NULL OR internal_cost_rate >= 0",
+        name="rate_card_items_internal_cost_rate_non_negative_check",
+    ),
+    CheckConstraint(
+        "(target_type = 'service' AND room_id IS NULL AND person_id IS NULL) "
+        "OR (target_type = 'room' AND room_id IS NOT NULL AND person_id IS NULL AND service_rate_id IS NULL) "
+        "OR (target_type = 'person' AND person_id IS NOT NULL AND room_id IS NULL AND service_rate_id IS NULL)",
+        name="rate_card_items_target_check",
+    ),
 )
 
 bookings = Table(
@@ -702,6 +716,12 @@ bookings = Table(
     Column("actual_starts_at", DateTime(timezone=True)),
     Column("actual_ends_at", DateTime(timezone=True)),
     Column("approved_overtime_minutes", Integer, nullable=False),
+    # A migration-owned attention flag. It is set only when a historical
+    # confirmed booking has no complete saved room/person commercial snapshot;
+    # it never invents a rate from a current catalogue or person record.
+    Column("commercial_review_required", Boolean, nullable=False),
+    Column("commercial_review_reason", Text),
+    Column("commercial_review_marked_at", DateTime(timezone=True)),
     Column("is_option", Boolean, nullable=False),
     Column("option_rank", Integer),
     Column("status", existing_postgres_enum("booking_status"), nullable=False),
@@ -709,6 +729,100 @@ bookings = Table(
     Column("notes", Text),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+)
+
+# A confirmed reservation has an agreed commercial snapshot for each resource
+# it uses.  This stays separate from a budget estimate: scheduling must remain
+# possible before an episode estimate has been built.
+booking_charge_components = Table(
+    "booking_charge_components",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("booking_id", UUID(as_uuid=False), ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False),
+    Column("component_type", Text, nullable=False),
+    Column("room_id", UUID(as_uuid=False), ForeignKey("rooms.id", ondelete="SET NULL")),
+    Column("person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
+    Column("resource_name", Text, nullable=False),
+    Column("category", Text, nullable=False),
+    Column("billing_unit", Text, nullable=False),
+    Column("client_rate", Numeric(14, 2), nullable=False),
+    Column("internal_cost_rate", Numeric(14, 2)),
+    Column("currency", Text, nullable=False),
+    Column("rate_source", Text, nullable=False),
+    Column("rate_card_scope", Text, nullable=False),
+    Column("rate_card_id", UUID(as_uuid=False), ForeignKey("rate_cards.id", ondelete="SET NULL")),
+    Column("rate_card_item_id", UUID(as_uuid=False), ForeignKey("rate_card_items.id", ondelete="SET NULL")),
+    Column("is_negotiated_override", Boolean, nullable=False),
+    Column("override_reason", Text),
+    Column("overridden_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("overridden_at", DateTime(timezone=True)),
+    Column("estimated_quantity", Numeric(14, 2), nullable=False),
+    Column("estimated_amount", Numeric(14, 2), nullable=False),
+    # These are derived only when approved actual time is submitted. They are
+    # retained beside the immutable agreed rate snapshot so a later rate-card
+    # change cannot rewrite a historical charge.
+    Column("actual_quantity", Numeric(14, 6)),
+    Column("actual_overtime_quantity", Numeric(14, 6), nullable=False),
+    Column("actual_client_amount", Numeric(14, 2)),
+    Column("actual_internal_amount", Numeric(14, 2)),
+    Column("overtime_multiplier", Numeric(6, 3), nullable=False),
+    Column("actual_submitted_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint("component_type IN ('room', 'person')", name="booking_charge_components_type_check"),
+    CheckConstraint("client_rate >= 0", name="booking_charge_components_client_rate_non_negative_check"),
+    CheckConstraint(
+        "internal_cost_rate IS NULL OR internal_cost_rate >= 0",
+        name="booking_charge_components_internal_rate_non_negative_check",
+    ),
+    CheckConstraint("estimated_quantity >= 0", name="booking_charge_components_quantity_non_negative_check"),
+    CheckConstraint("estimated_amount >= 0", name="booking_charge_components_amount_non_negative_check"),
+    CheckConstraint("actual_quantity IS NULL OR actual_quantity >= 0", name="booking_charge_components_actual_quantity_non_negative_check"),
+    CheckConstraint("actual_overtime_quantity >= 0", name="booking_charge_components_actual_overtime_non_negative_check"),
+    CheckConstraint("actual_client_amount IS NULL OR actual_client_amount >= 0", name="booking_charge_components_actual_client_non_negative_check"),
+    CheckConstraint("actual_internal_amount IS NULL OR actual_internal_amount >= 0", name="booking_charge_components_actual_internal_non_negative_check"),
+    CheckConstraint("overtime_multiplier >= 1", name="booking_charge_components_overtime_multiplier_check"),
+    CheckConstraint(
+        "(is_negotiated_override IS FALSE AND override_reason IS NULL) "
+        "OR (is_negotiated_override IS TRUE AND override_reason IS NOT NULL)",
+        name="booking_charge_components_override_reason_check",
+    ),
+    CheckConstraint(
+        "(component_type = 'room' AND room_id IS NOT NULL AND person_id IS NULL) "
+        "OR (component_type = 'person' AND person_id IS NOT NULL AND room_id IS NULL)",
+        name="booking_charge_components_resource_check",
+    ),
+    UniqueConstraint("booking_id", "component_type", name="booking_charge_components_booking_type_unique"),
+)
+
+# An explicit commercial decision is required before a booking component can
+# enter an invoice. This is deliberately not inferred from scheduling status.
+booking_component_invoice_selections = Table(
+    "booking_component_invoice_selections",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column(
+        "booking_charge_component_id",
+        UUID(as_uuid=False),
+        ForeignKey("booking_charge_components.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("include_in_invoice", Boolean, nullable=False),
+    Column("reason", Text),
+    Column("selected_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("selected_at", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint(
+        "include_in_invoice IS TRUE OR reason IS NOT NULL",
+        name="booking_component_invoice_selection_reason_check",
+    ),
+    UniqueConstraint(
+        "booking_charge_component_id",
+        name="booking_component_invoice_selections_component_unique",
+    ),
 )
 
 delivery_profiles = Table(
@@ -1079,15 +1193,59 @@ client_invoice_items = Table(
     ),
     Column("description", Text, nullable=False),
     Column("reference", Text),
-    Column("quantity", Numeric(12, 3), nullable=False),
+    Column("quantity", Numeric(14, 6), nullable=False),
     Column("unit_amount", Numeric(14, 2), nullable=False),
     Column("amount", Numeric(14, 2), nullable=False),
+    Column(
+        "booking_charge_component_id",
+        UUID(as_uuid=False),
+        ForeignKey("booking_charge_components.id", ondelete="RESTRICT"),
+    ),
+    Column("booking_component_charge_kind", Text),
+    # Booking-derived items retain these snapshots so a later scheduling or
+    # rate-card edit cannot rewrite an issued commercial document.
+    Column("source_booking_id", UUID(as_uuid=False), ForeignKey("bookings.id", ondelete="RESTRICT")),
+    Column("booking_date", Date),
+    Column("episode_code", Text),
+    Column("episode_title", Text),
+    Column("resource_type", Text),
+    Column("resource_name", Text),
+    Column("saved_rate", Numeric(14, 2)),
+    Column("overtime_multiplier", Numeric(7, 3)),
+    Column("voided_at", DateTime(timezone=True)),
+    Column("voided_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
     CheckConstraint(
         "quantity > 0 AND unit_amount >= 0 AND amount >= 0 AND amount = round(quantity * unit_amount, 2)",
         name="client_invoice_items_financial_amounts_check",
     ),
+    CheckConstraint(
+        "(booking_charge_component_id IS NULL AND booking_component_charge_kind IS NULL) "
+        "OR (booking_charge_component_id IS NOT NULL AND booking_component_charge_kind IN ('base', 'overtime'))",
+        name="client_invoice_items_booking_component_kind_check",
+    ),
+)
+
+# Reversals copy the already-issued numbers.  They never recompute an amount
+# from the current booking, rate card, or source component.
+client_invoice_line_reversals = Table(
+    "client_invoice_line_reversals",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("client_invoice_id", UUID(as_uuid=False), ForeignKey("client_invoices.id", ondelete="CASCADE"), nullable=False),
+    Column("client_invoice_item_id", UUID(as_uuid=False), ForeignKey("client_invoice_items.id", ondelete="RESTRICT"), nullable=False),
+    Column("reversal_type", Text, nullable=False),
+    Column("quantity", Numeric(14, 6), nullable=False),
+    Column("unit_amount", Numeric(14, 2), nullable=False),
+    Column("amount", Numeric(14, 2), nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("created_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint("reversal_type IN ('void', 'credit')", name="client_invoice_line_reversals_type_check"),
+    CheckConstraint("quantity > 0 AND unit_amount >= 0 AND amount < 0", name="client_invoice_line_reversals_amount_check"),
+    UniqueConstraint("client_invoice_item_id", name="client_invoice_line_reversals_item_unique"),
 )
 
 purchase_order_allocations = Table(

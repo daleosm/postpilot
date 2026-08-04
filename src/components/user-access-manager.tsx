@@ -49,8 +49,11 @@ export function UserAccessManager({ users, policies }: { users: UserAccess[]; po
     }
     form.reset({ name: "", email: "", password: "", confirmPassword: "", personRole: firstOperationalRole, membershipRole: "member" });
     setOpen(false);
-    setMessage("User access created. They can now sign in with their email and password.");
     router.refresh();
+    // Refresh the server-provided access list first. Keeping the compact
+    // confirmation as the last local update prevents the refresh from
+    // replacing it before an administrator can see the successful result.
+    setMessage("User access created.");
   }
 
   async function saveAccess() {

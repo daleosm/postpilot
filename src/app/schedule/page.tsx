@@ -4,22 +4,22 @@ import { PageHeader } from "@/components/operations-ui";
 import { ScheduleBoard } from "@/components/schedule-board";
 import { getActiveOrganizationContext } from "@/lib/organizations";
 import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
-import { canManageBookings, canRecordBookingActuals, canViewAllOperations, roleHome } from "@/lib/permissions";
+import { can, canManageBookings, canRecordBookingActuals, canViewAllOperations, roleHome } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 
 export default async function SchedulePage({ searchParams }: { searchParams: Promise<{ workOrder?: string; booking?: string }> }) {
-  const [mayManage, maySubmitOwnTime, mayViewAll] = await Promise.all([canManageBookings(), canRecordBookingActuals(), canViewAllOperations()]);
+  const [mayManage, maySubmitOwnTime, mayViewAll, mayManageCommercial] = await Promise.all([canManageBookings(), canRecordBookingActuals(), canViewAllOperations(), can("manage_commercial")]);
   if (!mayManage && !maySubmitOwnTime && !mayViewAll) redirect(await roleHome());
   const context = await getActiveOrganizationContext();
-  const data = await getScheduleData();
+  const data = await getScheduleData(mayManageCommercial);
   const { workOrder: requestedWorkOrderId, booking: requestedBookingId } = await searchParams;
   const initialStart = inputDate(new Date());
   return <div className="pp-page"><PageHeader eyebrow={`Post floor calendar · ${data.organizationName}`} title="Bookings" description="Edit bays, colour, mix, QC, artist assignments, and episode-linked work." metrics={[{ label: "Bookings", value: data.bookings.length }, { label: "Rooms", value: data.resources.rooms.length }, { label: "Option holds", value: data.bookings.filter((booking) => booking.isOption).length, tone: "warning" }]} action={mayManage ? <div className="flex flex-wrap gap-2"><CopyEpisodeBookingsDialog resources={data.resources} initialStart={initialStart} /><BookingFormDialog resources={data.resources} initialStart={initialStart} /></div> : undefined} /><ScheduleBoard bookings={data.bookings} rooms={data.resources.rooms} resources={data.resources} cateringRequests={data.cateringRequests} workOrders={data.workOrders} initialDate={new Date().toISOString()} initialWorkOrderId={requestedWorkOrderId ?? null} initialBookingId={requestedBookingId ?? null} canManage={mayManage} canSubmitOwnTime={maySubmitOwnTime} currentPersonId={context?.person?.id ?? null} /></div>;
 }
 
-async function getScheduleData() {
+async function getScheduleData(canManageCommercial: boolean) {
   const context = await getActiveOrganizationContext();
-  if (!context?.organization) return { organizationName: "No workspace", bookings: [], resources: { rooms: [], people: [], guestAccounts: [], episodes: [], budgetItems: [] }, cateringRequests: [], workOrders: [] };
+  if (!context?.organization) return { organizationName: "No workspace", bookings: [], resources: { rooms: [], people: [], guestAccounts: [], episodes: [], budgetItems: [], canManageCommercial: false }, cateringRequests: [], workOrders: [] };
   const from = new Date(Date.now() - 60 * 86_400_000); const to = new Date(Date.now() + 90 * 86_400_000);
   const query = `?from_at=${encodeURIComponent(from.toISOString())}&to_at=${encodeURIComponent(to.toISOString())}`;
     const [schedule, resources, catering, inbox] = await Promise.all([
@@ -37,6 +37,7 @@ async function getScheduleData() {
         guestAccounts: resources.guest_accounts,
         episodes: resources.episodes,
         budgetItems: resources.budget_items.map((item) => ({ id: item.id, episodeId: item.episode_id, label: item.label, hasRateSnapshot: item.has_rate_snapshot })),
+        canManageCommercial,
       },
       cateringRequests: catering.map((request) => ({
         id: request.id,
@@ -71,6 +72,7 @@ type ApiBooking = {
   episode_production_code: string | null; person_name: string | null; actual_budget_status: "not_submitted" | "allocated" | "unallocated"; budget_item_label: string | null; budget_item: { id: string; label: string } | null; budget_item_context?: { estimated_amount: number; actual_amount: number; remaining_estimate: number; currency: string } | null; workflow_state: { display_status: string; primary_stage_name: string | null } | null;
 };
 type ApiBookingResources = {
+  can_manage_commercial: boolean;
   rooms: Array<{ id: string; name: string; type: string }>;
   people: Array<{ id: string; name: string; role: string; availability: string; is_freelancer: boolean }>;
   guest_accounts: Array<{ id: string; name: string; role: string; email: string | null }>;

@@ -8,11 +8,12 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, case, func, insert, or_, select, update
+from sqlalchemy import and_, case, delete, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.dependencies import CurrentActor, DbSession
 from app.api.production import may_view_all_episodes
+from app.api.routes.rate_cards import resolve_effective_rate
 from app.api.schemas import (
     BookingConflictFlagRequest,
     BookingConflictRequest,
@@ -22,14 +23,23 @@ from app.api.schemas import (
     CopyEpisodeBookingsRequest,
 )
 from app.auth import has_permission, require_permission
-from app.booking_costs import BOOKING_RATE_DEFINITIONS, confirmed_hours, cost_for_hours
+from app.booking_costs import (
+    BOOKING_RATE_DEFINITIONS,
+    OVERTIME_MULTIPLIER,
+    confirmed_hours,
+    cost_for_hours,
+    raw_quantity_for_hours,
+    supports_overtime,
+)
 from app.booking_logic import booking_conflicts, is_active_option, nearest_free_slot, resequence_options
 from app.budget_actuals import record_budget_actual
 from app.budget_logic import json_safe
 from app.db.tables import (
     activity_log,
+    booking_charge_components,
     bookings,
     budget_lines,
+    client_invoice_items,
     episode_team_assignments,
     episodes,
     organization_members,
@@ -72,6 +82,8 @@ def _booking_values(row: object, *, include_commercial_context: bool = False) ->
         "actual_starts_at": row.actual_starts_at,
         "actual_ends_at": row.actual_ends_at,
         "approved_overtime_minutes": row.approved_overtime_minutes,
+        "commercial_review_required": bool(getattr(row, "commercial_review_required", False)),
+        "commercial_review_reason": getattr(row, "commercial_review_reason", None),
         "is_option": row.is_option,
         "option_rank": row.option_rank,
         "status": row.status,
@@ -288,54 +300,471 @@ async def _actual_cost(
     actual_ends_at: datetime,
     overtime_minutes: int,
 ) -> dict[str, object]:
-    """Calculate internal cost from tenant records, never client input."""
-    actual_hours = confirmed_hours(actual_starts_at, actual_ends_at, overtime_minutes)
-    room_rate = await _resolve_room_rate(
-        session,
-        actor,
-        episode_id=str(booking.episode_id) if booking.episode_id else None,
-        booking_type=booking.booking_type,
-    )
-    person = None
-    if booking.person_id:
-        person = (
-            await session.execute(
-                select(people.c.id, people.c.name, people.c.hourly_rate, people.c.day_rate).where(
-                    and_(people.c.id == booking.person_id, people.c.organization_id == actor.organization_id)
+    """Apply approved time to the booking's immutable charge snapshots.
+
+    The browser supplies dates and approved overtime only.  Both the client
+    charge and internal cost are calculated from rates stored at confirmation,
+    so changes to a rate card or person profile cannot rewrite actual history.
+    """
+    components = (
+        await session.execute(
+            select(booking_charge_components)
+            .where(
+                and_(
+                    booking_charge_components.c.organization_id == actor.organization_id,
+                    booking_charge_components.c.booking_id == booking.id,
                 )
             )
-        ).first()
-        if not person:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assigned person not found.")
-    artist_rate = _person_rate(person, actor.active_organization.currency) if person else None
-    room_cost = cost_for_hours(room_rate["rate"], room_rate["unit"], actual_hours) if room_rate else Decimal(0)
-    artist_cost = cost_for_hours(artist_rate["rate"], artist_rate["unit"], actual_hours) if artist_rate else Decimal(0)
-    total = room_cost + artist_cost
+            .order_by(booking_charge_components.c.component_type)
+        )
+    ).all()
+    if not components:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This confirmed booking has no commercial rate snapshot. "
+                "Reconfirm its commercial details before posting actual time."
+            ),
+        )
+
+    base_hours = confirmed_hours(actual_starts_at, actual_ends_at, 0)
+    overtime_hours = (Decimal(overtime_minutes) / Decimal(60)).quantize(Decimal("0.01"))
+    actual_hours = base_hours + overtime_hours
+    total_internal_cost = Decimal(0)
+    total_client_charge = Decimal(0)
+    result_components: list[dict[str, object]] = []
+    legacy: dict[str, dict[str, object] | None] = {"room": None, "artist": None}
+    now = datetime.now(UTC)
+
+    for component in components:
+        unit = str(component.billing_unit)
+        overtime_multiplier = _decimal(component.overtime_multiplier) or OVERTIME_MULTIPLIER
+        base_quantity = raw_quantity_for_hours(unit, base_hours).quantize(Decimal("0.000001"))
+        overtime_quantity = (
+            raw_quantity_for_hours(unit, overtime_hours).quantize(Decimal("0.000001"))
+            if supports_overtime(unit)
+            else Decimal(0)
+        )
+        client_rate = _decimal(component.client_rate) or Decimal(0)
+        internal_rate = _decimal(component.internal_cost_rate)
+        client_amount = cost_for_hours(client_rate, unit, base_hours)
+        internal_amount = cost_for_hours(internal_rate, unit, base_hours) if internal_rate is not None else None
+        if overtime_hours and supports_overtime(unit):
+            client_amount += cost_for_hours(client_rate * overtime_multiplier, unit, overtime_hours)
+            if internal_rate is not None:
+                internal_amount = (internal_amount or Decimal(0)) + cost_for_hours(
+                    internal_rate * overtime_multiplier, unit, overtime_hours
+                )
+        client_amount = client_amount.quantize(Decimal("0.01"))
+        if internal_amount is not None:
+            internal_amount = internal_amount.quantize(Decimal("0.01"))
+            total_internal_cost += internal_amount
+        total_client_charge += client_amount
+
+        await session.execute(
+            update(booking_charge_components)
+            .where(
+                and_(
+                    booking_charge_components.c.id == component.id,
+                    booking_charge_components.c.organization_id == actor.organization_id,
+                )
+            )
+            .values(
+                actual_quantity=base_quantity,
+                actual_overtime_quantity=overtime_quantity,
+                actual_client_amount=client_amount,
+                actual_internal_amount=internal_amount,
+                actual_submitted_at=now,
+                updated_at=now,
+            )
+        )
+        component_result = {
+            "id": str(component.id),
+            "component_type": component.component_type,
+            "resource": component.resource_name,
+            "resource_id": str(component.room_id or component.person_id),
+            "unit": unit,
+            "currency": component.currency,
+            "source": component.rate_source,
+            "rate_card_scope": component.rate_card_scope,
+            "client_rate": _money(client_rate),
+            "internal_cost_rate": _money(internal_rate) if internal_rate is not None else None,
+            "actual_quantity": _money(base_quantity),
+            "overtime_quantity": _money(overtime_quantity),
+            "overtime_multiplier": _money(overtime_multiplier),
+            "actual_client_charge": _money(client_amount),
+            "actual_internal_cost": _money(internal_amount) if internal_amount is not None else None,
+        }
+        result_components.append(component_result)
+        legacy_key = "room" if component.component_type == "room" else "artist"
+        legacy[legacy_key] = {
+            "category": component.category,
+            "rate": _money(internal_rate if internal_rate is not None else client_rate),
+            "unit": unit,
+            "source": component.rate_source,
+            "cost": _money(internal_amount) if internal_amount is not None else 0.0,
+            **(
+                {"person_id": str(component.person_id), "name": component.resource_name}
+                if component.component_type == "person"
+                else {}
+            ),
+        }
+
     return {
         "actual_hours": _money(actual_hours),
         "overtime_minutes": overtime_minutes,
-        "currency": (room_rate or artist_rate or {"currency": actor.active_organization.currency})["currency"],
-        "room": {
-            "category": room_rate["category"],
-            "rate": _money(room_rate["rate"]),
-            "unit": room_rate["unit"],
-            "source": room_rate["source"],
-            "cost": _money(room_cost),
-        }
-        if room_rate
-        else None,
-        "artist": {
-            "person_id": str(person.id),
-            "name": person.name,
-            "rate": _money(artist_rate["rate"]),
-            "unit": artist_rate["unit"],
-            "source": artist_rate["source"],
-            "cost": _money(artist_cost),
-        }
-        if person and artist_rate
-        else None,
-        "total_internal_cost": _money(total),
+        "currency": components[0].currency,
+        "components": result_components,
+        "room": legacy["room"],
+        "artist": legacy["artist"],
+        "total_client_charge": _money(total_client_charge),
+        "total_internal_cost": _money(total_internal_cost),
     }
+
+
+def _commercial_component_response(component: object) -> dict[str, object]:
+    """Expose a saved rate snapshot without leaking a mutable pricing input."""
+    return {
+        "id": str(component.id),
+        "component_type": component.component_type,
+        "resource": component.resource_name,
+        "resource_id": str(component.room_id or component.person_id),
+        "category": component.category,
+        "rate": _money(_decimal(component.client_rate) or Decimal(0)),
+        "internal_cost_rate": (
+            _money(_decimal(component.internal_cost_rate) or Decimal(0))
+            if component.internal_cost_rate is not None
+            else None
+        ),
+        "unit": component.billing_unit,
+        "currency": component.currency,
+        "source": component.rate_source,
+        "rate_card_scope": component.rate_card_scope,
+        "source_card_id": str(component.rate_card_id) if component.rate_card_id else None,
+        "source_card_item_id": str(component.rate_card_item_id) if component.rate_card_item_id else None,
+        "is_negotiated_override": component.is_negotiated_override,
+        "override_reason": component.override_reason,
+        "estimated_quantity": _money(_decimal(component.estimated_quantity) or Decimal(0)),
+        "estimated_charge": _money(_decimal(component.estimated_amount) or Decimal(0)),
+        "actual_quantity": (
+            _money(_decimal(component.actual_quantity) or Decimal(0))
+            if component.actual_quantity is not None
+            else None
+        ),
+        "actual_overtime_quantity": _money(_decimal(component.actual_overtime_quantity) or Decimal(0)),
+        "actual_client_charge": (
+            _money(_decimal(component.actual_client_amount) or Decimal(0))
+            if component.actual_client_amount is not None
+            else None
+        ),
+        "actual_internal_cost": (
+            _money(_decimal(component.actual_internal_amount) or Decimal(0))
+            if component.actual_internal_amount is not None
+            else None
+        ),
+        "overtime_multiplier": _money(_decimal(component.overtime_multiplier) or OVERTIME_MULTIPLIER),
+    }
+
+
+async def _resolve_booking_commercial_components(
+    session: DbSession,
+    actor: CurrentActor,
+    payload: BookingCreateRequest,
+) -> list[dict[str, object]]:
+    """Resolve room/person commercial previews from tenant rate cards.
+
+    The browser supplies only operational booking choices.  Every rate, rate
+    source and amount is resolved here against the selected episode contract.
+    """
+    definition = BOOKING_RATE_DEFINITIONS.get(payload.booking_type)
+    if not definition or not payload.episode_id or payload.status == "cancelled":
+        return []
+    category, unit = definition
+    quantity = confirmed_hours(payload.starts_at, payload.ends_at, 0)
+    targets: list[tuple[str, str, object]] = []
+    if payload.room_id:
+        room = (
+            await session.execute(
+                select(rooms.c.id, rooms.c.name).where(
+                    and_(rooms.c.id == payload.room_id, rooms.c.organization_id == actor.organization_id)
+                )
+            )
+        ).first()
+        if room:
+            targets.append(("room", str(room.id), room))
+    if payload.person_id:
+        person = (
+            await session.execute(
+                select(people.c.id, people.c.name, people.c.hourly_rate, people.c.day_rate).where(
+                    and_(people.c.id == payload.person_id, people.c.organization_id == actor.organization_id)
+                )
+            )
+        ).first()
+        if person:
+            targets.append(("person", str(person.id), person))
+
+    overrides = {override.component_type: override for override in payload.commercial_overrides}
+    components: list[dict[str, object]] = []
+    for component_type, target_id, resource in targets:
+        effective = await resolve_effective_rate(
+            session,
+            actor,
+            episode_id=payload.episode_id,
+            category=category,
+            unit=unit,
+            target_type=component_type,
+            target_id=target_id,
+        )
+        override = overrides.get(component_type)
+        rate = _decimal(override.rate) if override else _decimal(effective.get("client_rate", effective.get("rate")))
+        source = effective.get("source")
+        if override:
+            source = "negotiated_booking_override"
+        # A preview should make a missing commercial rule obvious, rather than
+        # quietly inventing a price from a person profile or the browser.
+        if rate is None or not source:
+            components.append(
+                {
+                    "component_type": component_type,
+                    "resource": resource.name,
+                    "resource_id": target_id,
+                    "category": category,
+                    "rate": None,
+                    "internal_cost_rate": None,
+                    "unit": unit,
+                    "currency": actor.active_organization.currency,
+                    "source": None,
+                    "source_card_id": None,
+                    "source_card_item_id": None,
+                    "rate_card_scope": None,
+                    "estimated_quantity": _money(quantity),
+                    "estimated_charge": None,
+                    "pricing_status": "rate_missing",
+                    "is_negotiated_override": False,
+                    "override_reason": None,
+                }
+            )
+            continue
+        # Rate cards can deliberately provide a separate internal rate. Until
+        # a facility has done that, retain the current operational fallback at
+        # confirmation time: a person's matching profile rate, otherwise the
+        # resolved commercial rate. The fallback is still a snapshot, never a
+        # live lookup made when actuals are submitted.
+        internal_rate = _decimal(effective.get("internal_cost_rate"))
+        if internal_rate is None and component_type == "person":
+            profile_rate = _person_rate(resource, str(effective["currency"]))
+            if profile_rate and profile_rate["unit"] == unit:
+                internal_rate = _decimal(profile_rate["rate"])
+        if internal_rate is None:
+            internal_rate = rate
+        amount = cost_for_hours(rate, unit, quantity)
+        source_is_card = str(source).endswith("_rate_card") and source != "facility_rate_card"
+        rate_card_scope = {
+            "master_rate_card": "master",
+            "network_rate_card": "network",
+            "client_rate_card": "client",
+            "show_rate_card": "show",
+            "episode_rate_card": "episode",
+            "negotiated_booking_override": "booking_override",
+        }.get(str(source), "facility")
+        components.append(
+            {
+                "component_type": component_type,
+                "resource": resource.name,
+                "resource_id": target_id,
+                "category": category,
+                "rate": _money(rate),
+                "internal_cost_rate": _money(internal_rate),
+                "unit": unit,
+                "currency": str(effective["currency"]),
+                "source": str(source),
+                "source_card_id": str(effective["card_id"]) if source_is_card and effective.get("card_id") else None,
+                "source_card_item_id": (
+                    str(effective["item_id"]) if source_is_card and effective.get("item_id") else None
+                ),
+                "rate_card_scope": rate_card_scope,
+                "estimated_quantity": _money(quantity),
+                "estimated_charge": _money(amount),
+                "pricing_status": "resolved",
+                "is_negotiated_override": bool(override),
+                "override_reason": override.reason.strip() if override else None,
+            }
+        )
+    return components
+
+
+async def _sync_booking_commercial_components(
+    session: DbSession,
+    actor: CurrentActor,
+    *,
+    booking: object,
+    payload: BookingCreateRequest,
+    preserve_existing: bool = False,
+) -> list[dict[str, object]]:
+    """Save one immutable room/person snapshot when a booking is confirmed.
+
+    Once actual time has been submitted the saved agreement is not refreshed by
+    later scheduling edits.  A retry or an edit before actuals is idempotent
+    because each component is unique per booking and component type.
+    """
+    # Commercial snapshots are written once, at confirmation. Tentative and
+    # pencil bookings can request a fresh preview but never receive a ledger
+    # row; after confirmation no later rate-card edit can rewrite the record.
+    if preserve_existing or payload.is_option or payload.status != "confirmed":
+        rows = (
+            await session.execute(
+                select(booking_charge_components)
+                .where(
+                    and_(
+                        booking_charge_components.c.organization_id == actor.organization_id,
+                        booking_charge_components.c.booking_id == booking.id,
+                    )
+                )
+                .order_by(booking_charge_components.c.component_type)
+            )
+        ).all()
+        return [_commercial_component_response(row) for row in rows]
+
+    preview = await _resolve_booking_commercial_components(session, actor, payload)
+    resolved = [component for component in preview if component["pricing_status"] == "resolved"]
+    resolved_types = [str(component["component_type"]) for component in resolved]
+    delete_statement = delete(booking_charge_components).where(
+        and_(
+            booking_charge_components.c.organization_id == actor.organization_id,
+            booking_charge_components.c.booking_id == booking.id,
+        )
+    )
+    if resolved_types:
+        delete_statement = delete_statement.where(booking_charge_components.c.component_type.not_in(resolved_types))
+    await session.execute(delete_statement)
+
+    now = datetime.now(UTC)
+    for component in resolved:
+        values = {
+            "id": str(uuid4()),
+            "organization_id": actor.organization_id,
+            "booking_id": booking.id,
+            "component_type": component["component_type"],
+            "room_id": component["resource_id"] if component["component_type"] == "room" else None,
+            "person_id": component["resource_id"] if component["component_type"] == "person" else None,
+            "resource_name": component["resource"],
+            "category": component["category"],
+            "billing_unit": component["unit"],
+            "client_rate": _decimal(component["rate"]),
+            "internal_cost_rate": _decimal(component["internal_cost_rate"]),
+            "currency": component["currency"],
+            "rate_source": component["source"],
+            "rate_card_scope": component["rate_card_scope"],
+            "rate_card_id": component["source_card_id"],
+            "rate_card_item_id": component["source_card_item_id"],
+            "is_negotiated_override": component["is_negotiated_override"],
+            "override_reason": component["override_reason"],
+            "overridden_by_user_id": actor.user_id if component["is_negotiated_override"] else None,
+            "overridden_at": now if component["is_negotiated_override"] else None,
+            "estimated_quantity": _decimal(component["estimated_quantity"]),
+            "estimated_amount": _decimal(component["estimated_charge"]),
+            "actual_overtime_quantity": Decimal(0),
+            "overtime_multiplier": OVERTIME_MULTIPLIER,
+            "created_at": now,
+            "updated_at": now,
+        }
+        await session.execute(
+            pg_insert(booking_charge_components)
+            .values(**values)
+            .on_conflict_do_update(
+                constraint="booking_charge_components_booking_type_unique",
+                set_={
+                    key: value
+                    for key, value in values.items()
+                    if key not in {"id", "created_at", "booking_id", "component_type"}
+                },
+            )
+        )
+    return preview
+
+
+async def _audit_booking_charge_snapshot(
+    session: DbSession,
+    actor: CurrentActor,
+    *,
+    booking: object,
+    components: list[dict[str, object]],
+) -> None:
+    """Record the commercial agreement captured when a booking is confirmed."""
+    if not components:
+        return
+    snapshot = [
+        {
+            "type": component["component_type"],
+            "resource": component["resource"],
+            "unit": component["unit"],
+            "rate": component["rate"],
+            "rateSource": component["source"],
+            "rateCardScope": component["rate_card_scope"],
+            "estimatedQuantity": component["estimated_quantity"],
+            "estimatedCharge": component["estimated_charge"],
+        }
+        for component in components
+    ]
+    await session.execute(
+        insert(activity_log).values(
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            action="booking.charge_snapshot_created",
+            entity_type="booking",
+            entity_id=str(booking.id),
+            metadata=json_safe(
+                {"episodeId": str(booking.episode_id) if booking.episode_id else None, "components": snapshot}
+            ),
+        )
+    )
+    overrides = [component for component in components if component.get("is_negotiated_override")]
+    if overrides:
+        await session.execute(
+            insert(activity_log).values(
+                organization_id=actor.organization_id,
+                actor_user_id=actor.user_id,
+                action="booking.price_override_approved",
+                entity_type="booking",
+                entity_id=str(booking.id),
+                metadata=json_safe(
+                    {
+                        "components": [
+                            {
+                                "type": component["component_type"],
+                                "resource": component["resource"],
+                                "rate": component["rate"],
+                                "reason": component["override_reason"],
+                            }
+                            for component in overrides
+                        ]
+                    }
+                ),
+            )
+        )
+
+
+async def _validate_commercial_overrides(
+    session: DbSession,
+    actor: CurrentActor,
+    payload: BookingCreateRequest,
+    *,
+    existing_is_confirmed: bool = False,
+) -> None:
+    """Allow an explicitly reasoned negotiated rate only while confirming."""
+    if not payload.commercial_overrides:
+        return
+    await require_permission(session, actor, "approve_booking_price_overrides")
+    if existing_is_confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A confirmed booking's negotiated price is already a saved commercial snapshot.",
+        )
+    if payload.is_option or payload.status != "confirmed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Set a negotiated price only when confirming a non-option booking.",
+        )
 
 
 async def _tenant_reference_exists(session: DbSession, table, organization_id: str, record_id: str | None) -> bool:
@@ -710,6 +1139,7 @@ async def booking_resources(actor: CurrentActor, session: DbSession) -> dict[str
     )
     if not may_access_board:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot access the bookings board.")
+    can_manage_commercial = await has_permission(session, actor, "manage_commercial")
     may_view_all = await may_view_all_episodes(session, actor)
     room_rows = await session.execute(
         select(rooms.c.id, rooms.c.name, rooms.c.type)
@@ -812,6 +1242,7 @@ async def booking_resources(actor: CurrentActor, session: DbSession) -> dict[str
             )
         ).all()
     return {
+        "can_manage_commercial": can_manage_commercial,
         "rooms": [{"id": str(row.id), "name": row.name, "type": row.type} for row in room_rows.all()],
         "people": [
             {
@@ -932,7 +1363,9 @@ async def submit_booking_actuals(
             status_code=status.HTTP_403_FORBIDDEN, detail="No active person record for time submission."
         )
     booking = await _booking_or_404(session, actor, booking_id, lock=True)
-    if str(booking.person_id or "") != actor.person_id:
+    is_assigned_artist = str(booking.person_id or "") == actor.person_id
+    can_correct_actuals = await has_permission(session, actor, "manage_production")
+    if not is_assigned_artist and not can_correct_actuals:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="You can only confirm time for your own booking."
         )
@@ -941,10 +1374,44 @@ async def submit_booking_actuals(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only a confirmed non-option booking can receive actual time.",
         )
-    if booking.actual_starts_at is not None or booking.actual_ends_at is not None:
+    if booking.commercial_review_required:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This historic booking needs commercial rate-snapshot review before actual time can be posted.",
+        )
+    is_correction = booking.actual_starts_at is not None or booking.actual_ends_at is not None
+    if is_correction and not can_correct_actuals:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Actual time is already confirmed for this booking."
         )
+    if is_correction and not (payload.note or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Explain why this confirmed actual time is being corrected.",
+        )
+    if is_correction:
+        active_invoice_line = await session.scalar(
+            select(client_invoice_items.c.id)
+            .select_from(client_invoice_items)
+            .join(
+                booking_charge_components,
+                booking_charge_components.c.id == client_invoice_items.c.booking_charge_component_id,
+            )
+            .where(
+                and_(
+                    client_invoice_items.c.organization_id == actor.organization_id,
+                    booking_charge_components.c.organization_id == actor.organization_id,
+                    booking_charge_components.c.booking_id == booking_id,
+                    client_invoice_items.c.voided_at.is_(None),
+                )
+            )
+            .limit(1)
+        )
+        if active_invoice_line:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Void or credit the issued invoice before correcting this booking's actual time.",
+            )
 
     work_orders = await _linked_work_orders(session, actor, booking_id, lock=True)
     if len(work_orders) > 1:
@@ -1019,12 +1486,27 @@ async def submit_booking_actuals(
         "actualCost": actual_cost,
         "budgetActual": {key: value for key, value in budget_actual.items() if key != "amount_decimal"},
         "workOrderId": str(work_order.id) if work_order else None,
+        "previousActual": (
+            {
+                "actualStartsAt": booking.actual_starts_at.isoformat() if booking.actual_starts_at else None,
+                "actualEndsAt": booking.actual_ends_at.isoformat() if booking.actual_ends_at else None,
+                "overtimeMinutes": booking.approved_overtime_minutes,
+            }
+            if is_correction
+            else None
+        ),
     }
     await session.execute(
         insert(activity_log).values(
             organization_id=actor.organization_id,
             actor_user_id=actor.user_id,
-            action="booking.time_overrun_recorded" if time_overrun else "booking.time_confirmed",
+            action=(
+                "booking.actual_time_corrected"
+                if is_correction
+                else "booking.time_overrun_recorded"
+                if time_overrun
+                else "booking.time_confirmed"
+            ),
             entity_type="booking",
             entity_id=booking_id,
             metadata=json_safe(metadata),
@@ -1068,6 +1550,20 @@ async def get_booking_conflicts(
     return await _availability(session, actor, payload, exclude_booking_id=payload.exclude_booking_id)
 
 
+@router.post("/commercial-preview")
+async def preview_booking_commercial_selection(
+    payload: BookingCreateRequest, actor: CurrentActor, session: DbSession
+) -> dict[str, object]:
+    """Show server-resolved room and artist charges before saving a booking."""
+    await require_permission(session, actor, "manage_production")
+    await _validate_references(session, actor, payload)
+    values = payload.model_copy(deep=True)
+    if values.is_option and values.status != "cancelled":
+        values.status = "tentative"
+    await _validate_commercial_overrides(session, actor, values)
+    return {"components": await _resolve_booking_commercial_components(session, actor, values)}
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_booking(payload: BookingCreateRequest, actor: CurrentActor, session: DbSession) -> dict[str, object]:
     await require_permission(session, actor, "manage_production")
@@ -1075,6 +1571,7 @@ async def create_booking(payload: BookingCreateRequest, actor: CurrentActor, ses
     values = payload.model_copy(deep=True)
     if values.is_option and values.status != "cancelled":
         values.status = "tentative"
+    await _validate_commercial_overrides(session, actor, values)
     availability = await _availability(session, actor, values)
     if not values.is_option and availability["conflicts"]:
         raise HTTPException(
@@ -1102,10 +1599,18 @@ async def create_booking(payload: BookingCreateRequest, actor: CurrentActor, ses
             status=values.status,
             booking_type=values.booking_type,
             notes=values.notes.strip() if values.notes else None,
+            commercial_review_required=False,
+            commercial_review_reason=None,
+            commercial_review_marked_at=None,
         )
         .returning(bookings)
     )
     row = created.one()
+    commercial_preview = await _sync_booking_commercial_components(
+        session, actor, booking=row, payload=values
+    )
+    if values.status == "confirmed" and not values.is_option:
+        await _audit_booking_charge_snapshot(session, actor, booking=row, components=commercial_preview)
     await _resequence_active_options(session, actor, values)
     await _add_booking_client_to_episode_team(session, actor, values)
     await session.execute(
@@ -1119,7 +1624,7 @@ async def create_booking(payload: BookingCreateRequest, actor: CurrentActor, ses
         )
     )
     await session.commit()
-    return _booking_values(row)
+    return {**_booking_values(row), "commercial_preview": commercial_preview}
 
 
 @router.patch("/{booking_id}")
@@ -1148,6 +1653,12 @@ async def update_booking(
     values = payload.model_copy(deep=True)
     if values.is_option and values.status != "cancelled":
         values.status = "tentative"
+    await _validate_commercial_overrides(
+        session,
+        actor,
+        values,
+        existing_is_confirmed=existing.status == "confirmed",
+    )
     availability = await _availability(session, actor, values, exclude_booking_id=booking_id)
     if not values.is_option and availability["conflicts"]:
         raise HTTPException(
@@ -1180,6 +1691,15 @@ async def update_booking(
         .returning(bookings)
     )
     row = changed.one()
+    commercial_preview = await _sync_booking_commercial_components(
+        session,
+        actor,
+        booking=row,
+        payload=values,
+        preserve_existing=existing.status == "confirmed",
+    )
+    if existing.status != "confirmed" and values.status == "confirmed" and not values.is_option:
+        await _audit_booking_charge_snapshot(session, actor, booking=row, components=commercial_preview)
     # The old and the new resource windows may differ. Re-sequence both scopes
     # so withdrawing or moving a hold cannot leave a stale rank behind.
     if previous.is_option:
@@ -1202,7 +1722,30 @@ async def update_booking(
         )
     )
     await session.commit()
-    return _booking_values(row)
+    return {**_booking_values(row), "commercial_preview": commercial_preview}
+
+
+@router.get("/{booking_id}/commercial-components")
+async def list_booking_commercial_components(
+    booking_id: str, actor: CurrentActor, session: DbSession
+) -> dict[str, object]:
+    """Return the agreed commercial snapshots for one tenant-owned booking."""
+    await require_permission(session, actor, "manage_production")
+    if not await _tenant_reference_exists(session, bookings, actor.organization_id, booking_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
+    rows = (
+        await session.execute(
+            select(booking_charge_components)
+            .where(
+                and_(
+                    booking_charge_components.c.organization_id == actor.organization_id,
+                    booking_charge_components.c.booking_id == booking_id,
+                )
+            )
+            .order_by(booking_charge_components.c.component_type)
+        )
+    ).all()
+    return {"components": [_commercial_component_response(row) for row in rows]}
 
 
 @router.post("/guest-accounts", status_code=status.HTTP_201_CREATED)
@@ -1390,6 +1933,9 @@ async def copy_episode_bookings(
                 "booking_type": item.booking_type,
                 "is_option": False,
                 "notes": item.notes,
+                "commercial_review_required": False,
+                "commercial_review_reason": None,
+                "commercial_review_marked_at": None,
             }
             for item in copies
         ],

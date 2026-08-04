@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@heroui/react";
 import { CalendarPlus, Clock3, Pencil, Search, ShieldAlert, UserPlus, UserRound, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
@@ -33,10 +33,12 @@ type BookingValues = z.infer<typeof bookingClientSchema>;
 type GuestAccount = { id: string; name: string; role: string; email: string | null };
 const newGuestSchema = z.object({ name: z.string().trim().min(2, "Enter the guest's name.").max(120), email: z.string().email("Enter a valid work email.").max(320), password: z.string().min(8, "Use at least 8 characters.").max(1024), confirmPassword: z.string() }).refine((value) => value.password === value.confirmPassword, { path: ["confirmPassword"], message: "Passwords do not match." });
 type NewGuest = z.infer<typeof newGuestSchema>;
-export type BookingResources = { episodes: Array<{ id: string; label: string }>; budgetItems: Array<{ id: string; episodeId: string; label: string; hasRateSnapshot: boolean }>; rooms: Array<{ id: string; name: string; type: string }>; people: Array<{ id: string; name: string; role: string; availability: string; isFreelancer: boolean }>; guestAccounts: GuestAccount[] };
+export type BookingResources = { episodes: Array<{ id: string; label: string }>; budgetItems: Array<{ id: string; episodeId: string; label: string; hasRateSnapshot: boolean }>; rooms: Array<{ id: string; name: string; type: string }>; people: Array<{ id: string; name: string; role: string; availability: string; isFreelancer: boolean }>; guestAccounts: GuestAccount[]; canManageCommercial?: boolean };
 export type EditableBooking = { id: string; title: string; startsAt: Date; endsAt: Date; setupMinutes: number; handoverMinutes: number; isOption: boolean; optionRank: number | null; status: string; bookingType: string; roomId: string | null; episodeId: string | null; budgetLineId?: string | null; personId: string | null; guestPersonId?: string | null; notes: string | null };
 type Conflict = { id: string; title: string; startsAt: Date | string; endsAt: Date | string; setupMinutes: number; handoverMinutes: number; bookingType: string; roomName: string | null; personName: string | null; personAvailability: string | null; personIsFreelancer: boolean | null; overlaps: Array<"room" | "person"> };
 type Suggestions = { availableRooms: Array<{ id: string; name: string; type: string }>; availablePeople: Array<{ id: string; name: string; role: string; availability: string; isFreelancer: boolean }>; nearestSlot: { startsAt: Date | string; endsAt: Date | string } | null };
+type CommercialPreviewItem = { componentType: "room" | "person"; resource: string; category: string; rate: number | null; unit: string; currency: string; source: string | null; rateCardScope?: string | null; estimatedQuantity: number; estimatedCharge: number | null; pricingStatus: "resolved" | "rate_missing"; isNegotiatedOverride?: boolean; overrideReason?: string | null };
+type CommercialOverride = { rate: string; reason: string };
 const emptySuggestions: Suggestions = { availableRooms: [], availablePeople: [], nearestSlot: null };
 const personnelBookingTypes = ["leave", "training", "sick", "unavailable"] as const;
 const bookingTypes = ["edit", "color", "mix", "qc", "client_review", "ingest", "conform", ...personnelBookingTypes] as const;
@@ -57,16 +59,47 @@ export function BookingFormDialog({ resources, initialStart, booking, onClose }:
   const episodeId = useWatch({ control: form.control, name: "episodeId" });
   const budgetLineId = useWatch({ control: form.control, name: "budgetLineId" });
   const guestPersonId = useWatch({ control: form.control, name: "guestPersonId" });
+  const roomId = useWatch({ control: form.control, name: "roomId" });
+  const personId = useWatch({ control: form.control, name: "personId" });
+  const startsAt = useWatch({ control: form.control, name: "startsAt" });
+  const endsAt = useWatch({ control: form.control, name: "endsAt" });
+  const statusValue = useWatch({ control: form.control, name: "status" });
+  const [commercialPreview, setCommercialPreview] = useState<CommercialPreviewItem[]>([]);
+  const [commercialPreviewLoading, setCommercialPreviewLoading] = useState(false);
+  const [commercialOverrides, setCommercialOverrides] = useState<Partial<Record<"room" | "person", CommercialOverride>>>({});
   const guestAccounts = [...resources.guestAccounts, ...createdGuests];
   const selectedGuest = guestAccounts.find((guest) => guest.id === guestPersonId) ?? null;
   const matchingGuests = guestAccounts.filter((guest) => `${guest.name} ${guest.email ?? ""} ${guest.role}`.toLowerCase().includes(guestQuery.trim().toLowerCase())).slice(0, 6);
   const isAvailabilityBooking = personnelBookingTypes.includes(bookingType as typeof personnelBookingTypes[number]);
+  const hasCommercialSelection = !isAvailabilityBooking && Boolean(episodeId && (roomId || personId) && startsAt && endsAt && statusValue !== "cancelled");
   const budgetItems = resources.budgetItems.filter((item) => item.episodeId === episodeId);
+  const maySetNegotiatedPrice = Boolean(resources.canManageCommercial && statusValue === "confirmed" && !isOption && (!booking || booking.status !== "confirmed"));
+  const overridePayload = useCallback(() => (Object.entries(commercialOverrides) as Array<["room" | "person", CommercialOverride]>).flatMap(([componentType, override]) => override.rate.trim() && override.reason.trim() ? [{ componentType, rate: Number(override.rate), reason: override.reason.trim() }] : []), [commercialOverrides]);
   const close = () => { setOpen(false); onClose?.(); };
   const acceptAvailability = (body: { conflicts?: Conflict[]; availableRooms?: Suggestions["availableRooms"]; availablePeople?: Suggestions["availablePeople"]; nearestSlot?: Suggestions["nearestSlot"] }) => {
     setConflicts(body.conflicts ?? []);
     setSuggestions({ availableRooms: body.availableRooms ?? [], availablePeople: body.availablePeople ?? [], nearestSlot: body.nearestSlot ?? null });
   };
+
+  useEffect(() => {
+    if (!hasCommercialSelection) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setCommercialPreviewLoading(true);
+      const values = form.getValues();
+      const response = await postpilotUiFetch("/v1/bookings/commercial-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...normalize({ ...values, title: values.title || "Booking commercial preview" }), commercialOverrides: overridePayload() }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!cancelled) {
+        setCommercialPreview(response.ok ? body?.components ?? [] : []);
+        setCommercialPreviewLoading(false);
+      }
+    }, 180);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [bookingType, endsAt, episodeId, form, hasCommercialSelection, isOption, overridePayload, personId, roomId, startsAt, statusValue]);
 
   const checkAvailability = form.handleSubmit(async (values) => {
     setMessage("");
@@ -78,7 +111,7 @@ export function BookingFormDialog({ resources, initialStart, booking, onClose }:
   });
   const submit = form.handleSubmit(async (values) => {
     setMessage("");
-    const response = await postpilotUiFetch(booking ? `/v1/bookings/${booking.id}` : "/v1/bookings", { method: booking ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(normalize(values)) });
+    const response = await postpilotUiFetch(booking ? `/v1/bookings/${booking.id}` : "/v1/bookings", { method: booking ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...normalize(values), commercialOverrides: overridePayload() }) });
     const body = await response.json();
     if (response.status === 409) { acceptAvailability(body); return setMessage(body.error); }
     if (!response.ok) return setMessage(body.error ?? "Could not save booking.");
@@ -99,6 +132,7 @@ export function BookingFormDialog({ resources, initialStart, booking, onClose }:
           <p className="-mt-1 text-xs text-[#767c78]">A guest account is automatically added to the selected episode team when the booking is saved.</p>
           {!isAvailabilityBooking && <Field label="Episode budget item" error={form.formState.errors.budgetLineId?.message}><select disabled={!episodeId} {...form.register("budgetLineId")}><option value="">No budget item · actual time will be unallocated</option>{budgetItems.map((item) => <option key={item.id} value={item.id}>{item.label}{item.hasRateSnapshot ? "" : " · rate snapshot missing"}</option>)}</select><span className="mt-1 block text-[11px] font-normal text-[#7c827f]">Confirmed actual time posts to this item using its saved rate. Items without a saved rate remain visibly unallocated.</span></Field>}
           <div className="grid gap-3 sm:grid-cols-2"><Field label="Client booking starts" error={form.formState.errors.startsAt?.message}><input type="datetime-local" {...form.register("startsAt")} /></Field><Field label="Client booking ends" error={form.formState.errors.endsAt?.message}><input type="datetime-local" {...form.register("endsAt")} /></Field></div>
+          {hasCommercialSelection && (commercialPreviewLoading || commercialPreview.length > 0) && <CommercialPreview loading={commercialPreviewLoading} items={commercialPreview} isConfirmed={statusValue === "confirmed" && !isOption} canOverride={maySetNegotiatedPrice} overrides={commercialOverrides} onOverrideChange={(componentType, next) => setCommercialOverrides((current) => ({ ...current, [componentType]: next }))} onOverrideClear={(componentType) => setCommercialOverrides((current) => { const next = { ...current }; delete next[componentType]; return next; })} />}
           <div className="rounded-lg border border-[#e4e4df] bg-[#f6f7f4] p-3"><p className="text-xs font-semibold text-[#535b57]">Operational buffers <span className="font-normal text-[#7b817e]">· block room and people, outside client-facing hours</span></p><div className="mt-2 grid gap-3 sm:grid-cols-2"><Field label="Setup (min)" error={form.formState.errors.setupMinutes?.message}><input type="number" min="0" max="480" {...form.register("setupMinutes", { valueAsNumber: true })} /></Field><Field label="Handover (min)" error={form.formState.errors.handoverMinutes?.message}><input type="number" min="0" max="480" {...form.register("handoverMinutes", { valueAsNumber: true })} /></Field></div></div>
           <label className="flex items-start gap-3 rounded-lg border border-[#dfe6e0] bg-[#f4f8f4] p-3 text-sm text-[#48554f]"><input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-[#bfc9c1] text-[#4f806a]" {...form.register("isOption", { onChange: (event) => { if (event.target.checked) form.setValue("status", "tentative", { shouldDirty: true }); } })} /><span><span className="font-semibold">Option booking / pencil hold</span><span className="mt-0.5 block text-xs text-[#718078]">Provisional and first-come ranked. It can overlap confirmed work without blocking the room or artist.</span>{isOption && booking?.optionRank ? <span className="mt-1 block text-xs font-medium text-[#4f806a]">Current pencil position: {booking.optionRank}</span> : null}</span></label>
           <Field label="Status" error={form.formState.errors.status?.message}><select {...form.register("status")}>{isOption ? <><option value="tentative">Option / pencil hold</option><option value="cancelled">Cancelled</option></> : <><option value="tentative">Tentative</option><option value="confirmed">Confirmed</option><option value="hold">On hold</option><option value="cancelled">Cancelled</option></>}</select></Field>
@@ -110,6 +144,16 @@ export function BookingFormDialog({ resources, initialStart, booking, onClose }:
     </div>}
     {creatingGuest && episodeId && <NewGuestAccountDialog episodeId={episodeId} onClose={() => setCreatingGuest(false)} onCreated={(guest) => { setCreatedGuests((current) => [...current, guest]); form.setValue("guestPersonId", guest.id, { shouldDirty: true }); setGuestQuery(guest.name); setCreatingGuest(false); }} />}
   </>;
+}
+
+function CommercialPreview({ loading, items, isConfirmed, canOverride, overrides, onOverrideChange, onOverrideClear }: { loading: boolean; items: CommercialPreviewItem[]; isConfirmed: boolean; canOverride: boolean; overrides: Partial<Record<"room" | "person", CommercialOverride>>; onOverrideChange: (componentType: "room" | "person", override: CommercialOverride) => void; onOverrideClear: (componentType: "room" | "person") => void }) {
+  return <section className="rounded-lg border border-[#dce7df] bg-[#f4f8f4] p-3" aria-live="polite">
+    <div className="flex flex-wrap items-baseline justify-between gap-2"><div><p className="text-xs font-semibold text-[#43564d]">Commercial preview</p><p className="mt-0.5 text-[11px] text-[#708078]">{isConfirmed ? "Rates will be saved as this booking’s commercial snapshot when confirmed." : "Pencil and tentative rates are live previews; they can re-resolve until the booking is confirmed."}</p></div>{loading && <span className="text-[11px] text-[#708078]">Updating…</span>}</div>
+    {!loading && <div className="mt-3 space-y-2">{items.map((item) => {
+      const override = overrides[item.componentType];
+      return <div key={`${item.componentType}-${item.resource}`} className="rounded-md border border-[#dfe8e2] bg-white/70 px-3 py-2 text-xs"><div className="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-3"><div className="min-w-0"><p className="truncate font-semibold text-[#45544d]">{item.resource}</p><p className="mt-0.5 text-[#79857e]">{item.componentType === "room" ? "Room / suite" : "Assigned artist"} · {item.isNegotiatedOverride ? "Negotiated booking price" : sourceLabel(item.source)}</p></div>{item.pricingStatus === "resolved" && item.rate !== null && item.estimatedCharge !== null ? <><span className="text-[#596860]">{formatMoney(item.rate, item.currency)} / {item.unit}</span><span className="font-semibold text-[#3f6756]">{formatMoney(item.estimatedCharge, item.currency)} est.</span></> : <span className="sm:col-span-2 font-medium text-[#9b6249]">No agreed rate found</span>}</div>{canOverride && <div className="mt-2 border-t border-[#e4ece6] pt-2">{override ? <div className="grid gap-2 sm:grid-cols-[140px_minmax(0,1fr)_auto] sm:items-end"><label className="block text-[11px] font-medium text-[#596860]">Negotiated rate<input aria-label={`Negotiated ${item.componentType} rate`} type="number" min="0" step="0.01" value={override.rate} onChange={(event) => onOverrideChange(item.componentType, { ...override, rate: event.target.value })} className="mt-1 h-9 w-full rounded-md border border-[#cddbd1] bg-white px-2 text-sm" /></label><label className="block text-[11px] font-medium text-[#596860]">Reason<input aria-label={`Negotiated ${item.componentType} reason`} value={override.reason} onChange={(event) => onOverrideChange(item.componentType, { ...override, reason: event.target.value })} placeholder="Client-approved negotiated rate" className="mt-1 h-9 w-full rounded-md border border-[#cddbd1] bg-white px-2 text-sm" /></label><Button type="button" size="sm" variant="tertiary" onPress={() => onOverrideClear(item.componentType)}>Use rate card</Button>{(!override.rate.trim() || !override.reason.trim()) && <p className="sm:col-span-3 text-[11px] text-[#9b6249]">Enter a negotiated rate and reason before confirming this booking.</p>}</div> : <Button type="button" size="sm" variant="tertiary" onPress={() => onOverrideChange(item.componentType, { rate: item.rate?.toFixed(2) ?? "", reason: "" })}>Set negotiated price</Button>}</div>}</div>;
+    })}</div>}
+  </section>;
 }
 
 function ConflictPanel({ conflicts, suggestions, message, onRoom, onPerson, onSlot }: { conflicts: Conflict[]; suggestions: Suggestions; message: string; onRoom: (id: string) => void; onPerson: (id: string) => void; onSlot: () => void }) {
@@ -142,5 +186,7 @@ function formatWindow(start: Date | string, end: Date | string) { return `${new 
 function bookingTypeLabel(type: string) { return type === "leave" ? "Approved leave" : type === "sick" ? "Sick / unavailable" : type.replaceAll("_", " "); }
 function availabilityBookingLabel(type: string) { return bookingTypeLabel(type); }
 function availabilityLabel(availability: string) { return availability.replaceAll("_", " "); }
+function sourceLabel(source: string | null) { return source ? source.replaceAll("_", " ").replace(/\brate\b/g, "rate") : "Rate card not configured"; }
+function formatMoney(value: number, currency: string) { return new Intl.NumberFormat("en-GB", { style: "currency", currency, minimumFractionDigits: 2 }).format(value); }
 function bufferLabel(setup: number, handover: number) { const labels = [[setup, "setup"], [handover, "handover"]].filter(([minutes]) => Number(minutes) > 0).map(([minutes, label]) => `${minutes}m ${label}`); return labels.length ? ` · buffers: ${labels.join(", ")}` : ""; }
 function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) { return <label className="block text-xs font-medium text-[#535b57]">{label}<span className="mt-1.5 block [&_input]:h-10 [&_input]:w-full [&_input]:rounded-md [&_input]:border [&_input]:border-[#dedfda] [&_input]:bg-[#fafbf9] [&_input]:px-3 [&_input]:text-sm [&_select]:h-10 [&_select]:w-full [&_select]:rounded-md [&_select]:border [&_select]:border-[#dedfda] [&_select]:bg-[#fafbf9] [&_select]:px-2 [&_textarea]:w-full [&_textarea]:rounded-md [&_textarea]:border [&_textarea]:border-[#dedfda] [&_textarea]:bg-[#fafbf9] [&_textarea]:p-3">{children}</span>{error && <span className="mt-1 block text-[11px] font-normal text-[#a35e41]">{error}</span>}</label>; }

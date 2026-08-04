@@ -134,4 +134,75 @@ test.describe("Commercial completion journeys", () => {
 
     await expect.poll(body).toMatchObject({ scope: "network", network: expect.any(String), show_id: null, episode_id: null, rate: 712 });
   });
+
+  test("searches for and saves one explicit named artist rate", async ({ page }) => {
+    await page.route("**/v1/rate-cards/artist-rates?*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ artist_rates: [] }) });
+    });
+    await page.route("**/v1/rate-cards/artists?*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ people: [{ id: "artist-rate-ui-001", name: "Ari Taylor", role: "colourist" }] }),
+      });
+    });
+    await page.goto("/budget");
+    await page.getByRole("button", { name: "Manage rate card" }).click();
+    await page.getByRole("button", { name: "Add artist rate" }).first().click();
+    const dialog = page.getByRole("dialog", { name: "Add artist rate" });
+    await dialog.getByLabel("Artist", { exact: true }).fill("Ari");
+    await dialog.getByRole("button", { name: /Ari Taylor/ }).click();
+    await dialog.getByLabel("Client rate").fill("185");
+    await dialog.getByLabel(/Internal cost rate/).fill("96");
+    const body = await captureJsonWrite(page, "**/v1/rate-cards/overrides");
+
+    await dialog.getByRole("button", { name: "Add artist rate", exact: true }).click();
+
+    await expect.poll(body).toMatchObject({
+      scope: "master",
+      target_type: "person",
+      person_id: "artist-rate-ui-001",
+      category: "Colourist",
+      unit: "hour",
+      rate: 185,
+      internal_cost_rate: 96,
+    });
+  });
+
+  test("removes a named artist exception while leaving the generic rate card intact", async ({ page }) => {
+    let removed = false;
+    await page.route("**/v1/rate-cards/artist-rates?*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          artist_rates: removed
+            ? []
+            : [{
+                id: "artist-rate-ui-remove-001",
+                person: { id: "artist-ui-remove-001", name: "Ari Taylor", role: "colourist" },
+                category: "Colourist",
+                unit: "hour",
+                client_rate: 185,
+                internal_cost_rate: 96,
+                currency: "USD",
+              }],
+        }),
+      });
+    });
+    await page.route("**/v1/rate-cards/items/artist-rate-ui-remove-001", async (route) => {
+      expect(route.request().method()).toBe("DELETE");
+      removed = true;
+      await route.fulfill({ status: 204 });
+    });
+
+    await page.goto("/budget");
+    await page.getByRole("button", { name: "Manage rate card" }).click();
+    const artistRate = page.getByText("Ari Taylor", { exact: true }).locator("xpath=ancestor::div[contains(@class, 'justify-between')][1]");
+    await expect(artistRate).toBeVisible();
+    await artistRate.getByRole("button", { name: "Remove" }).click();
+
+    await expect(page.getByText("Ari Taylor", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("No named artist rates on this card.")).toBeVisible();
+  });
 });

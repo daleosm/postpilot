@@ -122,6 +122,8 @@ async def resolve_budget_rate_snapshot(
             episode_id=episode_id,
             category=resolved_category,
             unit=resolved_unit,
+            target_type=resource_type if resource_type in {"room", "person"} else None,
+            target_id=resource_id if resource_type in {"room", "person"} else None,
         )
         if effective["rate"] is None:
             raise HTTPException(

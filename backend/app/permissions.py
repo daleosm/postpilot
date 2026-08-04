@@ -30,6 +30,14 @@ LEGACY_PERMISSION_MAP: Final[dict[str, str]] = {
     "authorize_early_starts": "manage_production",
     "manage_users": "manage_settings",
     "manage_rates": "manage_commercial",
+    # Commercial actions keep their own semantic checks in the API while the
+    # tenant policy remains deliberately compact: a post house grants the
+    # single Commercial capability rather than being forced to manage four
+    # near-identical job-title permissions.
+    "manage_rate_cards": "manage_commercial",
+    "approve_booking_price_overrides": "manage_commercial",
+    "approve_booking_charges_for_billing": "manage_commercial",
+    "issue_invoices": "manage_commercial",
     "manage_budget": "manage_commercial",
     "approve_budget_overruns": "manage_commercial",
     "approve_rate_overrides": "manage_commercial",

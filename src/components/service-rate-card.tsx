@@ -82,7 +82,7 @@ function RateRow({ rate }: { rate: MasterServiceRate }) {
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
         <p className="truncate text-sm font-semibold text-[#404844]">{rate.name}</p>
-        {!rate.isActive && <span className="rounded bg-[#f2f1ee] px-1.5 py-0.5 text-[10px] font-semibold text-[#777d79]">Inactive</span>}
+        {!rate.isActive && <span className="service-rate-inactive">Inactive</span>}
       </div>
       <p className="mt-1.5 text-xs text-[#7d837f]">{rate.category}{rate.notes ? " · " + rate.notes : ""}</p>
     </div>

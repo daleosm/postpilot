@@ -9,21 +9,32 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import and_, delete, func, insert, or_, select, update
+from sqlalchemy import and_, case, delete, func, insert, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import CurrentActor, DbSession
-from app.api.schemas import BillableFromWorkOrderRequest, BillableVoidRequest, ClientInvoiceIssueRequest
+from app.api.schemas import (
+    BillableFromWorkOrderRequest,
+    BillableVoidRequest,
+    BookingComponentInvoiceSelectionRequest,
+    ClientInvoiceIssueRequest,
+    ClientInvoiceVoidRequest,
+)
 from app.auth import require_permission
 from app.billing_logic import invoice_number_prefix, invoice_totals
 from app.budget_logic import decimal_amount, json_safe, monetary
 from app.db.tables import (
     activity_log,
     billables,
+    booking_charge_components,
+    booking_component_invoice_selections,
     bookings,
     client_invoice_items,
+    client_invoice_line_reversals,
     client_invoices,
     client_purchase_order_allocations,
     client_purchase_orders,
@@ -99,6 +110,255 @@ async def _episode_scope(session: DbSession, actor: CurrentActor, episode_id: st
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found.")
     return record
+
+
+def _component_line_amounts(component: object) -> tuple[Decimal, Decimal]:
+    """Split one persisted actual component into base and approved OT lines."""
+    quantity = decimal_amount(component.actual_quantity)
+    overtime_quantity = decimal_amount(component.actual_overtime_quantity)
+    rate = decimal_amount(component.client_rate)
+    base_amount = invoice_totals(
+        quantity * rate,
+        tax_enabled=False,
+        tax_rate_percent=Decimal(0),
+    )["subtotal_amount"]
+    total_amount = decimal_amount(component.actual_client_amount)
+    overtime_amount = total_amount - base_amount if overtime_quantity > 0 else Decimal(0)
+    # A component created before the overtime fields existed has no OT quantity
+    # and must still reconcile exactly to its saved client actual.
+    if overtime_quantity <= 0:
+        base_amount = total_amount
+    return base_amount, overtime_amount
+
+
+def _component_invoice_item_values(
+    *, organization_id: str,
+    invoice_id: str,
+    component: object,
+    episode: object,
+    now: datetime,
+) -> list[dict[str, object]]:
+    """Build immutable, separately itemised room/artist invoice lines."""
+    base_amount, overtime_amount = _component_line_amounts(component)
+    reference = f"{component.booking_date or 'Booking'} · {component.resource_name}"
+    description = f"{component.booking_title} · {component.resource_name}"
+    episode_code = episode.production_code or f"E{int(episode.number):02d}"
+    snapshots = {
+        "source_booking_id": component.booking_id,
+        "booking_date": component.booking_date.date() if component.booking_date else None,
+        "episode_code": episode_code,
+        "episode_title": episode.title,
+        "resource_type": component.component_type,
+        "resource_name": component.resource_name,
+        "saved_rate": decimal_amount(component.client_rate),
+        "overtime_multiplier": decimal_amount(component.overtime_multiplier),
+    }
+    values: list[dict[str, object]] = []
+    if decimal_amount(component.actual_quantity) > 0 and base_amount > 0:
+        values.append(
+            {
+                "organization_id": organization_id,
+                "client_invoice_id": invoice_id,
+                "billable_id": None,
+                "client_purchase_order_id": None,
+                "booking_charge_component_id": component.id,
+                "booking_component_charge_kind": "base",
+                "description": description,
+                "reference": reference,
+                "quantity": decimal_amount(component.actual_quantity),
+                "unit_amount": decimal_amount(component.client_rate),
+                "amount": base_amount,
+                **snapshots,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+    if decimal_amount(component.actual_overtime_quantity) > 0 and overtime_amount > 0:
+        values.append(
+            {
+                "organization_id": organization_id,
+                "client_invoice_id": invoice_id,
+                "billable_id": None,
+                "client_purchase_order_id": None,
+                "booking_charge_component_id": component.id,
+                "booking_component_charge_kind": "overtime",
+                "description": f"{description} · approved overtime",
+                "reference": reference,
+                "quantity": decimal_amount(component.actual_overtime_quantity),
+                "unit_amount": decimal_amount(component.client_rate) * decimal_amount(component.overtime_multiplier),
+                "amount": overtime_amount,
+                **snapshots,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+    return values
+
+
+async def _episode_booking_component_invoice_candidates(
+    session: DbSession,
+    actor: CurrentActor,
+    episode_id: str,
+    *,
+    included_only: bool = False,
+) -> list[dict[str, object]]:
+    """Return tenant-scoped actual components and their invoice-selection state."""
+    rows = (
+        await session.execute(
+            select(
+                booking_charge_components,
+                bookings.c.title.label("booking_title"),
+                bookings.c.starts_at.label("booking_starts_at"),
+                booking_component_invoice_selections.c.include_in_invoice,
+                booking_component_invoice_selections.c.reason.label("selection_reason"),
+                booking_component_invoice_selections.c.selected_at,
+            )
+            .select_from(booking_charge_components)
+            .join(
+                bookings,
+                and_(
+                    bookings.c.id == booking_charge_components.c.booking_id,
+                    bookings.c.organization_id == actor.organization_id,
+                ),
+            )
+            .outerjoin(
+                booking_component_invoice_selections,
+                and_(
+                    booking_component_invoice_selections.c.booking_charge_component_id
+                    == booking_charge_components.c.id,
+                    booking_component_invoice_selections.c.organization_id == actor.organization_id,
+                ),
+            )
+            .where(
+                and_(
+                    booking_charge_components.c.organization_id == actor.organization_id,
+                    bookings.c.episode_id == episode_id,
+                    booking_charge_components.c.actual_client_amount.is_not(None),
+                    booking_charge_components.c.actual_client_amount > 0,
+                )
+            )
+            .order_by(bookings.c.actual_starts_at, bookings.c.id, booking_charge_components.c.component_type)
+        )
+    ).all()
+    component_ids = [str(row.id) for row in rows]
+    invoiced_ids = set(
+        str(value)
+        for value in (
+            await session.scalars(
+                select(client_invoice_items.c.booking_charge_component_id).where(
+                    and_(
+                        client_invoice_items.c.organization_id == actor.organization_id,
+                        client_invoice_items.c.booking_charge_component_id.in_(
+                            component_ids or ["00000000-0000-0000-0000-000000000000"]
+                        ),
+                        client_invoice_items.c.voided_at.is_(None),
+                    )
+                )
+            )
+        ).all()
+        if value
+    )
+    result: list[dict[str, object]] = []
+    for row in rows:
+        component_id = str(row.id)
+        selected = row.include_in_invoice is True
+        invoiced = component_id in invoiced_ids
+        if included_only and (not selected or invoiced):
+            continue
+        base_amount, overtime_amount = _component_line_amounts(row)
+        result.append(
+            {
+                "id": component_id,
+                "booking_id": str(row.booking_id),
+                "booking_title": row.booking_title,
+                "booking_date": row.booking_starts_at.date().isoformat() if row.booking_starts_at else None,
+                "component_type": row.component_type,
+                "resource": row.resource_name,
+                "category": row.category,
+                "unit": row.billing_unit,
+                "currency": row.currency,
+                "rate": monetary(decimal_amount(row.client_rate)),
+                "overtime_multiplier": monetary(decimal_amount(row.overtime_multiplier)),
+                "actual_quantity": monetary(decimal_amount(row.actual_quantity)),
+                "actual_overtime_quantity": monetary(decimal_amount(row.actual_overtime_quantity)),
+                "base_amount": monetary(base_amount),
+                "overtime_amount": monetary(overtime_amount),
+                "actual_amount": monetary(decimal_amount(row.actual_client_amount)),
+                "selection_status": "invoiced"
+                if invoiced
+                else "included"
+                if selected
+                else "excluded"
+                if row.include_in_invoice is False
+                else "awaiting_selection",
+                "selection_reason": row.selection_reason,
+                "selected_at": row.selected_at,
+            }
+        )
+    return result
+
+
+async def _selected_booking_component_invoice_rows(
+    session: DbSession,
+    actor: CurrentActor,
+    episode_id: str,
+) -> list[object]:
+    """Lock selected, uninvoiced component sources before invoice creation."""
+    rows = (
+        await session.execute(
+            select(
+                booking_charge_components,
+                bookings.c.title.label("booking_title"),
+                bookings.c.starts_at.label("booking_date"),
+            )
+            .select_from(booking_charge_components)
+            .join(
+                bookings,
+                and_(
+                    bookings.c.id == booking_charge_components.c.booking_id,
+                    bookings.c.organization_id == actor.organization_id,
+                ),
+            )
+            .join(
+                booking_component_invoice_selections,
+                and_(
+                    booking_component_invoice_selections.c.booking_charge_component_id
+                    == booking_charge_components.c.id,
+                    booking_component_invoice_selections.c.organization_id == actor.organization_id,
+                    booking_component_invoice_selections.c.include_in_invoice.is_(True),
+                ),
+            )
+            .where(
+                and_(
+                    booking_charge_components.c.organization_id == actor.organization_id,
+                    bookings.c.episode_id == episode_id,
+                    booking_charge_components.c.actual_client_amount.is_not(None),
+                    booking_charge_components.c.actual_client_amount > 0,
+                )
+            )
+            .with_for_update()
+            .order_by(bookings.c.actual_starts_at, bookings.c.id, booking_charge_components.c.component_type)
+        )
+    ).all()
+    component_ids = [str(row.id) for row in rows]
+    already_invoiced = set(
+        str(value)
+        for value in (
+            await session.scalars(
+                select(client_invoice_items.c.booking_charge_component_id).where(
+                    and_(
+                        client_invoice_items.c.organization_id == actor.organization_id,
+                        client_invoice_items.c.booking_charge_component_id.in_(
+                            component_ids or ["00000000-0000-0000-0000-000000000000"]
+                        ),
+                        client_invoice_items.c.voided_at.is_(None),
+                    )
+                )
+            )
+        ).all()
+        if value
+    )
+    return [row for row in rows if str(row.id) not in already_invoiced]
 
 
 async def _work_order_overtime_charge(session: DbSession, actor: CurrentActor, work_order: object) -> Decimal:
@@ -357,6 +617,14 @@ async def _episode_invoice_readiness(
             .order_by(billables.c.created_at, billables.c.id)
         )
     ).all()
+    booking_components = await _episode_booking_component_invoice_candidates(
+        session,
+        actor,
+        episode_id,
+    )
+    selected_booking_components = [
+        component for component in booking_components if component["selection_status"] == "included"
+    ]
     issued_invoices = (
         await session.execute(
             select(client_invoices)
@@ -398,7 +666,7 @@ async def _episode_invoice_readiness(
         and not client_missing
         and workflow_complete
         and not unconfirmed_bookings
-        and ready_billables
+        and (ready_billables or selected_booking_components)
         and not client_po_blocker
     )
     blocked_reason = (
@@ -416,13 +684,15 @@ async def _episode_invoice_readiness(
             f"{'s' if len(unconfirmed_bookings) != 1 else ''} still need actual time confirmed."
         )
         if unconfirmed_bookings
-        else "No approved client charges are ready to invoice."
-        if not ready_billables
+        else "Select one or more approved room or artist actuals, or post a client change, before issuing an invoice."
+        if not ready_billables and not selected_booking_components
         else str(client_po_blocker["message"])
         if client_po_blocker
         else None
     )
-    total = sum((decimal_amount(item.amount) for item in ready_billables), Decimal(0))
+    total = sum((decimal_amount(item.amount) for item in ready_billables), Decimal(0)) + sum(
+        (decimal_amount(item["actual_amount"]) for item in selected_booking_components), Decimal(0)
+    )
     invoice_values = []
     for item in issued_invoices:
         value: dict[str, object] = {
@@ -460,6 +730,7 @@ async def _episode_invoice_readiness(
             }
             for item in ready_billables
         ],
+        "booking_components": booking_components,
         "invoices": invoice_values,
         "invoice_profile_complete": profile_complete,
         "workflow_complete": workflow_complete,
@@ -488,8 +759,122 @@ def _billable_value(row: object) -> dict[str, object]:
 
 @router.get("/episodes/{episode_id}/readiness")
 async def episode_invoice_readiness(episode_id: str, actor: CurrentActor, session: DbSession) -> dict[str, object]:
-    await require_permission(session, actor, "manage_commercial")
+    await require_permission(session, actor, "approve_booking_charges_for_billing")
     return await _episode_invoice_readiness(session, actor, episode_id)
+
+
+@router.get("/episodes/{episode_id}/booking-components")
+async def episode_booking_component_invoice_candidates(
+    episode_id: str, actor: CurrentActor, session: DbSession
+) -> dict[str, object]:
+    """List actual room/person charges for an explicit invoice decision."""
+    await require_permission(session, actor, "approve_booking_charges_for_billing")
+    await _episode_scope(session, actor, episode_id)
+    components = await _episode_booking_component_invoice_candidates(session, actor, episode_id)
+    return {"booking_components": components}
+
+
+@router.put("/booking-components/{component_id}/invoice-selection")
+async def set_booking_component_invoice_selection(
+    component_id: str,
+    payload: BookingComponentInvoiceSelectionRequest,
+    actor: CurrentActor,
+    session: DbSession,
+) -> dict[str, object]:
+    """Include or exclude one approved booking component with an audit trail."""
+    await require_permission(session, actor, "approve_booking_charges_for_billing")
+    component = (
+        await session.execute(
+            select(booking_charge_components, bookings.c.episode_id)
+            .select_from(booking_charge_components)
+            .join(
+                bookings,
+                and_(
+                    bookings.c.id == booking_charge_components.c.booking_id,
+                    bookings.c.organization_id == actor.organization_id,
+                ),
+            )
+            .where(
+                and_(
+                    booking_charge_components.c.id == component_id,
+                    booking_charge_components.c.organization_id == actor.organization_id,
+                )
+            )
+            .with_for_update()
+            .limit(1)
+        )
+    ).first()
+    if not component:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking charge component not found.")
+    if component.actual_client_amount is None or decimal_amount(component.actual_client_amount) <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Confirm an approved billable actual before selecting it for invoicing.",
+        )
+    already_invoiced = await session.scalar(
+        select(client_invoice_items.c.id)
+        .where(
+            and_(
+                client_invoice_items.c.organization_id == actor.organization_id,
+                client_invoice_items.c.booking_charge_component_id == component_id,
+                client_invoice_items.c.voided_at.is_(None),
+            )
+        )
+        .limit(1)
+    )
+    if already_invoiced:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This booking charge is already on an issued invoice and cannot be changed.",
+        )
+    now = datetime.now(UTC)
+    values = {
+        "id": str(uuid4()),
+        "organization_id": actor.organization_id,
+        "booking_charge_component_id": component_id,
+        "include_in_invoice": payload.include_in_invoice,
+        "reason": payload.reason.strip() if payload.reason else None,
+        "selected_by_user_id": actor.user_id,
+        "selected_at": now,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await session.execute(
+        pg_insert(booking_component_invoice_selections)
+        .values(**values)
+        .on_conflict_do_update(
+            constraint="booking_component_invoice_selections_component_unique",
+            set_={
+                key: value
+                for key, value in values.items()
+                if key not in {"id", "created_at", "booking_charge_component_id"}
+            },
+        )
+    )
+    await _audit(
+        session,
+        actor,
+        action=(
+            "booking_component.invoice_included"
+            if payload.include_in_invoice
+            else "booking_component.invoice_excluded"
+        ),
+        entity_type="booking_charge_component",
+        entity_id=component_id,
+        metadata={
+            "episodeId": str(component.episode_id),
+            "includeInInvoice": payload.include_in_invoice,
+            "reason": values["reason"],
+            "actualAmount": str(component.actual_client_amount),
+        },
+    )
+    await session.commit()
+    return {
+        "component_id": component_id,
+        "include_in_invoice": payload.include_in_invoice,
+        "reason": values["reason"],
+        "selected_at": now,
+    }
 
 
 @router.get("/work-order-charges")
@@ -939,8 +1324,8 @@ async def _invoice_po_scope(
 async def issue_client_invoice(
     payload: ClientInvoiceIssueRequest, actor: CurrentActor, session: DbSession
 ) -> dict[str, object]:
-    """Issue an immutable invoice from every approved, uninvoiced episode charge."""
-    await require_permission(session, actor, "manage_commercial")
+    """Issue an immutable invoice from selected actuals and approved changes."""
+    await require_permission(session, actor, "issue_invoices")
     readiness = await _episode_invoice_readiness(session, actor, payload.episode_id)
     episode_data = readiness["episode"]
     if not readiness["ready_to_issue"]:
@@ -976,12 +1361,15 @@ async def issue_client_invoice(
             .order_by(billables.c.created_at, billables.c.id)
         )
     ).all()
-    if not billable_rows:
+    booking_component_rows = await _selected_booking_component_invoice_rows(session, actor, payload.episode_id)
+    if not billable_rows and not booking_component_rows:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="No approved client charges are ready to invoice."
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No selected booking actuals or approved client charges are ready to invoice.",
         )
     totals = invoice_totals(
-        sum((decimal_amount(item.amount) for item in billable_rows), Decimal(0)),
+        sum((decimal_amount(item.amount) for item in billable_rows), Decimal(0))
+        + sum((decimal_amount(item.actual_client_amount) for item in booking_component_rows), Decimal(0)),
         tax_enabled=profile.tax_enabled,
         tax_rate_percent=decimal_amount(profile.tax_rate_percent),
     )
@@ -1029,27 +1417,43 @@ async def issue_client_invoice(
         .returning(client_invoices)
     )
     invoice = created.one()
+    invoice_item_values = [
+        {
+            "organization_id": actor.organization_id,
+            "client_invoice_id": invoice.id,
+            "billable_id": item.id,
+            "client_purchase_order_id": item.client_purchase_order_id,
+            "booking_charge_component_id": None,
+            "booking_component_charge_kind": None,
+            "description": item.description.strip() if item.description else "Post-production services",
+            "reference": item.reference,
+            "quantity": Decimal(1),
+            "unit_amount": item.amount,
+            "amount": item.amount,
+            "created_at": now,
+            "updated_at": now,
+        }
+        for item in billable_rows
+    ]
+    for component in booking_component_rows:
+        invoice_item_values.extend(
+            _component_invoice_item_values(
+                organization_id=actor.organization_id,
+                invoice_id=str(invoice.id),
+                component=component,
+                episode=episode,
+                now=now,
+            )
+        )
+    if not invoice_item_values:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The selected booking components did not produce billable invoice lines.",
+        )
     created_items = (
         await session.execute(
             insert(client_invoice_items)
-            .values(
-                [
-                    {
-                        "organization_id": actor.organization_id,
-                        "client_invoice_id": invoice.id,
-                        "billable_id": item.id,
-                        "client_purchase_order_id": item.client_purchase_order_id,
-                        "description": item.description.strip() if item.description else "Post-production services",
-                        "reference": item.reference,
-                        "quantity": Decimal(1),
-                        "unit_amount": item.amount,
-                        "amount": item.amount,
-                        "created_at": now,
-                        "updated_at": now,
-                    }
-                    for item in billable_rows
-                ]
-            )
+            .values(invoice_item_values)
             .returning(client_invoice_items)
         )
     ).all()
@@ -1104,6 +1508,7 @@ async def issue_client_invoice(
             "taxAmount": monetary(totals["tax_amount"]),
             "totalAmount": monetary(totals["total_amount"]),
             "currency": actor.active_organization.currency,
+            "bookingComponentCount": len(booking_component_rows),
         },
     )
     for purchase_order_id, invoice_item_id, overrun_authorised in client_po_events:
@@ -1152,6 +1557,139 @@ async def _invoice_or_404(session: DbSession, actor: CurrentActor, invoice_id: s
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
     return invoice
+
+
+@router.post("/invoices/{invoice_id}/void")
+async def void_client_invoice(
+    invoice_id: str,
+    payload: ClientInvoiceVoidRequest,
+    actor: CurrentActor,
+    session: DbSession,
+) -> dict[str, object]:
+    """Void an issued invoice with exact negative reversals of its saved lines.
+
+    No current source amount, rate card, booking duration, or tax setting is
+    consulted here.  The original line is retained, marked voided, and one
+    reversing ledger entry is written against it.
+    """
+    await require_permission(session, actor, "issue_invoices")
+    invoice = (
+        await session.execute(
+            select(client_invoices)
+            .where(and_(client_invoices.c.id == invoice_id, client_invoices.c.organization_id == actor.organization_id))
+            .with_for_update()
+            .limit(1)
+        )
+    ).first()
+    if not invoice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
+    if invoice.status == "void":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This invoice has already been voided.")
+    if invoice.status != "issued":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only an issued invoice can be voided. Record a credit note for a paid invoice.",
+        )
+    items = (
+        await session.execute(
+            select(client_invoice_items)
+            .where(
+                and_(
+                    client_invoice_items.c.organization_id == actor.organization_id,
+                    client_invoice_items.c.client_invoice_id == invoice_id,
+                    client_invoice_items.c.voided_at.is_(None),
+                )
+            )
+            .with_for_update()
+            .order_by(client_invoice_items.c.created_at, client_invoice_items.c.id)
+        )
+    ).all()
+    if not items:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This invoice has no active lines to reverse.")
+    now = datetime.now(UTC)
+    reason = payload.reason.strip()
+    await session.execute(
+        insert(client_invoice_line_reversals).values(
+            [
+                {
+                    "id": str(uuid4()),
+                    "organization_id": actor.organization_id,
+                    "client_invoice_id": invoice_id,
+                    "client_invoice_item_id": item.id,
+                    "reversal_type": "void",
+                    "quantity": item.quantity,
+                    "unit_amount": item.unit_amount,
+                    "amount": -decimal_amount(item.amount),
+                    "reason": reason,
+                    "created_by_user_id": actor.user_id,
+                    "created_at": now,
+                }
+                for item in items
+            ]
+        )
+    )
+    item_ids = [item.id for item in items]
+    await session.execute(
+        update(client_invoice_items)
+        .where(
+            and_(
+                client_invoice_items.c.organization_id == actor.organization_id,
+                client_invoice_items.c.id.in_(item_ids),
+            )
+        )
+        .values(voided_at=now, voided_by_user_id=actor.user_id, updated_at=now)
+    )
+    billable_ids = [item.billable_id for item in items if item.billable_id]
+    if billable_ids:
+        await session.execute(
+            update(billables)
+            .where(
+                and_(
+                    billables.c.organization_id == actor.organization_id,
+                    billables.c.id.in_(billable_ids),
+                    billables.c.client_invoice_id == invoice_id,
+                )
+            )
+            .values(client_invoice_id=None, status="approved", invoice_date=None, due_date=None, updated_at=now)
+        )
+    # A client-PO invoice allocation is an effect of this exact invoice line,
+    # so removing it releases the balance while the reversal table preserves
+    # the historical void evidence.
+    await session.execute(
+        delete(client_purchase_order_allocations).where(
+            and_(
+                client_purchase_order_allocations.c.organization_id == actor.organization_id,
+                client_purchase_order_allocations.c.client_invoice_item_id.in_(item_ids),
+                client_purchase_order_allocations.c.allocation_type == "client_invoice",
+            )
+        )
+    )
+    await session.execute(
+        update(client_invoices)
+        .where(and_(client_invoices.c.id == invoice_id, client_invoices.c.organization_id == actor.organization_id))
+        .values(status="void", updated_at=now)
+    )
+    await _audit(
+        session,
+        actor,
+        action="client_invoice.voided",
+        entity_type="client_invoice",
+        entity_id=invoice_id,
+        metadata={
+            "invoiceNumber": invoice.invoice_number,
+            "reason": reason,
+            "reversalLineCount": len(items),
+            "reversedAmount": str(sum((-decimal_amount(item.amount) for item in items), Decimal(0))),
+        },
+    )
+    await session.commit()
+    return {
+        "id": str(invoice.id),
+        "invoice_number": invoice.invoice_number,
+        "status": "void",
+        "reversal_line_count": len(items),
+        "reversed_amount": monetary(sum((-decimal_amount(item.amount) for item in items), Decimal(0))),
+    }
 
 
 async def _invoice_export_readiness(session: DbSession, actor: CurrentActor, invoice_id: str) -> dict[str, object]:
@@ -1217,7 +1755,15 @@ async def _invoice_export_readiness(session: DbSession, actor: CurrentActor, inv
                     client_invoice_items.c.client_invoice_id == invoice_id,
                 )
             )
-            .order_by(client_invoice_items.c.created_at, client_invoice_items.c.id)
+            .order_by(
+                client_invoice_items.c.created_at,
+                case(
+                    (client_invoice_items.c.booking_component_charge_kind == "base", 0),
+                    (client_invoice_items.c.booking_component_charge_kind == "overtime", 1),
+                    else_=0,
+                ),
+                client_invoice_items.c.id,
+            )
         )
     ).all()
     item_billable_ids = [item.billable_id for item in items if item.billable_id]
@@ -1232,33 +1778,72 @@ async def _invoice_export_readiness(session: DbSession, actor: CurrentActor, inv
         )
     ).all()
     sources_by_id = {str(source.id): source for source in source_billables}
-    source_ids = [str(item.billable_id) for item in items if item.billable_id]
-    lines_have_unique_sources = len(source_ids) == len(set(source_ids)) == len(items)
-    source_states_match = all(
+    billable_source_ids = [str(item.billable_id) for item in items if item.billable_id]
+    component_source_keys = [
+        f"{item.booking_charge_component_id}:{item.booking_component_charge_kind}"
+        for item in items
+        if item.booking_charge_component_id and item.booking_component_charge_kind
+    ]
+    lines_have_unique_sources = (
+        len(billable_source_ids) == len(set(billable_source_ids))
+        and len(component_source_keys) == len(set(component_source_keys))
+        and len(billable_source_ids) + len(component_source_keys) == len(items)
+    )
+    billable_states_match = all(
         (source := sources_by_id.get(str(item.billable_id)))
         and source.status == "invoiced"
         and str(source.client_invoice_id) == str(invoice.id)
         for item in items
+        if item.billable_id
     )
-    checks["billablesReconcile"] = bool(items) and lines_have_unique_sources and source_states_match
+    component_states_match = all(
+        item.source_booking_id
+        and item.booking_date
+        and item.episode_code
+        and item.episode_title
+        and item.resource_type in {"room", "person"}
+        and item.resource_name
+        and item.saved_rate is not None
+        and item.booking_component_charge_kind in {"base", "overtime"}
+        for item in items
+        if item.booking_charge_component_id
+    )
+    checks["billablesReconcile"] = (
+        bool(items) and lines_have_unique_sources and billable_states_match and component_states_match
+    )
     if not checks["billablesReconcile"]:
-        blocking_reasons.append("One or more invoice lines are not reconciled to an invoiced source billable.")
+        blocking_reasons.append("One or more invoice lines are not reconciled to their approved source.")
         blocking_records.append({"type": "invoice", "id": str(invoice.id), "label": invoice.invoice_number})
 
-    line_values_match_sources = all(
-        (source := sources_by_id.get(str(item.billable_id)))
-        and decimal_amount(item.amount) == decimal_amount(source.amount)
-        and decimal_amount(item.amount)
-        == invoice_totals(
+    def line_matches_source(item: object) -> bool:
+        calculated_line_amount = invoice_totals(
             decimal_amount(item.quantity) * decimal_amount(item.unit_amount),
             tax_enabled=False,
             tax_rate_percent=Decimal(0),
         )["subtotal_amount"]
-        for item in items
-    )
+        if item.billable_id:
+            source = sources_by_id.get(str(item.billable_id))
+            return bool(
+                source and decimal_amount(item.amount) == decimal_amount(source.amount) == calculated_line_amount
+            )
+        if item.booking_charge_component_id:
+            # An issued booking line must reconcile to its own immutable
+            # snapshot, not mutable booking/time/rate-card records.  Any
+            # correction later is a credit or void of this line, followed by a
+            # newly issued line, rather than a silent repricing.
+            expected_rate = decimal_amount(item.saved_rate)
+            if item.booking_component_charge_kind == "overtime":
+                expected_rate *= decimal_amount(item.overtime_multiplier)
+            return (
+                decimal_amount(item.unit_amount) == expected_rate
+                and decimal_amount(item.amount) == calculated_line_amount
+            )
+        return False
+
+    line_values_match_sources = all(line_matches_source(item) for item in items)
     checks["invoiceLinesEqualSourceBillables"] = checks["billablesReconcile"] and line_values_match_sources
     if not checks["invoiceLinesEqualSourceBillables"]:
-        blocking_reasons.append("An invoice line does not exactly match its source billable.")
+        blocking_reasons.append("An invoice line does not exactly match its saved source charge.")
 
     calculated = invoice_totals(
         sum((decimal_amount(item.amount) for item in items), Decimal(0)),
@@ -1315,14 +1900,14 @@ async def _invoice_export_readiness(session: DbSession, actor: CurrentActor, inv
 
 @router.get("/invoices/{invoice_id}/export-readiness")
 async def invoice_export_readiness(invoice_id: str, actor: CurrentActor, session: DbSession) -> dict[str, object]:
-    await require_permission(session, actor, "manage_commercial")
+    await require_permission(session, actor, "issue_invoices")
     return await _invoice_export_readiness(session, actor, invoice_id)
 
 
 @router.get("/invoices/{invoice_id}/export")
 async def exportable_invoice(invoice_id: str, actor: CurrentActor, session: DbSession) -> dict[str, object]:
     """Return an export-safe immutable invoice payload; rendering is a UI concern."""
-    await require_permission(session, actor, "manage_commercial")
+    await require_permission(session, actor, "issue_invoices")
     gate = await _invoice_export_readiness(session, actor, invoice_id)
     if not gate["exportable"]:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(gate["blocked_reason"]))
@@ -1336,7 +1921,15 @@ async def exportable_invoice(invoice_id: str, actor: CurrentActor, session: DbSe
                     client_invoice_items.c.client_invoice_id == invoice_id,
                 )
             )
-            .order_by(client_invoice_items.c.created_at, client_invoice_items.c.id)
+            .order_by(
+                client_invoice_items.c.created_at,
+                case(
+                    (client_invoice_items.c.booking_component_charge_kind == "base", 0),
+                    (client_invoice_items.c.booking_component_charge_kind == "overtime", 1),
+                    else_=0,
+                ),
+                client_invoice_items.c.id,
+            )
         )
     ).all()
     return {
@@ -1370,6 +1963,24 @@ async def exportable_invoice(invoice_id: str, actor: CurrentActor, session: DbSe
                 "quantity": float(item.quantity),
                 "unit_amount": monetary(decimal_amount(item.unit_amount)),
                 "amount": monetary(decimal_amount(item.amount)),
+                "booking_date": item.booking_date,
+                "episode": (
+                    {"code": item.episode_code, "title": item.episode_title}
+                    if item.booking_charge_component_id
+                    else None
+                ),
+                "resource": (
+                    {"type": item.resource_type, "name": item.resource_name}
+                    if item.booking_charge_component_id
+                    else None
+                ),
+                "saved_rate": monetary(decimal_amount(item.saved_rate)) if item.saved_rate is not None else None,
+                "overtime_multiplier": (
+                    monetary(decimal_amount(item.overtime_multiplier))
+                    if item.overtime_multiplier is not None
+                    else None
+                ),
+                "source_booking_id": str(item.source_booking_id) if item.source_booking_id else None,
             }
             for item in items
         ],

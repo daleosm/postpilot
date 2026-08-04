@@ -199,6 +199,16 @@ class EpisodeUpdateRequest(BaseModel):
     delivery_deadline: datetime | None = None
 
 
+class BookingCommercialOverrideRequest(BaseModel):
+    """A negotiated rate for one resource on one booking only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    component_type: str = Field(pattern="^(room|person)$")
+    rate: Money = Field(ge=0)
+    reason: str = Field(min_length=5, max_length=1000)
+
+
 class BookingCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=240)
     room_id: str | None = None
@@ -217,6 +227,7 @@ class BookingCreateRequest(BaseModel):
     )
     is_option: bool = False
     notes: str | None = Field(default=None, max_length=4000)
+    commercial_overrides: list[BookingCommercialOverrideRequest] = Field(default_factory=list, max_length=2)
 
     @model_validator(mode="after")
     def valid_window(self) -> BookingCreateRequest:
@@ -224,6 +235,13 @@ class BookingCreateRequest(BaseModel):
             raise ValueError("Booking end must be after its start.")
         if self.budget_line_id and not self.episode_id:
             raise ValueError("Choose an episode before assigning a budget item.")
+        component_types = [override.component_type for override in self.commercial_overrides]
+        if len(component_types) != len(set(component_types)):
+            raise ValueError("Set at most one negotiated price for each booking resource.")
+        if "room" in component_types and not self.room_id:
+            raise ValueError("Choose a room before setting its negotiated price.")
+        if "person" in component_types and not self.person_id:
+            raise ValueError("Choose an artist before setting their negotiated price.")
         return self
 
 
@@ -705,12 +723,16 @@ class RateCardOverrideRequest(BaseModel):
     show_id: str | None = None
     episode_id: str | None = None
     service_rate_id: str | None = None
+    target_type: str = Field(default="service", pattern="^(service|room|person)$")
+    room_id: str | None = None
+    person_id: str | None = None
     category: str | None = Field(default=None, min_length=2, max_length=120)
     unit: str | None = Field(default=None, min_length=2, max_length=40)
     rate: Money = Field(ge=0)
+    internal_cost_rate: Money | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
-    def valid_scope_and_service(self) -> RateCardOverrideRequest:
+    def valid_scope_and_target(self) -> RateCardOverrideRequest:
         targets = {
             "network": self.network,
             "client": self.client_company_id,
@@ -724,8 +746,21 @@ class RateCardOverrideRequest(BaseModel):
             raise ValueError(f"A {self.scope} rate card needs its matching target.")
         elif any(value for name, value in targets.items() if name != self.scope):
             raise ValueError("A rate-card override can have only one scope target.")
-        if not self.service_rate_id and not (self.category and self.unit):
-            raise ValueError("Choose a service rate or provide a category and unit.")
+        if self.target_type == "service":
+            if self.room_id or self.person_id:
+                raise ValueError("A generic service rate cannot also target a room or person.")
+            if not self.service_rate_id and not (self.category and self.unit):
+                raise ValueError("Choose a service rate or provide a category and unit.")
+        elif self.target_type == "room":
+            if not self.room_id or self.person_id or self.service_rate_id:
+                raise ValueError("A room rate must target one room and cannot include a service or person.")
+            if not (self.category and self.unit):
+                raise ValueError("A room rate needs a category and billing unit.")
+        else:
+            if not self.person_id or self.room_id or self.service_rate_id:
+                raise ValueError("A named artist rate must target one person and cannot include a service or room.")
+            if not (self.category and self.unit):
+                raise ValueError("A named artist rate needs a category and billing unit.")
         return self
 
 
@@ -965,6 +1000,21 @@ class BillableVoidRequest(BaseModel):
     reason: str = Field(min_length=4, max_length=2000)
 
 
+class BookingComponentInvoiceSelectionRequest(BaseModel):
+    """A commercial user's explicit inclusion decision for one actual charge."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include_in_invoice: bool
+    reason: str | None = Field(default=None, min_length=4, max_length=2000)
+
+    @model_validator(mode="after")
+    def reason_for_exclusion(self) -> BookingComponentInvoiceSelectionRequest:
+        if not self.include_in_invoice and not self.reason:
+            raise ValueError("Explain why this actual charge is excluded from the invoice.")
+        return self
+
+
 class ClientPoOverrunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -986,6 +1036,14 @@ class ClientInvoiceIssueRequest(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("Provide at most one overrun reason for each client PO.")
         return self
+
+
+class ClientInvoiceVoidRequest(BaseModel):
+    """Void an issued invoice using exact reversals of its saved lines."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=4, max_length=2000)
 
 
 class DeliveryProfileCreateRequest(BaseModel):

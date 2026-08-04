@@ -106,6 +106,18 @@ def create_rate_backed_estimate(lab: ProductionApiLab, current_episode_id: str) 
 
 
 def create_confirmed_booking(lab: ProductionApiLab, current_episode_id: str, budget_line_id: str) -> str:
+    # A confirmed booking takes its commercial snapshot from a matching
+    # operational service row; estimates and booking pricing are separate.
+    pricing = lab.client.post(
+        "/v1/rate-cards/services",
+        json={
+            "name": f"Lifecycle edit booking rate {uuid4().hex[:8]}",
+            "category": "Edit suite",
+            "unit": "hour",
+            "rate": "100.00",
+        },
+    )
+    assert pricing.status_code == 201, pricing.text
     created = lab.client.post(
         "/v1/bookings",
         json={

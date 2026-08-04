@@ -78,11 +78,22 @@ def _create_show_episode(
 
 
 def _effective(
-    lab: ProductionApiLab, episode_id: str, *, category: str = "Colourist", unit: str = "hour"
+    lab: ProductionApiLab,
+    episode_id: str,
+    *,
+    category: str = "Colourist",
+    unit: str = "hour",
+    target_type: str | None = None,
+    target_id: str | None = None,
 ) -> dict[str, object]:
+    params: dict[str, str] = {"episode_id": episode_id, "category": category, "unit": unit}
+    if target_type:
+        params["target_type"] = target_type
+    if target_id:
+        params["target_id"] = target_id
     response = lab.client.get(
         "/v1/rate-cards/effective",
-        params={"episode_id": episode_id, "category": category, "unit": unit},
+        params=params,
     )
     assert response.status_code == 200, response.text
     return response.json()["effective_rate"]
@@ -334,3 +345,312 @@ def test_rate_cards_enforce_commercial_permission_and_tenant_scope(production_la
     )
 
     assert foreign_service.status_code == foreign_show.status_code == foreign_episode.status_code == 404
+
+
+def test_named_artist_rates_are_explicit_scoped_and_fall_back_to_generic_services(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    episode_id = _episode_id(production_lab)
+    service_rate_id = _service(
+        production_lab,
+        name=f"Generic colourist {uuid4().hex[:8]}",
+        category="Colourist",
+        unit="hour",
+        rate=100,
+    )
+    master = _override(production_lab, scope="master", service_rate_id=service_rate_id, rate=125)
+    initial_people = [item for item in master["items"] if item["target_type"] == "person"]
+    assert initial_people == []
+
+    named = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={
+            "scope": "master",
+            "target_type": "person",
+            "person_id": production_lab.data.colorist_person_id,
+            "category": "Colourist",
+            "unit": "hour",
+            "rate": 175,
+            "internal_cost_rate": 95,
+        },
+    )
+    assert named.status_code == 201, named.text
+    person_item = next(item for item in named.json()["items"] if item["target_type"] == "person")
+    assert person_item["person_id"] == production_lab.data.colorist_person_id
+    assert person_item["client_rate"] == 175
+    assert person_item["internal_cost_rate"] == 95
+
+    # A generic service at show scope wins over the broader master person rate;
+    # an exact artist row at the same show scope then wins over that generic.
+    _override(
+        production_lab,
+        scope="show",
+        service_rate_id=service_rate_id,
+        rate=150,
+        show_id=production_lab.data.show_id,
+    )
+    generic = _effective(
+        production_lab,
+        episode_id,
+        target_type="person",
+        target_id=production_lab.data.colorist_person_id,
+    )
+    assert generic["rate"] == 150
+    assert generic["source"] == "show_rate_card"
+    exact = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={
+            "scope": "show",
+            "show_id": production_lab.data.show_id,
+            "target_type": "person",
+            "person_id": production_lab.data.colorist_person_id,
+            "category": "Colourist",
+            "unit": "hour",
+            "rate": 190,
+            "internal_cost_rate": 105,
+        },
+    )
+    assert exact.status_code == 201, exact.text
+    resolved = _effective(
+        production_lab,
+        episode_id,
+        target_type="person",
+        target_id=production_lab.data.colorist_person_id,
+    )
+    assert resolved["rate"] == 190
+    assert resolved["internal_cost_rate"] == 105
+    assert resolved["target_type"] == "person"
+    assert resolved["person_id"] == production_lab.data.colorist_person_id
+
+    room = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={
+            "scope": "show",
+            "show_id": production_lab.data.show_id,
+            "target_type": "room",
+            "room_id": production_lab.data.room_id,
+            "category": "Colour suite",
+            "unit": "hour",
+            "rate": 240,
+            "internal_cost_rate": 115,
+        },
+    )
+    assert room.status_code == 201, room.text
+    room_resolved = _effective(
+        production_lab,
+        episode_id,
+        category="Colour suite",
+        target_type="room",
+        target_id=production_lab.data.room_id,
+    )
+    assert room_resolved["rate"] == 240
+    assert room_resolved["internal_cost_rate"] == 115
+    assert room_resolved["target_type"] == "room"
+    assert room_resolved["room_id"] == production_lab.data.room_id
+
+
+def test_named_artist_rate_targets_are_tenant_scoped_and_idempotent(production_lab: ProductionApiLab) -> None:
+    production_lab.sign_in_as_manager()
+    payload = {
+        "scope": "master",
+        "target_type": "person",
+        "person_id": production_lab.data.editor_person_id,
+        "category": "Editor",
+        "unit": "hour",
+        "rate": 160,
+    }
+    created = production_lab.client.post("/v1/rate-cards/overrides", json=payload)
+    updated = production_lab.client.post("/v1/rate-cards/overrides", json={**payload, "rate": 165})
+    assert created.status_code == updated.status_code == 201
+    artist_items = [item for item in updated.json()["items"] if item["target_type"] == "person"]
+    assert len(artist_items) == 1
+    assert artist_items[0]["rate"] == 165
+
+    foreign = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={**payload, "person_id": production_lab.data.foreign_person_id},
+    )
+    assert foreign.status_code == 404
+    foreign_lookup = production_lab.client.get(
+        "/v1/rate-cards/effective",
+        params={
+            "episode_id": _episode_id(production_lab),
+            "category": "Editor",
+            "unit": "hour",
+            "target_type": "person",
+            "target_id": production_lab.data.foreign_person_id,
+        },
+    )
+    assert foreign_lookup.status_code == 404
+
+
+def test_named_artist_rate_beats_generic_rate_at_a_peer_network_or_client_scope(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    service_rate_id = _service(
+        production_lab,
+        name=f"Peer scope colourist {uuid4().hex[:8]}",
+        category="Colourist",
+        unit="hour",
+        rate=100,
+    )
+    # Both scopes apply to this episode. The named client exception must win
+    # before the resolver considers the network's generic service price.
+    _override(
+        production_lab,
+        scope="network",
+        service_rate_id=service_rate_id,
+        rate=150,
+        network="Peer scope network",
+    )
+    named_client = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={
+            "scope": "client",
+            "client_company_id": production_lab.data.client_company_id,
+            "target_type": "person",
+            "person_id": production_lab.data.colorist_person_id,
+            "category": "Colourist",
+            "unit": "hour",
+            "rate": 180,
+        },
+    )
+    assert named_client.status_code == 201, named_client.text
+    _, episode_id = _create_show_episode(
+        production_lab,
+        network="Peer scope network",
+        client_company_id=production_lab.data.client_company_id,
+    )
+
+    effective = _effective(
+        production_lab,
+        episode_id,
+        target_type="person",
+        target_id=production_lab.data.colorist_person_id,
+    )
+    assert effective["rate"] == 180
+    assert effective["source"] == "client_rate_card"
+    assert effective["target_type"] == "person"
+
+
+def test_artist_rate_search_and_scoped_register_are_tenant_safe(production_lab: ProductionApiLab) -> None:
+    production_lab.sign_in_as_manager()
+    person = production_lab.fetchrow(
+        "SELECT name FROM people WHERE id = $1 AND organization_id = $2",
+        production_lab.data.editor_person_id,
+        production_lab.data.organization_id,
+    )
+    assert person
+    search = production_lab.client.get("/v1/rate-cards/artists", params={"query": person["name"][:4]})
+    assert search.status_code == 200, search.text
+    assert any(row["id"] == production_lab.data.editor_person_id for row in search.json()["people"])
+    editor_role = next(
+        row["role"] for row in search.json()["people"] if row["id"] == production_lab.data.editor_person_id
+    )
+    assert production_lab.client.get("/v1/rate-cards/artists", params={"query": ""}).json() == {"people": []}
+
+    saved = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={
+            "scope": "master",
+            "target_type": "person",
+            "person_id": production_lab.data.editor_person_id,
+            "category": "Editor",
+            "unit": "hour",
+            "rate": 180,
+            "internal_cost_rate": 92,
+        },
+    )
+    assert saved.status_code == 201, saved.text
+    register = production_lab.client.get("/v1/rate-cards/artist-rates", params={"scope": "master"})
+    assert register.status_code == 200, register.text
+    assert register.json()["artist_rates"] == [
+        {
+            "id": next(item["id"] for item in saved.json()["items"] if item["target_type"] == "person"),
+            "person": {
+                "id": production_lab.data.editor_person_id,
+                "name": person["name"],
+                "role": editor_role,
+            },
+            "category": "Editor",
+            "unit": "hour",
+            "client_rate": 180,
+            "internal_cost_rate": 92,
+            "currency": "GBP",
+        }
+    ]
+
+    production_lab.sign_out()
+    production_lab.sign_in_as_viewer()
+    assert production_lab.client.get("/v1/rate-cards/artists", params={"query": "editor"}).status_code == 403
+
+
+def test_removing_a_named_artist_rate_restores_the_scoped_generic_fallback(
+    production_lab: ProductionApiLab,
+) -> None:
+    """Artist exceptions are explicit and reversible; deleting one never deletes its fallback."""
+    production_lab.sign_in_as_manager()
+    episode_id = _episode_id(production_lab)
+    service_rate_id = _service(
+        production_lab,
+        name=f"Removal fallback {uuid4().hex[:8]}",
+        category="Offline editor",
+        unit="hour",
+        rate=120,
+    )
+    _override(production_lab, scope="master", service_rate_id=service_rate_id, rate=120)
+    named = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={
+            "scope": "master",
+            "target_type": "person",
+            "person_id": production_lab.data.editor_person_id,
+            "category": "Offline editor",
+            "unit": "hour",
+            "rate": 180,
+            "internal_cost_rate": 90,
+        },
+    )
+    assert named.status_code == 201, named.text
+    item_id = next(item["id"] for item in named.json()["items"] if item["target_type"] == "person")
+    before = _effective(
+        production_lab,
+        episode_id,
+        category="Offline editor",
+        target_type="person",
+        target_id=production_lab.data.editor_person_id,
+    )
+    assert before["rate"] == 180
+
+    removed = production_lab.client.delete(f"/v1/rate-cards/items/{item_id}")
+    assert removed.status_code == 204, removed.text
+    after = _effective(
+        production_lab,
+        episode_id,
+        category="Offline editor",
+        target_type="person",
+        target_id=production_lab.data.editor_person_id,
+    )
+    assert after["rate"] == 120
+    assert after["source"] == "master_rate_card"
+    assert production_lab.fetchval(
+        """
+        SELECT count(*)
+        FROM rate_card_items
+        WHERE organization_id = $1 AND id = $2 AND target_type = 'person'
+        """,
+        production_lab.data.organization_id,
+        item_id,
+    ) == 0
+    assert production_lab.client.delete(f"/v1/rate-cards/items/{item_id}").status_code == 404
+    assert production_lab.fetchval(
+        """
+        SELECT count(*) FROM activity_log
+        WHERE organization_id = $1 AND action = 'rate_card.override_removed'
+          AND metadata ->> 'itemId' = $2
+        """,
+        production_lab.data.organization_id,
+        item_id,
+    ) == 1

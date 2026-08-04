@@ -45,6 +45,49 @@ test.describe("Booking creation and conflict UX", () => {
     await expect(page.getByRole("dialog", { name: "New booking" })).toHaveCount(0);
   });
 
+  test("shows server-resolved room and artist charges without offering a price field", async ({ page }) => {
+    await page.route("**/v1/bookings/commercial-preview", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          components: [
+            {
+              component_type: "room", resource: "Copper Cut 1", category: "Edit suite", rate: 100,
+              unit: "hour", currency: "GBP", source: "show_rate_card", estimated_quantity: 3,
+              estimated_charge: 300, pricing_status: "resolved",
+            },
+            {
+              component_type: "person", resource: "Mark Dyer", category: "Edit suite", rate: 175,
+              unit: "hour", currency: "GBP", source: "episode_rate_card", estimated_quantity: 3,
+              estimated_charge: 525, pricing_status: "resolved",
+            },
+          ],
+        }),
+      });
+    });
+    await openBookingDialog(page);
+    await fillBookingBasics(page, "UI commercial preview");
+
+    const dialog = page.getByRole("dialog", { name: "New booking" });
+    await expect(dialog.getByText("Commercial preview", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Copper Cut 1", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Mark Dyer", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("£300.00 est.", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("£525.00 est.", { exact: true })).toBeVisible();
+    await expect(dialog.getByLabel("Client rate", { exact: true })).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Set negotiated price" }).first().click();
+    await dialog.getByLabel("Negotiated room rate").fill("123.45");
+    await dialog.getByLabel("Negotiated room reason").fill("Client agreed a late suite rate.");
+    const bookingBody = await captureJsonWrite(page, "**/v1/bookings", { id: "a5000000-0000-4000-8000-000000000006" }, 201);
+
+    await dialog.getByRole("button", { name: "Save booking" }).click();
+
+    await expect.poll(bookingBody).toMatchObject({
+      commercial_overrides: [{ component_type: "room", rate: 123.45, reason: "Client agreed a late suite rate." }],
+    });
+  });
+
   test("turns a provisional reservation into an explicit pencil hold payload", async ({ page }) => {
     await openBookingDialog(page);
     await fillBookingBasics(page, "UI pencil hold");

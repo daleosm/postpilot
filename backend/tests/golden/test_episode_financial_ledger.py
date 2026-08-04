@@ -131,6 +131,17 @@ def test_golden_episode_ledger_and_invoice_match_the_checked_in_penny_fixture(
     )
     assert baseline.status_code == 201, baseline.text
 
+    booking_pricing = lab.client.post(
+        "/v1/rate-cards/services",
+        json={
+            "name": "Golden edit booking rate",
+            "category": "Edit suite",
+            "unit": "hour",
+            "rate": "100.00",
+        },
+    )
+    assert booking_pricing.status_code == 201, booking_pricing.text
+
     booking = lab.client.post(
         "/v1/bookings",
         json={

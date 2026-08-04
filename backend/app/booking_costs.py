@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 FACILITY_DAY_HOURS = Decimal("9")
+FACILITY_WEEK_DAYS = Decimal("5")
+OVERTIME_MULTIPLIER = Decimal("1.5")
 
 # These are service-rate categories, not role names. A post house can alter
 # their rates or use a more-specific rate card without changing this logic.
@@ -51,16 +53,51 @@ def facility_hours(starts_at: datetime, ends_at: datetime) -> Decimal:
     return hours
 
 
+def normalise_billing_unit(unit: str | None) -> str:
+    """Keep legacy and human-friendly unit labels financially equivalent."""
+    return (unit or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def raw_quantity_for_hours(unit: str | None, hours: Decimal) -> Decimal:
+    """Convert occupied hours without rounding before a monetary calculation."""
+    normalized = normalise_billing_unit(unit)
+    if normalized == "hour":
+        value = hours
+    elif normalized == "half_day":
+        value = hours / (FACILITY_DAY_HOURS / Decimal(2))
+    elif normalized == "day":
+        value = hours / FACILITY_DAY_HOURS
+    elif normalized == "week":
+        value = hours / (FACILITY_DAY_HOURS * FACILITY_WEEK_DAYS)
+    elif normalized in {"fixed", "fixed_fee", "episode", "unit"}:
+        value = Decimal(1) if hours > 0 else Decimal(0)
+    else:
+        # Unknown historic units are treated as fixed rather than inventing a
+        # time conversion. New rate-card rows are validated elsewhere.
+        value = Decimal(1) if hours > 0 else Decimal(0)
+    return value
+
+
+def quantity_for_hours(unit: str | None, hours: Decimal) -> Decimal:
+    """Return a displayable component quantity without affecting money maths."""
+    return raw_quantity_for_hours(unit, hours).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def cost_for_hours(rate: Decimal | None, unit: str | None, hours: Decimal) -> Decimal:
     if rate is None or not unit:
         return Decimal(0)
-    if unit == "hour":
-        value = rate * hours
-    elif unit == "day":
-        value = rate * (hours / FACILITY_DAY_HOURS)
-    else:  # episode/fixed services are charged once when time is confirmed.
-        value = rate
+    quantity = raw_quantity_for_hours(unit, hours)
+    normalized = normalise_billing_unit(unit)
+    if normalized in {"fixed", "fixed_fee", "episode", "unit"}:
+        value = rate if quantity else Decimal(0)
+    else:
+        value = rate * quantity
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def supports_overtime(unit: str | None) -> bool:
+    """Fixed, episode and unit prices stay fixed when a session runs late."""
+    return normalise_billing_unit(unit) in {"hour", "half_day", "day", "week"}
 
 
 def confirmed_hours(starts_at: datetime, ends_at: datetime, overtime_minutes: int) -> Decimal:
