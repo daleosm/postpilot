@@ -23,6 +23,19 @@ const schema = z.object({
 type Values = z.infer<typeof schema>;
 type Input = z.input<typeof schema>;
 type MasterPrice = { rate: string | number; currency: string };
+type MasterRoom = {
+  id: string;
+  name: string;
+  type: string;
+  rate: {
+    id: string;
+    category: string;
+    unit: "hour" | "episode" | "fixed";
+    rate: string | number;
+    internal_cost_rate: string | number | null;
+    currency: string;
+  } | null;
+};
 
 export type ServiceRate = {
   id: string;
@@ -40,6 +53,7 @@ type MasterServiceRate = ServiceRate & { masterRate?: string | number };
 
 export function ServiceRateCard({ rates, embedded = false }: { rates: ServiceRate[]; embedded?: boolean }) {
   const [masterPrices, setMasterPrices] = useState<Record<string, MasterPrice>>({});
+  const [rooms, setRooms] = useState<MasterRoom[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +68,15 @@ export function ServiceRateCard({ rates, embedded = false }: { rates: ServiceRat
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    postpilotUiFetch("/v1/rate-cards/master-rooms")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => { if (!cancelled) setRooms(body?.rooms ?? []); })
+      .catch(() => { if (!cancelled) setRooms([]); });
+    return () => { cancelled = true; };
+  }, []);
+
   const masterRates = rates.map((rate) => ({
     ...rate,
     masterRate: masterPrices[rate.category + ":" + rate.unit]?.rate,
@@ -65,10 +88,11 @@ export function ServiceRateCard({ rates, embedded = false }: { rates: ServiceRat
         <h2 className="text-sm font-semibold text-[#343b38]">Master rate card</h2>
         <p className="mt-1 text-xs text-[#858a87]">Your post house’s standard room, artist, and service rates. Network, show, and episode cards inherit these prices until overridden.</p>
       </div>
-      <RateDialog />
+      <div className="flex flex-wrap gap-2"><RoomRateDialog rooms={rooms} /><RateDialog /></div>
     </div>
     <div className="divide-y divide-[#efeeea]">
       {masterRates.map((rate) => <RateRow key={rate.id} rate={rate} />)}
+      {rooms.filter((room) => room.rate).map((room) => <RoomRateRow key={room.id} room={room} rooms={rooms} />)}
       {!rates.length && <div className="px-5 py-12 text-center">
         <ReceiptText className="mx-auto text-[#a1a7a3]" size={22} />
         <p className="mt-3 text-sm font-medium text-[#59615d]">No master rates yet</p>
@@ -94,6 +118,108 @@ function RateRow({ rate }: { rate: MasterServiceRate }) {
       <RemoveRateButton rate={rate} />
     </div>
   </div>;
+}
+
+function RoomRateRow({ room, rooms }: { room: MasterRoom; rooms: MasterRoom[] }) {
+  if (!room.rate) return null;
+  return <div className="flex flex-col justify-between gap-3 px-5 py-4 sm:flex-row sm:items-center">
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-semibold text-[#404844]">{room.name}</p><span className="service-rate-inactive">Room</span></div>
+      <p className="mt-1.5 text-xs text-[#7d837f]">{room.type} · selected from Settings → Rooms</p>
+    </div>
+    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+      <p className="mr-1 text-sm font-semibold text-[#3d4642]">{formatMoney(room.rate.rate, room.rate.currency)} <span className="text-xs font-normal text-[#7d837f]">/ {room.rate.unit}</span></p>
+      <RoomRateDialog room={room} rooms={rooms} />
+      <RemoveRoomRateButton room={room} />
+    </div>
+  </div>;
+}
+
+function RoomRateDialog({ room, rooms }: { room?: MasterRoom; rooms: MasterRoom[] }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [roomId, setRoomId] = useState(room?.id ?? "");
+  const [unit, setUnit] = useState<"hour" | "episode" | "fixed">(room?.rate?.unit ?? "hour");
+  const [rate, setRate] = useState(room?.rate ? String(room.rate.rate) : "");
+  const [internalCostRate, setInternalCostRate] = useState(room?.rate?.internal_cost_rate == null ? "" : String(room.rate.internal_cost_rate));
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const selectedRoom = rooms.find((candidate) => candidate.id === roomId);
+
+  function close() {
+    setOpen(false);
+    setRoomId(room?.id ?? "");
+    setUnit(room?.rate?.unit ?? "hour");
+    setRate(room?.rate ? String(room.rate.rate) : "");
+    setInternalCostRate(room?.rate?.internal_cost_rate == null ? "" : String(room.rate.internal_cost_rate));
+    setError("");
+  }
+
+  async function save() {
+    if (!selectedRoom) return setError("Choose a room from Settings.");
+    if (!rate || Number(rate) <= 0) return setError("Enter a client rate greater than zero.");
+    if (internalCostRate && Number(internalCostRate) < 0) return setError("Internal cost cannot be negative.");
+    setSaving(true);
+    setError("");
+    const response = await postpilotUiFetch("/v1/rate-cards/overrides", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: "master",
+        targetType: "room",
+        roomId: selectedRoom.id,
+        category: selectedRoom.type || selectedRoom.name,
+        unit,
+        rate: Number(rate),
+        internalCostRate: internalCostRate ? Number(internalCostRate) : null,
+      }),
+    });
+    const body = await response.json().catch(() => null);
+    setSaving(false);
+    if (!response.ok) return setError(body?.detail ?? body?.error ?? "Could not save this room rate.");
+    close();
+    router.refresh();
+  }
+
+  return <>
+    <Button variant={room ? "tertiary" : "primary"} onPress={() => setOpen(true)} className={room ? "min-w-0 border border-[#dfe3df] bg-white text-[#58635e]" : "bg-[#263130] text-white"}>
+      {room ? <><Pencil size={14} /> Edit</> : <><Plus size={16} /> Add room rate</>}
+    </Button>
+    {open && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#202725]/25 p-4" role="dialog" aria-modal="true" aria-labelledby="room-rate-title">
+      <div className="w-full max-w-md rounded-xl border border-[#e2e3de] bg-[#fafbf9] p-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-4"><div><h2 id="room-rate-title" className="text-lg font-semibold tracking-[-0.03em] text-[#2d3431]">{room ? "Edit room rate" : "Add room rate"}</h2><p className="mt-1 text-sm text-[#767c78]">Choose a room from Settings. Its saved ID is used when bookings resolve the price.</p></div><Button isIconOnly variant="tertiary" onPress={close} aria-label="Close room rate form" className="min-w-0 text-[#7d827e]"><X size={18} /></Button></div>
+        <div className="mt-5 space-y-4">
+          <Field label="Room"><select value={roomId} disabled={Boolean(room)} onChange={(event) => setRoomId(event.target.value)}><option value="">Choose a configured room</option>{rooms.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.type}</option>)}</select></Field>
+          {selectedRoom && <p className="rounded-md border border-[#dce7df] bg-[#f2f8f3] px-3 py-2 text-xs text-[#486454]">{selectedRoom.name} is managed in Settings → Rooms.</p>}
+          <div className="grid gap-3 sm:grid-cols-2"><Field label="Client rate"><input value={rate} onChange={(event) => setRate(event.target.value)} type="number" min="0.01" step="0.01" /></Field><Field label="Per"><select value={unit} onChange={(event) => setUnit(event.target.value as "hour" | "episode" | "fixed")}><option value="hour">Hour</option><option value="episode">Episode</option><option value="fixed">Fixed service</option></select></Field></div>
+          <Field label="Internal cost rate (optional)"><input value={internalCostRate} onChange={(event) => setInternalCostRate(event.target.value)} type="number" min="0" step="0.01" /></Field>
+          {error && <p role="alert" className="text-xs text-[#a35e41]">{error}</p>}
+        </div>
+        <div className="mt-6 flex justify-end gap-2 border-t border-[#ecebe7] pt-4"><Button variant="tertiary" onPress={close}>Cancel</Button><Button variant="primary" onPress={save} isDisabled={saving} className="bg-[#263130] text-white">{saving ? "Saving…" : room ? "Save room rate" : "Add room rate"}</Button></div>
+      </div>
+    </div>}
+  </>;
+}
+
+function RemoveRoomRateButton({ room }: { room: MasterRoom }) {
+  const router = useRouter();
+  const [error, setError] = useState("");
+  const [removing, setRemoving] = useState(false);
+  if (!room.rate) return null;
+  const rateId = room.rate.id;
+  async function remove() {
+    setRemoving(true);
+    setError("");
+    const response = await postpilotUiFetch("/v1/rate-cards/items/" + rateId, { method: "DELETE" });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      setError(body?.detail ?? body?.error ?? "Could not remove this room rate.");
+      setRemoving(false);
+      return;
+    }
+    router.refresh();
+  }
+  return <div className="relative"><Button variant="tertiary" onPress={remove} isDisabled={removing} className="min-w-0 border border-[#eeded8] bg-[#fffdfb] text-[#a35e41]"><Trash2 size={14} /> {removing ? "Removing…" : "Remove"}</Button>{error && <p role="alert" className="absolute right-0 top-full z-10 mt-1 w-48 text-right text-[11px] text-[#a35e41]">{error}</p>}</div>;
 }
 
 function RateDialog({ rate }: { rate?: MasterServiceRate }) {
@@ -148,7 +274,7 @@ function RateDialog({ rate }: { rate?: MasterServiceRate }) {
 
   return <>
     <Button variant={rate ? "tertiary" : "primary"} onPress={() => setOpen(true)} className={rate ? "min-w-0 border border-[#dfe3df] bg-white text-[#58635e]" : "bg-[#263130] text-white"}>
-      {rate ? <><Pencil size={14} /> Edit</> : <><Plus size={16} /> Add rate</>}
+      {rate ? <><Pencil size={14} /> Edit</> : <><Plus size={16} /> Add service rate</>}
     </Button>
     {open && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#202725]/25 p-4">
       <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-xl border border-[#e2e3de] bg-[#fafbf9] p-6 shadow-2xl">
@@ -161,7 +287,7 @@ function RateDialog({ rate }: { rate?: MasterServiceRate }) {
         </div>
         <form className="mt-6 space-y-4" onSubmit={form.handleSubmit(submit)}>
           <Field label="Service" error={form.formState.errors.name?.message}><input {...form.register("name")} placeholder="Senior editor" /></Field>
-          <Field label="Applies to"><select {...form.register("artistRole", { onChange: (event) => { const match = roles.find((role) => role.role === event.target.value); if (match && !rate) { form.setValue("name", match.label); form.setValue("category", match.label); } } })}><option value="">Generic service or room</option>{roles.map((role) => <option key={role.role} value={role.role}>{role.label}</option>)}</select></Field>
+          <Field label="Applies to"><select {...form.register("artistRole", { onChange: (event) => { const match = roles.find((role) => role.role === event.target.value); if (match && !rate) { form.setValue("name", match.label); form.setValue("category", match.label); } } })}><option value="">Generic service</option>{roles.map((role) => <option key={role.role} value={role.role}>{role.label}</option>)}</select></Field>
           <Field label="Budget category" error={form.formState.errors.category?.message}><input {...form.register("category")} placeholder="Editorial artists" /></Field>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Master rate" error={form.formState.errors.rate?.message}><input type="number" min="0" step="0.01" {...form.register("rate")} /></Field>

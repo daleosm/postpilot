@@ -625,6 +625,78 @@ async def list_artist_rate_roles(actor: CurrentActor, session: DbSession) -> dic
     return {"roles": [{"role": row.role, "label": row.label} for row in rows]}
 
 
+@router.get("/master-rooms")
+async def list_master_room_rates(actor: CurrentActor, session: DbSession) -> dict[str, object]:
+    """Return Settings rooms with their optional master-card rate rows.
+
+    A room is always selected from the operational room register.  The rate
+    card never accepts a free-text room name, which keeps booking-rate
+    resolution tied to the same room ID used by scheduling.
+    """
+    await require_permission(session, actor, "manage_rate_cards")
+    master_card_ids = select(rate_cards.c.id).where(
+        and_(
+            rate_cards.c.organization_id == actor.organization_id,
+            rate_cards.c.client_company_id.is_(None),
+            rate_cards.c.network.is_(None),
+            rate_cards.c.show_id.is_(None),
+            rate_cards.c.episode_id.is_(None),
+        )
+    )
+    rows = (
+        await session.execute(
+            select(
+                rooms.c.id.label("room_id"),
+                rooms.c.name.label("room_name"),
+                rooms.c.type.label("room_type"),
+                rate_card_items.c.id.label("item_id"),
+                rate_card_items.c.category,
+                rate_card_items.c.unit,
+                rate_card_items.c.rate,
+                rate_card_items.c.internal_cost_rate,
+            )
+            .select_from(rooms)
+            .outerjoin(
+                rate_card_items,
+                and_(
+                    rate_card_items.c.organization_id == actor.organization_id,
+                    rate_card_items.c.target_type == "room",
+                    rate_card_items.c.room_id == rooms.c.id,
+                    rate_card_items.c.rate_card_id.in_(master_card_ids),
+                ),
+            )
+            .where(rooms.c.organization_id == actor.organization_id)
+            .order_by(rooms.c.name, rooms.c.id)
+        )
+    ).all()
+    return {
+        "rooms": [
+            {
+                "id": str(row.room_id),
+                "name": row.room_name,
+                "type": row.room_type,
+                "rate": (
+                    {
+                        "id": str(row.item_id),
+                        "category": row.category,
+                        "unit": row.unit,
+                        "rate": monetary(decimal_amount(row.rate)),
+                        "internal_cost_rate": (
+                            monetary(decimal_amount(row.internal_cost_rate))
+                            if row.internal_cost_rate is not None
+                            else None
+                        ),
+                        "currency": actor.active_organization.currency,
+                    }
+                    if row.item_id
+                    else None
+                ),
+            }
+            for row in rows
+        ]
+    }
+
+
 @router.post("/services", status_code=status.HTTP_201_CREATED)
 async def create_service_rate(
     payload: ServiceRateCreateRequest, actor: CurrentActor, session: DbSession

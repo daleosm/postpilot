@@ -458,6 +458,38 @@ def test_named_artist_rates_are_explicit_scoped_and_fall_back_to_generic_service
     assert room_resolved["room_id"] == production_lab.data.room_id
 
 
+def test_master_room_rates_are_selected_from_the_tenant_room_register(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    created = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={
+            "scope": "master",
+            "target_type": "room",
+            "room_id": production_lab.data.room_id,
+            "category": "Finishing suite",
+            "unit": "hour",
+            "rate": 245,
+            "internal_cost_rate": 120,
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    register = production_lab.client.get("/v1/rate-cards/master-rooms")
+    assert register.status_code == 200, register.text
+    own_room = next(room for room in register.json()["rooms"] if room["id"] == production_lab.data.room_id)
+    assert own_room["rate"] == {
+        "id": own_room["rate"]["id"],
+        "category": "Finishing suite",
+        "unit": "hour",
+        "rate": 245,
+        "internal_cost_rate": 120,
+        "currency": "GBP",
+    }
+    assert all(room["id"] != production_lab.data.foreign_room_id for room in register.json()["rooms"])
+
+
 def test_artist_role_rate_applies_automatically_until_a_named_artist_override(
     production_lab: ProductionApiLab,
 ) -> None:
