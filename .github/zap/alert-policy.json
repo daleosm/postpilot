@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "riskActions": {
+    "Critical": "fail",
+    "High": "fail",
+    "Medium": "report",
+    "Low": "report",
+    "Informational": "report"
+  },
+  "mediumReview": {
+    "mode": "report",
+    "reviewOn": "2026-10-01",
+    "promotion": "After baseline tuning, change Medium to fail in riskActions and update this review record."
+  },
+  "acceptedAlerts": []
+}

@@ -79,10 +79,16 @@ GitHub Actions runs the quick security gate before the full app test suite:
 - Checkov validates the two EKS Terraform configurations.
 - CodeQL scans the TypeScript and Python source with the `security-extended`
   query suite; findings are published to GitHub code scanning.
-- Pushes to `main` also run an OWASP ZAP **passive baseline** against an
-  ephemeral production-mode Next.js/FastAPI runtime. Its HTML and JSON reports
-  are CI artifacts. This scan is unauthenticated and does not send active
-  attack payloads.
+- Pushes to `main` also run two OWASP ZAP **passive** checks against an
+  ephemeral production-mode Next.js/FastAPI runtime: a public sign-in-page
+  baseline and a safe scan of FastAPI's OpenAPI document. Their HTML and JSON
+  reports are CI artifacts. Both scans are unauthenticated and do not send
+  active attack payloads. The reviewed
+  [ZAP alert policy](../.github/zap/alert-policy.json) is the real gate while
+  ZAP's `-I` remains temporarily enabled: it blocks High/Critical, reports
+  Medium/Low/Informational, and requires any false-positive exception to have
+  a narrow plugin/URL match, reason, review date, and expiry date. Medium is
+  explicitly review-only until the recorded policy review promotes it.
 
 The frontend applies a nonce-based Content Security Policy, clickjacking
 protection, MIME sniffing protection, referrer and browser-feature policies,
@@ -92,9 +98,33 @@ COEP is intentionally not enabled: an overly strict cross-origin embedder
 policy can prevent MSAL's silent-authentication iframe from using the existing
 Entra browser session.
 
-An authenticated active DAST scan belongs in a separate scheduled workflow
-against an isolated staging environment with dedicated test users and an
-approved scan policy. Never point active DAST at a real facility deployment.
+The separate **PostPilot active DAST** workflow is manual or weekly (Monday
+02:37 UTC), never triggered by a pull request or deployment. It starts a fresh
+PostgreSQL service on a GitHub-hosted runner, migrates and seeds it, then adds
+one client-scoped scanner account used only in that ephemeral database. ZAP
+uses the real browser email/password sign-in form and verifies its authenticated
+session before scanning. Its tracked Automation Framework context imports the
+FastAPI OpenAPI document but only allows the frontend sign-in surface and the
+low-privilege dashboard/shows/episodes/bookings/approvals API areas. It excludes
+health/metrics/schema paths, sign-out and password/SSO flows, debug controls,
+tenant switching, commercial endpoints, settings, delivery/QC, catering, and
+other high-side-effect operations. The same reviewed policy blocks unaccepted
+High/Critical alerts and uploads the JSON/HTML report as a 30-day artifact.
+
+Active DAST is deliberately **not** the authorisation test suite. Its one
+logged-in account is useful for common web/API weaknesses such as injection,
+headers, cookies, sessions, and input handling. FastAPI PostgreSQL integration
+tests remain authoritative for tenant isolation, capability policy, and record
+ownership; Playwright remains authoritative for the corresponding browser
+journeys (for example, that one user cannot edit another user’s record).
+
+Never point active DAST at a real facility deployment.
+
+An external passive ZAP baseline is intentionally not configured yet. Add it
+only once there is a dedicated HTTPS staging URL and a protected GitHub
+environment for it; it can then validate the real TLS, reverse-proxy headers,
+redirects, cookie flags, and ingress behaviour. It must never target the public
+demo or a customer system.
 
 ## How to investigate a problem
 

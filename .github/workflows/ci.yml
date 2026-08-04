@@ -265,7 +265,13 @@ jobs:
           python -m pip install -e .
           alembic upgrade head
           python -m app.demo_seed
-          POSTPILOT_DEBUG_DEMO=true POSTPILOT_FRONTEND_ORIGINS=http://localhost:5003 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/postpilot-dast-api.log" 2>&1 &
+          POSTPILOT_FRONTEND_ORIGINS=http://localhost:5003 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/postpilot-dast-api.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/ready > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/postpilot-dast-api.log"
+          exit 1
       - name: Build and start disposable production frontend
         env:
           POSTPILOT_API_ORIGIN: http://127.0.0.1:8000
@@ -281,7 +287,7 @@ jobs:
           cat "$RUNNER_TEMP/postpilot-dast-api.log"
           cat "$RUNNER_TEMP/postpilot-dast-ui.log"
           exit 1
-      - name: Run OWASP ZAP passive baseline
+      - name: Run OWASP ZAP passive public-surface baseline
         run: |
           mkdir -p "$RUNNER_TEMP/zap"
           # The pinned ZAP image runs as its unprivileged `zap` user, while
@@ -290,7 +296,19 @@ jobs:
           docker run --rm --network host \
             -v "$RUNNER_TEMP/zap:/zap/wrk:rw" \
             ghcr.io/zaproxy/zaproxy@sha256:8d387b1a63e3425beef4846e39719f5af2a787753af2d8b6558c6257d7a577a2 \
-            zap-baseline.py -t http://127.0.0.1:5003/sign-in -m 1 -I -J zap-report.json -r zap-report.html
+            zap-baseline.py -t http://127.0.0.1:5003/sign-in -m 1 -I -J zap-frontend-report.json -r zap-frontend-report.html
+      - name: Run OWASP ZAP safe OpenAPI scan
+        run: |
+          docker run --rm --network host \
+            -v "$RUNNER_TEMP/zap:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy@sha256:8d387b1a63e3425beef4846e39719f5af2a787753af2d8b6558c6257d7a577a2 \
+            zap-api-scan.py -t http://127.0.0.1:8000/openapi.json -S -I -J zap-api-report.json -r zap-api-report.html
+      - name: Enforce reviewed passive DAST policy
+        run: |
+          python scripts/security/check_zap_report.py \
+            --policy .github/zap/alert-policy.json \
+            "$RUNNER_TEMP/zap/zap-frontend-report.json" \
+            "$RUNNER_TEMP/zap/zap-api-report.json"
       - name: Upload passive DAST report
         if: always()
         uses: actions/upload-artifact@v4

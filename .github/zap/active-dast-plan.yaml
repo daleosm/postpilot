@@ -1,0 +1,145 @@
+# OWASP ZAP Automation Framework plan for the isolated weekly/manual scan.
+#
+# This plan is deliberately a narrow authenticated scan, not a production
+# crawler. GitHub Actions substitutes the two scanner credentials into a
+# non-artifact temporary copy; this tracked file never contains a usable
+# password.
+env:
+  contexts:
+    - name: postpilot-active-dast
+      # The frontend is needed solely for the genuine email/password browser
+      # login. API discovery comes from FastAPI's OpenAPI document below.
+      urls:
+        - http://127.0.0.1:5003
+        - http://127.0.0.1:8000/v1
+      includePaths:
+        - "http://127\\.0\\.0\\.1:5003/(?:sign-in|_next/.*)?"
+        - "http://127\\.0\\.0\\.1:8000/v1/auth/session"
+        # These are deliberately low-privilege operational API areas. This
+        # lets ZAP probe ordinary authenticated request handling without
+        # scanning commercial, delivery, or configuration mutations. It is
+        # not an authorisation or tenant-boundary test suite.
+        - "http://127\\.0\\.0\\.1:8000/v1/(?:dashboard|shows|episodes|bookings|approvals)(?:/.*)?"
+      excludePaths:
+        # Infrastructure and schema endpoints are not app attack surface.
+        - "http://127\\.0\\.0\\.1:8000/(?:live|ready|healthz|metrics|openapi\\.json|docs|redoc)(?:/.*)?"
+        # Never let an active scanner sign out, change a password, exercise
+        # Microsoft flows, or invoke debug controls.
+        - "http://127\\.0\\.0\\.1:8000/v1/auth/(?:sign-out|change-password|microsoft)(?:/.*)?"
+        - "http://127\\.0\\.0\\.1:8000/v1/debug(?:/.*)?"
+        - "http://127\\.0\\.0\\.1:5003/(?:sign-out|debug)(?:/.*)?"
+        # Explicitly out of scope: financial records, tenant configuration,
+        # external-facing delivery actions, and high-side-effect operations.
+        - "http://127\\.0\\.0\\.1:8000/v1/(?:billing|budget|purchase-orders|client-purchase-orders|vendor-invoices|rate-cards|crm|work-orders|deliveries|qc|catering|settings)(?:/.*)?"
+        - "http://127\\.0\\.0\\.1:8000/v1/organizations/active"
+      authentication:
+        # Browser authentication executes the same React email/password form
+        # that a normal user uses; it is not a handcrafted session cookie.
+        method: browser
+        parameters:
+          loginPageUrl: http://127.0.0.1:5003/sign-in
+          loginPageWait: 5
+          browserId: firefox-headless
+        verification:
+          method: autodetect
+      sessionManagement:
+        method: autodetect
+      users:
+        - name: active-dast-client
+          credentials:
+            username: "__POSTPILOT_DAST_EMAIL__"
+            password: "__POSTPILOT_DAST_PASSWORD__"
+  parameters:
+    failOnError: true
+    failOnWarning: false
+    continueOnFailure: false
+    progressToStdout: true
+
+jobs:
+  # Import the actual FastAPI contract. The context allow-list/exclusions above
+  # still decide which imported routes may be scanned.
+  - type: openapi
+    parameters:
+      apiUrl: http://127.0.0.1:8000/openapi.json
+      context: postpilot-active-dast
+      user: active-dast-client
+      targetUrl: http://127.0.0.1:8000
+
+  # Fail before active attacks if the real UI login/session exchange did not
+  # work. A 401/403 must never silently downgrade the scan to anonymous.
+  - type: requestor
+    parameters:
+      user: active-dast-client
+    requests:
+      - name: authenticated-session-check
+        url: http://127.0.0.1:8000/v1/auth/session
+        method: GET
+        responseCode: 200
+
+  - type: spider
+    parameters:
+      context: postpilot-active-dast
+      user: active-dast-client
+      url: http://127.0.0.1:5003/sign-in
+      maxDuration: 2
+      maxDepth: 3
+      logoutAvoidance: true
+      postForm: false
+      processForm: false
+
+  - type: activeScan-config
+    parameters:
+      maxRuleDurationInMins: 2
+      maxScanDurationInMins: 18
+      maxAlertsPerRule: 10
+      threadPerHost: 2
+      handleAntiCSRFTokens: true
+      injectPluginIdInHeader: true
+    inputVectors:
+      postData:
+        enabled: true
+        json:
+          enabled: true
+      urlQueryStringAndDataDrivenNodes:
+        enabled: true
+        addParam: false
+      httpHeaders:
+        enabled: true
+        allRequests: false
+
+  - type: activeScan-policy
+    parameters:
+      name: PostPilot isolated authenticated policy
+    policyDefinition:
+      defaultStrength: Low
+      defaultThreshold: Medium
+
+  # The active job is intentionally bounded to low-privilege authenticated
+  # request handling. Browser pages are discovered for auth only. FastAPI and
+  # Playwright tests, not this one-user scan, prove permissions and tenancy.
+  - type: activeScan
+    parameters:
+      context: postpilot-active-dast
+      user: active-dast-client
+      url: http://127.0.0.1:8000/v1
+      policy: PostPilot isolated authenticated policy
+      maxRuleDurationInMins: 2
+      maxScanDurationInMins: 18
+      delayInMs: 100
+      threadPerHost: 2
+      maxAlertsPerRule: 10
+
+  - type: report
+    parameters:
+      template: traditional-json
+      reportDir: /zap/wrk
+      reportFile: zap-active-report.json
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: /zap/wrk
+      reportFile: zap-active-report.html
+  - type: outputSummary
+    parameters:
+      format: Long
+      summaryFile: /zap/wrk/zap-active-summary.json

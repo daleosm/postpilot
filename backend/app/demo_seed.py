@@ -319,7 +319,10 @@ async def seed() -> None:
     engine = get_engine()
     async with engine.begin() as connection:
         await connection.execute(delete(t.organizations).where(t.organizations.c.id.in_(TENANT_IDS)))
-        await connection.execute(delete(t.users).where(t.users.c.id == "user_iris"))
+        # These accounts belong only to specialist local fixtures.  Remove
+        # them alongside the demo tenants so ordinary demo seeds never leave
+        # an authenticated account without a tenant membership behind.
+        await connection.execute(delete(t.users).where(t.users.c.id.in_(("user_iris", "user_dast_active_scan"))))
 
         for number, tenant in enumerate(TENANTS, start=1):
             await _seed_tenant(connection, number, TENANT_IDS[number - 1], tenant, password_hash)

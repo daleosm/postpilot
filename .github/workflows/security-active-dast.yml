@@ -18,6 +18,10 @@ jobs:
     name: OWASP ZAP active scan (isolated runtime)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # These credentials exist only in the disposable PostgreSQL service used
+      # by this job. They are deliberately not a production/demo login.
+      POSTPILOT_DAST_EMAIL: dast.client@active-scan.test
     services:
       postgres:
         image: postgres:16-alpine
@@ -46,6 +50,11 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/pyproject.toml
+      - name: Generate the disposable DAST password
+        run: |
+          password="$(openssl rand -hex 32)"
+          echo "::add-mask::$password"
+          echo "POSTPILOT_DAST_PASSWORD=$password" >> "$GITHUB_ENV"
       - run: pnpm install --frozen-lockfile
       - name: Start an isolated seeded application runtime
         working-directory: backend
@@ -56,7 +65,15 @@ jobs:
           python -m pip install -e .
           alembic upgrade head
           python -m app.demo_seed
-          POSTPILOT_DEBUG_DEMO=true POSTPILOT_FRONTEND_ORIGINS=http://localhost:5003 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/postpilot-active-dast-api.log" 2>&1 &
+          python -m app.dast_seed
+          POSTPILOT_FRONTEND_ORIGINS=http://localhost:5003 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/postpilot-active-dast-api.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/postpilot-active-dast-api.pid"
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/ready > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/postpilot-active-dast-api.log"
+          exit 1
       - name: Build and start isolated production frontend
         env:
           POSTPILOT_API_ORIGIN: http://127.0.0.1:8000
@@ -72,18 +89,32 @@ jobs:
           cat "$RUNNER_TEMP/postpilot-active-dast-api.log"
           cat "$RUNNER_TEMP/postpilot-active-dast-ui.log"
           exit 1
-      # This intentionally scans only the public sign-in surface. A later
-      # authenticated ZAP context can safely widen scope to protected routes.
-      - name: Run ZAP active scan
+      - name: Run isolated authenticated ZAP active scan
         run: |
           mkdir -p "$RUNNER_TEMP/zap-active"
+          mkdir -p "$RUNNER_TEMP/zap-active-plan"
           # The pinned ZAP image runs as its unprivileged `zap` user, while
           # GitHub creates RUNNER_TEMP as the runner user.
           chmod 777 "$RUNNER_TEMP/zap-active"
+          sed \
+            -e "s|__POSTPILOT_DAST_EMAIL__|$POSTPILOT_DAST_EMAIL|g" \
+            -e "s|__POSTPILOT_DAST_PASSWORD__|$POSTPILOT_DAST_PASSWORD|g" \
+            .github/zap/active-dast-plan.yaml > "$RUNNER_TEMP/zap-active-plan/active-dast-plan.yaml"
           docker run --rm --network host \
+            -v "$RUNNER_TEMP/zap-active-plan:/zap/plan:ro" \
             -v "$RUNNER_TEMP/zap-active:/zap/wrk:rw" \
             ghcr.io/zaproxy/zaproxy@sha256:8d387b1a63e3425beef4846e39719f5af2a787753af2d8b6558c6257d7a577a2 \
-            zap-full-scan.py -t http://127.0.0.1:5003/sign-in -m 2 -I -J zap-active-report.json -r zap-active-report.html
+            zap.sh -cmd -autorun /zap/plan/active-dast-plan.yaml
+      - name: Apply reviewed ZAP alert policy
+        if: always()
+        run: |
+          if [ ! -f "$RUNNER_TEMP/zap-active/zap-active-report.json" ]; then
+            echo "ZAP did not generate a report; preserve the active scan failure above."
+            exit 0
+          fi
+          python scripts/security/check_zap_report.py \
+            --policy .github/zap/alert-policy.json \
+            "$RUNNER_TEMP/zap-active/zap-active-report.json"
       - name: Upload active DAST report
         if: always()
         uses: actions/upload-artifact@v4
