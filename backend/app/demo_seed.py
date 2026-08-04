@@ -103,6 +103,20 @@ MASTER_RATES = (
     ("QC operator", "QC operator", "hour", 72),
 )
 
+# Generic artist rates are attached to configurable operational role keys,
+# not to a hard-coded list of people. Named artist rows remain the deliberate
+# exception for one person on one commercial scope.
+MASTER_RATE_ARTIST_ROLES = {
+    "Senior editor": "editor",
+    "Post supervisor": "post_supervisor",
+    "Producer": "producer",
+    "Assistant editor": "assistant_editor",
+    "Online editor": "online_editor",
+    "Colourist": "colorist",
+    "Sound mixer": "sound_mixer",
+    "QC operator": "qc",
+}
+
 # These people fill the specialist sign-off roles that each tenant's core
 # roster does not explicitly list.  Keep their display names human and short:
 # the debug switcher is a useful test tool, not a place to repeat a post-house
@@ -1636,6 +1650,7 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
             "organization_id": organization_id,
             "name": name,
             "category": category,
+            "artist_role": MASTER_RATE_ARTIST_ROLES.get(name),
             "unit": unit,
             "rate": Decimal(rate) * multiplier,
             "currency": currency,
@@ -1695,10 +1710,11 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                     "rate_card_id": master_card_id,
                     "service_rate_id": uid(number, "36", index),
                     "category": category,
+                    "artist_role": MASTER_RATE_ARTIST_ROLES.get(name),
                     "unit": unit,
                     "rate": Decimal(rate) * multiplier,
                 }
-                for index, (_, category, unit, rate) in enumerate(MASTER_RATES, start=1)
+                for index, (name, category, unit, rate) in enumerate(MASTER_RATES, start=1)
             ]
             + [
                 {

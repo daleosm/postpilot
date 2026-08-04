@@ -641,6 +641,9 @@ service_rates = Table(
     Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
     Column("name", Text, nullable=False),
     Column("category", Text, nullable=False),
+    # When set, this generic rate is the default commercial price for every
+    # active person with the matching tenant-configured operational role.
+    Column("artist_role", Text),
     Column("unit", Text, nullable=False),
     Column("rate", Numeric(14, 2), nullable=False),
     Column("currency", Text, nullable=False),
@@ -680,6 +683,9 @@ rate_card_items = Table(
     Column("room_id", UUID(as_uuid=False), ForeignKey("rooms.id", ondelete="CASCADE")),
     Column("person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="CASCADE")),
     Column("category", Text, nullable=False),
+    # Copied from the linked catalogue service so a scoped card can resolve an
+    # artist-role default without depending on mutable presentation labels.
+    Column("artist_role", Text),
     Column("unit", Text, nullable=False),
     Column("rate", Numeric(14, 2), nullable=False),
     Column("internal_cost_rate", Numeric(14, 2)),

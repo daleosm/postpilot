@@ -158,6 +158,35 @@ def test_booking_preview_and_confirmation_snapshot_room_and_named_artist_rates(
     assert {item["component_type"]: item for item in unchanged.json()["components"]}["person"]["rate"] == 175.0
 
 
+def test_booking_uses_the_assigned_artists_role_rate_without_a_named_person_row(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    service = production_lab.client.post(
+        "/v1/rate-cards/services",
+        json={
+            "name": "Production viewer editorial",
+            "category": "Editorial artists",
+            "artist_role": "production_viewer",
+            "unit": "hour",
+            "rate": 145,
+        },
+    )
+    assert service.status_code == 201, service.text
+    master = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={"scope": "master", "service_rate_id": service.json()["id"], "rate": 145},
+    )
+    assert master.status_code == 201, master.text
+
+    preview = production_lab.client.post("/v1/bookings/commercial-preview", json=_booking_payload(production_lab))
+    assert preview.status_code == 200, preview.text
+    person = next(component for component in preview.json()["components"] if component["component_type"] == "person")
+    assert person["rate"] == 145.0
+    assert person["category"] == "Editorial artists"
+    assert person["source"] == "master_rate_card"
+
+
 def test_pencil_booking_rates_re_resolve_until_confirmation_without_creating_tenant_charges(
     production_lab: ProductionApiLab,
 ) -> None:

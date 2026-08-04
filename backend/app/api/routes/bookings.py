@@ -495,7 +495,7 @@ async def _resolve_booking_commercial_components(
     if payload.person_id:
         person = (
             await session.execute(
-                select(people.c.id, people.c.name, people.c.hourly_rate, people.c.day_rate).where(
+                select(people.c.id, people.c.name, people.c.role, people.c.hourly_rate, people.c.day_rate).where(
                     and_(people.c.id == payload.person_id, people.c.organization_id == actor.organization_id)
                 )
             )
@@ -515,6 +515,7 @@ async def _resolve_booking_commercial_components(
             target_type=component_type,
             target_id=target_id,
         )
+        resolved_category = str(effective.get("category") or category)
         override = overrides.get(component_type)
         rate = _decimal(override.rate) if override else _decimal(effective.get("client_rate", effective.get("rate")))
         source = effective.get("source")
@@ -528,7 +529,7 @@ async def _resolve_booking_commercial_components(
                     "component_type": component_type,
                     "resource": resource.name,
                     "resource_id": target_id,
-                    "category": category,
+                    "category": resolved_category,
                     "rate": None,
                     "internal_cost_rate": None,
                     "unit": unit,
@@ -572,7 +573,7 @@ async def _resolve_booking_commercial_components(
                 "component_type": component_type,
                 "resource": resource.name,
                 "resource_id": target_id,
-                "category": category,
+                "category": resolved_category,
                 "rate": _money(rate),
                 "internal_cost_rate": _money(internal_rate),
                 "unit": unit,

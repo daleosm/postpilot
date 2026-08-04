@@ -20,6 +20,7 @@ from app.db.tables import (
     activity_log,
     crm_companies,
     episodes,
+    organization_role_policies,
     people,
     rate_card_items,
     rate_cards,
@@ -63,6 +64,7 @@ def _card_response(card: object, items: list[object]) -> dict[str, object]:
                 "room_id": str(item.room_id) if item.room_id else None,
                 "person_id": str(item.person_id) if item.person_id else None,
                 "category": item.category,
+                "artist_role": item.artist_role,
                 "unit": item.unit,
                 "rate": monetary(decimal_amount(item.rate)),
                 "client_rate": monetary(decimal_amount(item.rate)),
@@ -80,6 +82,7 @@ def _service_response(service: object) -> dict[str, object]:
         "id": str(service.id),
         "name": service.name,
         "category": service.category,
+        "artist_role": service.artist_role,
         "unit": service.unit,
         "rate": monetary(decimal_amount(service.rate)),
         "currency": service.currency,
@@ -132,6 +135,29 @@ async def _episode_context(session: DbSession, actor: CurrentActor, episode_id: 
     if not episode:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found.")
     return episode
+
+
+async def _artist_role_or_422(session: DbSession, actor: CurrentActor, artist_role: str | None) -> str | None:
+    """Accept only a role configured by this post house as a rate target."""
+    role = artist_role.strip() if artist_role else None
+    if not role:
+        return None
+    configured = (
+        await session.execute(
+            select(organization_role_policies.c.role).where(
+                and_(
+                    organization_role_policies.c.organization_id == actor.organization_id,
+                    organization_role_policies.c.role == role,
+                )
+            )
+        )
+    ).first()
+    if not configured:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Choose a role configured for this post house.",
+        )
+    return role
 
 
 async def _scope_target(
@@ -401,6 +427,7 @@ async def resolve_effective_rate(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="A named rate lookup needs both target type and target ID.",
         )
+    person_role: str | None = None
     if target_type == "room":
         target_exists = (
             await session.execute(
@@ -414,13 +441,14 @@ async def resolve_effective_rate(
     elif target_type == "person":
         target_exists = (
             await session.execute(
-                select(people.c.id).where(
+                select(people.c.id, people.c.role).where(
                     and_(people.c.id == target_id, people.c.organization_id == actor.organization_id)
                 )
             )
         ).first()
         if not target_exists:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found.")
+        person_role = str(target_exists.role or "") or None
     episode = await _episode_context(session, actor, episode_id)
     cards = [card for card in await _all_cards(session, actor) if card.is_active]
     card_ids = [card.id for card in cards]
@@ -468,7 +496,13 @@ async def resolve_effective_rate(
         # back to generic services. This matters when a show belongs to both
         # a network and client account: either named exception wins over a
         # generic commercial rate at the other peer scope.
-        target_kinds = ("target", "service") if target_type else ("service",)
+        target_kinds = (
+            ("target", "artist_role", "service")
+            if target_type == "person" and person_role
+            else ("target", "service")
+            if target_type
+            else ("service",)
+        )
         for kind in target_kinds:
             for source in sources:
                 for card in cards:
@@ -482,6 +516,17 @@ async def resolve_effective_rate(
                                 for entry in entries
                                 if entry.target_type == target_type
                                 and str(entry.person_id if target_type == "person" else entry.room_id) == str(target_id)
+                                and entry.unit == unit
+                            ),
+                            None,
+                        )
+                    elif kind == "artist_role":
+                        item = next(
+                            (
+                                entry
+                                for entry in entries
+                                if entry.target_type == "service"
+                                and entry.artist_role == person_role
                                 and entry.unit == unit
                             ),
                             None,
@@ -503,6 +548,8 @@ async def resolve_effective_rate(
                         "source": source,
                         "card_id": str(card.id),
                         "item_id": str(item.id),
+                        "category": item.category,
+                        "artist_role": item.artist_role,
                     }
                     if item.target_type != "service" or item.internal_cost_rate is not None:
                         resolved.update(
@@ -564,12 +611,27 @@ async def list_service_rates(actor: CurrentActor, session: DbSession) -> dict[st
     return {"service_rates": [_service_response(service) for service in services]}
 
 
+@router.get("/artist-roles")
+async def list_artist_rate_roles(actor: CurrentActor, session: DbSession) -> dict[str, object]:
+    """Expose the tenant's editable role policy as selectable rate targets."""
+    await require_permission(session, actor, "manage_commercial")
+    rows = (
+        await session.execute(
+            select(organization_role_policies.c.role, organization_role_policies.c.label)
+            .where(organization_role_policies.c.organization_id == actor.organization_id)
+            .order_by(organization_role_policies.c.label, organization_role_policies.c.role)
+        )
+    ).all()
+    return {"roles": [{"role": row.role, "label": row.label} for row in rows]}
+
+
 @router.post("/services", status_code=status.HTTP_201_CREATED)
 async def create_service_rate(
     payload: ServiceRateCreateRequest, actor: CurrentActor, session: DbSession
 ) -> dict[str, object]:
     await require_permission(session, actor, "manage_rate_cards")
     now = datetime.now(UTC)
+    artist_role = await _artist_role_or_422(session, actor, payload.artist_role)
     try:
         created = await session.execute(
             insert(service_rates)
@@ -577,6 +639,7 @@ async def create_service_rate(
                 organization_id=actor.organization_id,
                 name=payload.name.strip(),
                 category=payload.category.strip(),
+                artist_role=artist_role,
                 unit=payload.unit.strip(),
                 rate=payload.rate,
                 currency=actor.active_organization.currency,
@@ -597,6 +660,7 @@ async def create_service_rate(
             metadata={
                 "name": service.name,
                 "category": service.category,
+                "artistRole": service.artist_role,
                 "unit": service.unit,
                 "rate": str(service.rate),
                 "currency": service.currency,
@@ -624,6 +688,8 @@ async def update_service_rate(
         if field in fields:
             value = getattr(payload, field)
             values[field] = value.strip() if value else None
+    if "artist_role" in fields:
+        values["artist_role"] = await _artist_role_or_422(session, actor, payload.artist_role)
     for field in ("rate", "is_active"):
         if field in fields:
             values[field] = getattr(payload, field)
@@ -632,7 +698,8 @@ async def update_service_rate(
     try:
         category = values.get("category", existing.category)
         unit = values.get("unit", existing.unit)
-        if category != existing.category or unit != existing.unit:
+        artist_role = values.get("artist_role", existing.artist_role)
+        if category != existing.category or unit != existing.unit or artist_role != existing.artist_role:
             await session.execute(
                 update(rate_card_items)
                 .where(
@@ -641,7 +708,7 @@ async def update_service_rate(
                         rate_card_items.c.service_rate_id == service_rate_id,
                     )
                 )
-                .values(category=category, unit=unit, updated_at=datetime.now(UTC))
+                .values(category=category, artist_role=artist_role, unit=unit, updated_at=datetime.now(UTC))
             )
         updated = await session.execute(
             update(service_rates)
@@ -666,12 +733,14 @@ async def update_service_rate(
                 "before": {
                     "name": existing.name,
                     "category": existing.category,
+                    "artistRole": existing.artist_role,
                     "unit": existing.unit,
                     "rate": str(existing.rate),
                 },
                 "after": {
                     "name": service.name,
                     "category": service.category,
+                    "artistRole": service.artist_role,
                     "unit": service.unit,
                     "rate": str(service.rate),
                 },
@@ -871,6 +940,7 @@ async def set_rate_card_override(
             detail="The override category and unit must match the selected service rate.",
         )
     category = service.category if service else (payload.category or "").strip()
+    artist_role = service.artist_role if service else None
     unit = service.unit if service else (payload.unit or "").strip()
     try:
         card = await _card_for_scope(session, actor, scope=payload.scope, target=target, name=name)
@@ -881,6 +951,7 @@ async def set_rate_card_override(
             "service_rate_id": service.id if service else None,
             **item_target,
             "category": category,
+            "artist_role": artist_role,
             "unit": unit,
             "rate": payload.rate,
             "internal_cost_rate": payload.internal_cost_rate,
@@ -936,6 +1007,7 @@ async def set_rate_card_override(
                 "scope": payload.scope,
                 "targetType": payload.target_type,
                 "category": category,
+                "artistRole": artist_role,
                 "unit": unit,
                 "rate": payload.rate,
                 "internalCostRate": payload.internal_cost_rate,

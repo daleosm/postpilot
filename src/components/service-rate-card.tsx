@@ -13,6 +13,7 @@ import { postpilotUiFetch } from "@/lib/postpilot-api-client";
 const schema = z.object({
   name: z.string().trim().min(1, "Service name is required.").max(120),
   category: z.string().trim().min(1, "Category is required.").max(120),
+  artistRole: z.string(),
   unit: z.enum(["hour", "episode", "fixed"]),
   rate: z.coerce.number().positive("Rate must be greater than zero."),
   notes: z.string().trim().max(2000).optional(),
@@ -27,6 +28,7 @@ export type ServiceRate = {
   id: string;
   name: string;
   category: string;
+  artistRole: string | null;
   unit: string;
   rate: string | number;
   currency: string;
@@ -84,7 +86,7 @@ function RateRow({ rate }: { rate: MasterServiceRate }) {
         <p className="truncate text-sm font-semibold text-[#404844]">{rate.name}</p>
         {!rate.isActive && <span className="service-rate-inactive">Inactive</span>}
       </div>
-      <p className="mt-1.5 text-xs text-[#7d837f]">{rate.category}{rate.notes ? " · " + rate.notes : ""}</p>
+      <p className="mt-1.5 text-xs text-[#7d837f]">{rate.artistRole ? `Artist role · ${titleCase(rate.artistRole)}` : rate.category}{rate.notes ? " · " + rate.notes : ""}</p>
     </div>
     <div className="flex flex-wrap items-center gap-2 sm:justify-end">
       <p className="mr-1 text-sm font-semibold text-[#3d4642]">{formatMoney(displayedRate, rate.currency)} <span className="text-xs font-normal text-[#7d837f]">/ {rate.unit}</span></p>
@@ -98,6 +100,7 @@ function RateDialog({ rate }: { rate?: MasterServiceRate }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
+  const [roles, setRoles] = useState<Array<{ role: string; label: string }>>([]);
   const form = useForm<Input, unknown, Values>({
     resolver: zodResolver(schema),
     defaultValues: defaults(rate),
@@ -109,6 +112,16 @@ function RateDialog({ rate }: { rate?: MasterServiceRate }) {
     form.reset(defaults(rate));
   }
 
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    postpilotUiFetch("/v1/rate-cards/artist-roles")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => { if (!cancelled) setRoles(body?.roles ?? []); })
+      .catch(() => { if (!cancelled) setRoles([]); });
+    return () => { cancelled = true; };
+  }, [open]);
+
   async function submit(values: Values) {
     setError("");
     const serviceResponse = await postpilotUiFetch(
@@ -116,7 +129,7 @@ function RateDialog({ rate }: { rate?: MasterServiceRate }) {
       {
         method: rate ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...values, notes: values.notes || null }),
+        body: JSON.stringify({ ...values, artistRole: values.artistRole || null, notes: values.notes || null }),
       },
     );
     const service = await serviceResponse.json().catch(() => null);
@@ -148,6 +161,7 @@ function RateDialog({ rate }: { rate?: MasterServiceRate }) {
         </div>
         <form className="mt-6 space-y-4" onSubmit={form.handleSubmit(submit)}>
           <Field label="Service" error={form.formState.errors.name?.message}><input {...form.register("name")} placeholder="Senior editor" /></Field>
+          <Field label="Applies to"><select {...form.register("artistRole", { onChange: (event) => { const match = roles.find((role) => role.role === event.target.value); if (match && !rate) { form.setValue("name", match.label); form.setValue("category", match.label); } } })}><option value="">Generic service or room</option>{roles.map((role) => <option key={role.role} value={role.role}>{role.label}</option>)}</select></Field>
           <Field label="Budget category" error={form.formState.errors.category?.message}><input {...form.register("category")} placeholder="Editorial artists" /></Field>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Master rate" error={form.formState.errors.rate?.message}><input type="number" min="0" step="0.01" {...form.register("rate")} /></Field>
@@ -222,11 +236,16 @@ function defaults(rate?: MasterServiceRate): Input {
   return {
     name: rate?.name ?? "",
     category: rate?.category ?? "",
+    artistRole: rate?.artistRole ?? "",
     unit: (rate?.unit as Input["unit"]) ?? "hour",
     rate: rate ? Number(rate.masterRate ?? rate.rate) : 0,
     notes: rate?.notes ?? "",
     isActive: rate?.isActive ?? true,
   };
+}
+
+function titleCase(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function formatMoney(value: string | number, currency: string) {

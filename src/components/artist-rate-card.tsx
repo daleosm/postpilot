@@ -44,7 +44,7 @@ function money(value: string | number | null, currency: string) {
   }
 }
 
-/** Explicit named-artist prices; generic service prices remain the fallback. */
+/** Explicit named-artist prices override the selected person's role rate. */
 export function ArtistRateCard({ scope }: { scope: Scope }) {
   const router = useRouter();
   const [rates, setRates] = useState<ArtistRate[]>([]);
@@ -77,7 +77,7 @@ export function ArtistRateCard({ scope }: { scope: Scope }) {
     <div className="flex flex-col justify-between gap-3 border-b border-[#ebeae6] px-5 py-4 sm:flex-row sm:items-center">
       <div>
         <h3 className="text-sm font-semibold text-[#343b38]">Named artist rates</h3>
-        <p className="mt-1 text-xs text-[#858a87]">Add only the artists with an agreed exception. Everyone else uses the generic service rate.</p>
+        <p className="mt-1 text-xs text-[#858a87]">Add only agreed personal exceptions. Everyone else is priced from their configured post-house role.</p>
       </div>
       <Button size="sm" variant="secondary" onPress={() => setOpen(true)} className="border border-[#dfe3df] bg-white text-[#52635d]">
         <Plus size={14} /> Add artist rate
@@ -181,7 +181,7 @@ function ArtistRateDialog({ scope, initialRate, existingPeople, onClose, onSaved
 
   return <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#202725]/30 p-4" role="dialog" aria-modal="true" aria-labelledby="artist-rate-title">
     <div className="w-full max-w-md rounded-xl border border-[#e2e3de] bg-[#fafbf9] p-6 shadow-2xl">
-      <div className="flex items-start justify-between gap-4"><div><h3 id="artist-rate-title" className="text-lg font-semibold tracking-[-0.03em] text-[#2d3431]">{editing ? "Edit artist rate" : "Add artist rate"}</h3><p className="mt-1 text-sm text-[#767c78]">Artist rates are an explicit exception to the generic service rate.</p></div><Button isIconOnly variant="tertiary" onPress={onClose} aria-label="Close artist rate form" className="min-w-0 text-[#7d827e]"><X size={18} /></Button></div>
+      <div className="flex items-start justify-between gap-4"><div><h3 id="artist-rate-title" className="text-lg font-semibold tracking-[-0.03em] text-[#2d3431]">{editing ? "Edit artist rate" : "Add artist rate"}</h3><p className="mt-1 text-sm text-[#767c78]">This overrides the artist’s configured role rate at this scope only.</p></div><Button isIconOnly variant="tertiary" onPress={onClose} aria-label="Close artist rate form" className="min-w-0 text-[#7d827e]"><X size={18} /></Button></div>
       <div className="mt-5 space-y-4">
         <label className="block text-xs font-medium text-[#535b57]">Artist<div className="relative mt-1.5"><Search size={14} className="absolute left-3 top-3 text-[#8b918d]" /><input value={search} disabled={editing} onChange={(event) => { setSearch(event.target.value); setSelected(null); }} placeholder="Search people by name or role" className="h-10 w-full rounded-md border border-[#dedfda] bg-white py-2 pl-9 pr-3 text-sm disabled:bg-[#f3f3ef]" /></div></label>
         {!editing && search.trim().length >= 2 && <div className="max-h-40 overflow-y-auto rounded-md border border-[#dedfda] bg-white">{visibleMatches.map((person) => <button key={person.id} type="button" onClick={() => { setSelected(person); setSearch(person.name); setMatches([]); }} className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-xs hover:bg-[#f3f6f3]"><span className="font-medium text-[#47514c]">{person.name}</span><span className="shrink-0 text-[#858d88]">{titleCase(person.role)}</span></button>)}{!visibleMatches.length && <p className="px-3 py-2.5 text-xs text-[#858d88]">No eligible people found.</p>}</div>}

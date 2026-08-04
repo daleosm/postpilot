@@ -20,10 +20,18 @@ def _episode_id(lab: ProductionApiLab) -> str:
     return response.json()["episodes"][0]["id"]
 
 
-def _service(lab: ProductionApiLab, *, name: str, category: str, unit: str, rate: float) -> str:
+def _service(
+    lab: ProductionApiLab,
+    *,
+    name: str,
+    category: str,
+    unit: str,
+    rate: float,
+    artist_role: str | None = None,
+) -> str:
     response = lab.client.post(
         "/v1/rate-cards/services",
-        json={"name": name, "category": category, "unit": unit, "rate": rate},
+        json={"name": name, "category": category, "unit": unit, "rate": rate, "artist_role": artist_role},
     )
     assert response.status_code == 201, response.text
     return response.json()["id"]
@@ -448,6 +456,65 @@ def test_named_artist_rates_are_explicit_scoped_and_fall_back_to_generic_service
     assert room_resolved["internal_cost_rate"] == 115
     assert room_resolved["target_type"] == "room"
     assert room_resolved["room_id"] == production_lab.data.room_id
+
+
+def test_artist_role_rate_applies_automatically_until_a_named_artist_override(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    episode_id = _episode_id(production_lab)
+    role_rate_id = _service(
+        production_lab,
+        name=f"Production manager {uuid4().hex[:8]}",
+        category="Production management",
+        unit="hour",
+        rate=100,
+        artist_role="production_manager",
+    )
+    _override(production_lab, scope="master", service_rate_id=role_rate_id, rate=125)
+
+    automatic = _effective(
+        production_lab,
+        episode_id,
+        category="Unrelated booking category",
+        target_type="person",
+        target_id=production_lab.data.manager_person_id,
+    )
+    assert automatic["rate"] == 125
+    assert automatic["category"] == "Production management"
+    assert automatic["artist_role"] == "production_manager"
+
+    named = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={
+            "scope": "master",
+            "target_type": "person",
+            "person_id": production_lab.data.manager_person_id,
+            "category": "Production management",
+            "unit": "hour",
+            "rate": 170,
+        },
+    )
+    assert named.status_code == 201, named.text
+    assert _effective(
+        production_lab,
+        episode_id,
+        category="Unrelated booking category",
+        target_type="person",
+        target_id=production_lab.data.manager_person_id,
+    )["rate"] == 170
+
+    invalid = production_lab.client.post(
+        "/v1/rate-cards/services",
+        json={
+            "name": "Unknown artist role",
+            "category": "Unknown",
+            "artist_role": "not_configured_here",
+            "unit": "hour",
+            "rate": 99,
+        },
+    )
+    assert invalid.status_code == 422
 
 
 def test_named_artist_rate_targets_are_tenant_scoped_and_idempotent(production_lab: ProductionApiLab) -> None:

@@ -116,8 +116,8 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
 }
 
 async function loadServiceRates() {
-  const response = await postpilotApiServerFetch<{ service_rates: Array<{ id: string; name: string; category: string; unit: string; rate: string | number; currency: string; notes: string | null; is_active: boolean }> }>("/rate-cards/services");
-  return response.service_rates.map((rate) => ({ ...rate, isActive: rate.is_active }));
+  const response = await postpilotApiServerFetch<{ service_rates: Array<{ id: string; name: string; category: string; artist_role: string | null; unit: string; rate: string | number; currency: string; notes: string | null; is_active: boolean }> }>("/rate-cards/services");
+  return response.service_rates.map((rate) => ({ ...rate, artistRole: rate.artist_role, isActive: rate.is_active }));
 }
 
 async function loadBookingCosts(episodeId: string): Promise<BookingCost[]> {
