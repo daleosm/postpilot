@@ -159,7 +159,7 @@ def test_dashboard_work_order_attention_is_an_exception_queue(client: TestClient
         due_soon_or_overdue = bool(
             item["due_at"] and datetime.fromisoformat(item["due_at"].replace("Z", "+00:00")) <= cutoff
         )
-        unassigned = not item["assignee_person_id"] and not item["assignee_role"]
+        unassigned = not item["assignee_person_id"]
         blocks_pending_sign_off = (
             item["is_blocking"]
             and item["episode_workflow_status"] == "awaiting_sign_off"

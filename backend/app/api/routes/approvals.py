@@ -7,7 +7,7 @@ it never infers authority from an occupational role label.
 from __future__ import annotations
 
 from fastapi import APIRouter
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, select
 
 from app.api.dependencies import CurrentActor, DbSession
 from app.db.tables import (
@@ -94,10 +94,7 @@ async def approval_inbox(actor: CurrentActor, session: DbSession) -> dict[str, o
                     # manager has approved the work order, so do not surface
                     # draft, submitted, or returned work as actionable work.
                     post_work_orders.c.status.in_(("in_progress", "ready_for_review")),
-                    or_(
-                        post_work_orders.c.assignee_person_id == actor.person_id,
-                        post_work_orders.c.assignee_role == actor.person_role,
-                    ),
+                    post_work_orders.c.assignee_person_id == actor.person_id,
                 )
             )
             .order_by(post_work_orders.c.due_at.asc().nulls_last(), post_work_orders.c.created_at)

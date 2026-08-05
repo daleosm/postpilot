@@ -104,18 +104,12 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
             work_order_attention_conditions.append(post_work_orders.c.id.is_(None))
         else:
             work_order_attention_conditions.append(
-                or_(
-                    post_work_orders.c.assignee_person_id == actor.person_id,
-                    post_work_orders.c.assignee_role == actor.person_role,
-                )
+                post_work_orders.c.assignee_person_id == actor.person_id
             )
     work_order_attention_conditions.append(
         or_(
             post_work_orders.c.due_at <= now + timedelta(hours=48),
-            and_(
-                post_work_orders.c.assignee_person_id.is_(None),
-                post_work_orders.c.assignee_role.is_(None),
-            ),
+            post_work_orders.c.assignee_person_id.is_(None),
             and_(
                 post_work_orders.c.is_blocking.is_(True),
                 episodes.c.workflow_status == "awaiting_sign_off",
@@ -134,7 +128,6 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
                 post_work_orders.c.due_at,
                 post_work_orders.c.is_blocking,
                 post_work_orders.c.assignee_person_id,
-                post_work_orders.c.assignee_role,
                 post_work_orders.c.workflow_stage_id.label("work_order_stage_id"),
                 episodes.c.id.label("episode_id"),
                 episodes.c.title.label("episode_title"),
@@ -216,7 +209,6 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
                 "due_at": item.due_at,
                 "is_blocking": item.is_blocking,
                 "assignee_person_id": item.assignee_person_id,
-                "assignee_role": item.assignee_role,
                 "work_order_stage_id": item.work_order_stage_id,
                 "episode_id": item.episode_id,
                 "episode_title": item.episode_title,

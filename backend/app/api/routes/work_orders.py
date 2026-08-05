@@ -95,9 +95,7 @@ def _work_order_value(
         "kind": row.kind,
         "title": row.title,
         "description": row.description,
-        "department": row.department,
         "assignee_person_id": str(row.assignee_person_id) if row.assignee_person_id else None,
-        "assignee_role": row.assignee_role,
         "priority": row.priority,
         "is_blocking": row.is_blocking,
         "status": row.status,
@@ -886,7 +884,7 @@ async def _can_access_work_order(session: DbSession, actor: CurrentActor, work_o
         return True
     if not actor.person_id or actor.active_organization and actor.active_organization.role == "client":
         return False
-    return work_order.assignee_person_id == actor.person_id or work_order.assignee_role == actor.person_role
+    return work_order.assignee_person_id == actor.person_id
 
 
 @router.get("")
@@ -897,10 +895,7 @@ async def list_work_orders(actor: CurrentActor, session: DbSession) -> dict[str,
             conditions.append(post_work_orders.c.id.is_(None))
         else:
             conditions.append(
-                or_(
-                    post_work_orders.c.assignee_person_id == actor.person_id,
-                    post_work_orders.c.assignee_role == actor.person_role,
-                )
+                post_work_orders.c.assignee_person_id == actor.person_id
             )
     rows = (
         await session.execute(
@@ -960,8 +955,7 @@ async def work_order_inbox(actor: CurrentActor, session: DbSession) -> dict[str,
                     # reserve or act on yet.
                     post_work_orders.c.status.in_(("in_progress", "ready_for_review")),
                     or_(
-                        post_work_orders.c.assignee_person_id == actor.person_id,
-                        post_work_orders.c.assignee_role == actor.person_role,
+                    post_work_orders.c.assignee_person_id == actor.person_id,
                     ),
                 )
             )
@@ -1067,9 +1061,9 @@ async def create_work_order(
             kind=payload.kind,
             title=payload.title.strip(),
             description=payload.description.strip() if payload.description else None,
-            department=payload.department.strip() if payload.department else None,
+            department=None,
             assignee_person_id=payload.assignee_person_id,
-            assignee_role=payload.assignee_role.strip() if payload.assignee_role else None,
+            assignee_role=None,
             priority=payload.priority,
             is_blocking=blocking,
             status="in_progress" if payload.kind == "qc_exception" else "open",
@@ -1141,7 +1135,7 @@ async def update_work_order(
     may_update_assigned = await has_permission(session, actor, "update_assigned_work")
     is_assigned = bool(
         actor.person_id
-        and (work_order.assignee_person_id == actor.person_id or work_order.assignee_role == actor.person_role)
+        and work_order.assignee_person_id == actor.person_id
     )
     if not may_manage and not (may_update_assigned and is_assigned):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only update work assigned to you.")
@@ -1150,9 +1144,7 @@ async def update_work_order(
         "episode_id",
         "title",
         "description",
-        "department",
         "assignee_person_id",
-        "assignee_role",
         "work_type",
         "vendor_company_id",
         "purchase_order_id",
@@ -1461,7 +1453,7 @@ async def update_work_order(
         if (
             payload.status in {"ready_for_review", "complete"}
             and work_order.work_type == "internal"
-            and (work_order.assignee_person_id or work_order.assignee_role)
+            and work_order.assignee_person_id
         ):
             if not work_order.booking_id:
                 raise HTTPException(
@@ -1558,6 +1550,9 @@ async def update_work_order(
 
     now = datetime.now(UTC)
     values = payload.model_dump(exclude_unset=True)
+    # Clear legacy fields on the next ordinary edit. They are retained as
+    # nullable columns only to preserve historical records during rollout.
+    values.update({"department": None, "assignee_role": None})
     values.pop("approval_note", None)
     values.pop("overrun_reason", None)
     values.pop("client_po_overrun_reason", None)
@@ -1771,7 +1766,7 @@ async def reserve_work_order_room(
     may_record_time = await has_permission(session, actor, "update_assigned_work")
     is_assigned = bool(
         actor.person_id
-        and (work_order.assignee_person_id == actor.person_id or work_order.assignee_role == actor.person_role)
+        and work_order.assignee_person_id == actor.person_id
     )
     if not may_manage and not (may_record_time and is_assigned):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only schedule work assigned to you.")

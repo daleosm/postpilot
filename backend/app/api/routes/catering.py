@@ -177,10 +177,7 @@ async def catering_resources(actor: CurrentActor, session: DbSession) -> dict[st
                         post_work_orders.c.organization_id == actor.organization_id,
                         post_work_orders.c.work_type == "internal",
                         post_work_orders.c.status == "in_progress",
-                        or_(
-                            post_work_orders.c.assignee_person_id == person.id,
-                            post_work_orders.c.assignee_role == person.role,
-                        ),
+                        post_work_orders.c.assignee_person_id == person.id,
                     )
                 )
                 .order_by(post_work_orders.c.updated_at.desc().nulls_last(), post_work_orders.c.created_at.desc())
@@ -256,10 +253,7 @@ async def create_catering_request(
                         post_work_orders.c.organization_id == actor.organization_id,
                         post_work_orders.c.work_type == "internal",
                         post_work_orders.c.status == "in_progress",
-                        or_(
-                            post_work_orders.c.assignee_person_id == person.id,
-                            post_work_orders.c.assignee_role == person.role,
-                        ),
+                        post_work_orders.c.assignee_person_id == person.id,
                     )
                 )
                 .limit(1)

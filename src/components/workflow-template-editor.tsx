@@ -9,8 +9,7 @@ import { useState } from "react";
 
 type Stage = { id: string; name: string; key: string; position: number; color: string; isTerminal: boolean; canStartEarly: boolean; requiresQcPass: boolean; deliveryGate: "none" | "facility_dispatch" | "client_acceptance" };
 type Rule = { id: string; workflowStageId: string; approverRole: string | null; label: string; approvalOrder: number; isRequired: boolean };
-type WorkOrderTemplate = { id: string; workflowStageId: string; title: string; description: string | null; department: string | null; assigneeRole: string | null; priority: "blocker" | "high" | "normal" | "low"; isBlocking: boolean; position: number };
-type Workflow = { id: string; name: string; description: string | null; stages: Stage[]; rules: Rule[]; workOrderTemplates: WorkOrderTemplate[] };
+type Workflow = { id: string; name: string; description: string | null; stages: Stage[]; rules: Rule[] };
 type RoleOption = { role: string; label: string };
 
 export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow; roles: RoleOption[] }) {
@@ -23,7 +22,6 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
     ...rule,
     approverRole: rule.approverRole ?? roles.find((role) => `${role.label} sign-off`.toLocaleLowerCase() === rule.label.toLocaleLowerCase())?.role ?? null,
   })));
-  const [workOrderTemplates, setWorkOrderTemplates] = useState(workflow.workOrderTemplates);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [draggedStageId, setDraggedStageId] = useState<string | null>(null);
@@ -106,7 +104,6 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
     }
     setStages((items) => items.filter((item) => item.id !== id).sort((a, b) => a.position - b.position).map((item, index) => ({ ...item, position: index + 1 })));
     setRules((items) => items.filter((item) => item.workflowStageId !== id));
-    setWorkOrderTemplates((items) => items.filter((item) => item.workflowStageId !== id));
   }
 
   async function save() {
@@ -116,7 +113,7 @@ export function WorkflowTemplateEditor({ workflow, roles }: { workflow: Workflow
       const response = await postpilotUiFetch(`/v1/workflows/${workflow.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: workflow.name, description: workflow.description, stages, rules, workOrderTemplates }),
+        body: JSON.stringify({ name: workflow.name, description: workflow.description, stages, rules }),
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) return setMessage(body?.error ?? "Could not save the workflow.");

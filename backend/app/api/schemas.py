@@ -311,9 +311,7 @@ class WorkOrderCreateRequest(BaseModel):
     kind: str = Field(default="work_order", pattern="^(work_order|qc_exception|delivery_correction)$")
     title: str = Field(min_length=2, max_length=160)
     description: str | None = Field(default=None, max_length=4000)
-    department: str | None = Field(default=None, max_length=120)
     assignee_person_id: str | None = None
-    assignee_role: str | None = Field(default=None, max_length=80)
     priority: str = Field(default="normal", pattern="^(blocker|high|normal|low)$")
     is_blocking: bool | None = None
     billing_scope: str = Field(default="included", pattern="^(included|billable_change|internal)$")
@@ -380,9 +378,7 @@ class WorkOrderUpdateRequest(BaseModel):
     )
     title: str | None = Field(default=None, min_length=2, max_length=160)
     description: str | None = Field(default=None, max_length=4000)
-    department: str | None = Field(default=None, max_length=120)
     assignee_person_id: str | None = None
-    assignee_role: str | None = Field(default=None, max_length=80)
     work_type: str | None = Field(default=None, pattern="^(internal|external_vendor)$")
     vendor_company_id: str | None = None
     purchase_order_id: str | None = None

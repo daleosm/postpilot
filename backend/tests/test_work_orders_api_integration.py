@@ -35,7 +35,6 @@ def _payload(lab: ProductionApiLab, **overrides: object) -> dict[str, object]:
         "episode_id": episode_id,
         "workflow_stage_id": lab.data.workflow_stage_id,
         "title": "Resolve client title-card correction",
-        "department": "Editorial",
         "assignee_person_id": lab.data.editor_person_id,
         "priority": "high",
         **overrides,
@@ -224,6 +223,39 @@ def test_work_order_create_defaults_stage_work_to_blocking_and_keeps_item_ledger
         ("expense", "1.00", "18.50"),
     ]
     assert work_order_id in {item["id"] for item in production_lab.client.get("/v1/work-orders").json()["work_orders"]}
+
+
+def test_work_orders_use_only_named_person_assignment_and_ignore_legacy_fields(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    created = production_lab.client.post(
+        "/v1/work-orders",
+        json=_payload(
+            production_lab,
+            title="Named assignment only",
+            assignee_person_id=None,
+            # Older clients may still send these fields. They must neither be
+            # stored nor turn into a role-wide assignment.
+            department="Editorial",
+            assignee_role="production_viewer",
+        ),
+    )
+    assert created.status_code == 201, created.text
+    work_order_id = created.json()["id"]
+    assert "department" not in created.json()
+    assert "assignee_role" not in created.json()
+    saved = production_lab.fetchrow(
+        "SELECT department, assignee_role FROM post_work_orders WHERE id = $1",
+        work_order_id,
+    )
+    assert saved and dict(saved) == {"department": None, "assignee_role": None}
+
+    production_lab.sign_out()
+    production_lab.sign_in_as_viewer()
+    visible = production_lab.client.get("/v1/work-orders")
+    assert visible.status_code == 200, visible.text
+    assert work_order_id not in {item["id"] for item in visible.json()["work_orders"]}
 
 
 def test_work_order_lifecycle_allows_the_creator_with_approval_capability_to_approve(

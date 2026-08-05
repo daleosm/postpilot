@@ -9,7 +9,6 @@ import { postpilotApiFetch } from "@/lib/postpilot-api-client";
 type Charge = {
   id: string;
   title: string;
-  department: string | null;
   status: string;
   billingStatus: string;
   estimatedAmount: string | number | null;

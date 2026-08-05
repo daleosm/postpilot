@@ -41,7 +41,7 @@ type BudgetData = {
   lines: Line[];
   episodes: Array<{ id: string; label: string; showId: string; showTitle: string; network: string }>;
   resources: { services: Array<{ id: string; name: string; category: string; unit: string }>; rooms: Array<{ id: string; name: string; type: string }>; people: Array<{ id: string; name: string; role: string }>; vendors: Array<{ id: string; name: string }> };
-  workOrderCharges: Array<{ id: string; title: string; department: string | null; status: string; billingStatus: string; estimatedAmount: string | number | null; currency: string; billingNotes: string | null; episodeId: string; episodeTitle: string; episodeNumber: number; showId: string; showTitle: string; clientCompanyId: string | null }>;
+  workOrderCharges: Array<{ id: string; title: string; status: string; billingStatus: string; estimatedAmount: string | number | null; currency: string; billingNotes: string | null; episodeId: string; episodeTitle: string; episodeNumber: number; showId: string; showTitle: string; clientCompanyId: string | null }>;
   purchaseOrders: PurchaseOrderSummary[];
   clientPurchaseOrders: ClientPurchaseOrderSummary[];
 };
@@ -398,7 +398,7 @@ async function load(): Promise<BudgetData> {
         return { id: String(line.id), workOrderId: (line.work_order as Record<string, unknown> | null)?.id ? String((line.work_order as Record<string, unknown>).id) : null, vendorInvoiceId: line.vendor_invoice_id ? String(line.vendor_invoice_id) : null, purchaseOrderId: order?.id ? String(order.id) : null, purchaseOrderNumber: order?.po_number ? String(order.po_number) : null, purchaseOrderAllocationId: null, externalCost: Boolean(line.external_cost), episodeId: line.episode_id ? String(line.episode_id) : null, episodeTitle: episode?.title ?? null, episodeNumber: episode?.number ?? null, category: String(line.category), description: line.description ? String(line.description) : null, showTitle: show?.title ?? null, network: show?.network ?? null, budgetedAmount: Number(line.estimated_amount ?? 0), actualAmount: Number(line.actual_amount ?? 0), currency: String(line.currency), costType: String(line.cost_type), showId: line.show_id ? String(line.show_id) : null };
       }),
       workOrderCharges: workOrderCharges.work_order_charges.map((charge) => ({
-        id: String(charge.id), title: String(charge.title), department: charge.department ? String(charge.department) : null,
+        id: String(charge.id), title: String(charge.title),
         status: String(charge.status), billingStatus: String(charge.billing_status), estimatedAmount: Number(charge.estimated_amount ?? 0),
         currency: String(charge.currency), billingNotes: charge.billing_notes ? String(charge.billing_notes) : null,
         episodeId: String(charge.episode_id), episodeTitle: String(charge.episode_title), episodeNumber: Number(charge.episode_number),

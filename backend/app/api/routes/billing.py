@@ -979,7 +979,6 @@ async def list_work_order_charges(actor: CurrentActor, session: DbSession) -> di
             select(
                 post_work_orders.c.id,
                 post_work_orders.c.title,
-                post_work_orders.c.department,
                 post_work_orders.c.status,
                 post_work_orders.c.billing_status,
                 post_work_orders.c.estimated_amount,
@@ -1029,7 +1028,6 @@ async def list_work_order_charges(actor: CurrentActor, session: DbSession) -> di
             {
                 "id": str(row.id),
                 "title": row.title,
-                "department": row.department,
                 "status": row.status,
                 "billing_status": row.billing_status,
                 "estimated_amount": monetary(decimal_amount(row.client_quote_amount or row.estimated_amount)),

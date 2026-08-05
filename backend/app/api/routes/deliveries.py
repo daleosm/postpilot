@@ -1325,7 +1325,6 @@ async def transition_delivery_item(
                             kind="delivery_correction",
                             title=f"Delivery correction — {item.label}",
                             description=payload.reason.strip(),
-                            department="QC / delivery" if payload.status == "qc_failed" else "Delivery",
                             priority="blocker",
                             is_blocking=True,
                             status="open",

@@ -162,7 +162,6 @@ async def create_or_update_qc_report(
                 title="QC failure — assign and resolve corrections",
                 description=payload.summary
                 or "A QC report has failed. Review the report and log each correction before re-QC.",
-                department="QC",
                 assignee_person_id=episode.editor_id,
                 priority="blocker",
                 is_blocking=True,
@@ -269,7 +268,6 @@ async def create_qc_issue(payload: QcIssueCreateRequest, actor: CurrentActor, se
             status="in_progress",
             title=f"QC {payload.severity} — {payload.code or 'correction required'}",
             description=payload.description.strip(),
-            department="QC",
             assignee_person_id=report.editor_id,
             priority="blocker"
             if payload.severity == "critical"
