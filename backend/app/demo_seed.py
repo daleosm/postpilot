@@ -873,7 +873,10 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
     # pencil holds, a linked work-order reservation, and actuals/overtime.
     # This makes the Gantt states useful immediately after a reset.
     booking_specs = (
-        (1, 1, "editor", 0, 9, 1, 18, "edit", "confirmed", False, None, None, None, None),
+        # A live, standard facility day for the first editor in every demo
+        # post house. It keeps catering and runner-desk flows usable today
+        # without implying the room is booked into tomorrow.
+        (1, 1, "editor", 0, 9, 0, 18, "edit", "confirmed", False, None, "Today’s editorial session", None, None),
         (3, 4, "colorist", 0, 10, 0, 16, "color", "confirmed", False, None, None, None, None),
         (4, 7, "sound_mixer", 1, 9, 1, 18, "mix", "confirmed", False, None, None, None, None),
         (5, 4, "qc", 2, 9, 2, 17, "qc", "confirmed", False, None, None, None, None),
