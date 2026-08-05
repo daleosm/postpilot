@@ -1513,8 +1513,6 @@ async def _create_stage_work_orders(session: DbSession, actor: CurrentActor, epi
                     kind="work_order",
                     title=template.title,
                     description=template.description,
-                    department=None,
-                    assignee_role=None,
                     priority=template.priority,
                     is_blocking=template.is_blocking,
                     status="open",

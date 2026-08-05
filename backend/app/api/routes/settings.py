@@ -1126,8 +1126,6 @@ async def update_workflow(
                     "workflow_stage_id": str(item["workflow_stage_id"]),
                     "title": str(item.get("title") or "Work order").strip(),
                     "description": item.get("description"),
-                    "department": None,
-                    "assignee_role": None,
                     "priority": str(item.get("priority") or "normal"),
                     "is_blocking": bool(item.get("is_blocking", True)),
                     "position": int(item.get("position") or index + 1),

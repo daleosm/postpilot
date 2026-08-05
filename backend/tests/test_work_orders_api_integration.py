@@ -245,11 +245,15 @@ def test_work_orders_use_only_named_person_assignment_and_ignore_legacy_fields(
     work_order_id = created.json()["id"]
     assert "department" not in created.json()
     assert "assignee_role" not in created.json()
-    saved = production_lab.fetchrow(
-        "SELECT department, assignee_role FROM post_work_orders WHERE id = $1",
-        work_order_id,
+    legacy_columns = production_lab.fetchval(
+        """
+        SELECT count(*)
+        FROM information_schema.columns
+        WHERE table_name = 'post_work_orders'
+          AND column_name IN ('department', 'assignee_role')
+        """
     )
-    assert saved and dict(saved) == {"department": None, "assignee_role": None}
+    assert legacy_columns == 0
 
     production_lab.sign_out()
     production_lab.sign_in_as_viewer()

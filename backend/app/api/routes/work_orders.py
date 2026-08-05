@@ -894,9 +894,7 @@ async def list_work_orders(actor: CurrentActor, session: DbSession) -> dict[str,
         if not actor.person_id or actor.active_organization and actor.active_organization.role == "client":
             conditions.append(post_work_orders.c.id.is_(None))
         else:
-            conditions.append(
-                post_work_orders.c.assignee_person_id == actor.person_id
-            )
+            conditions.append(post_work_orders.c.assignee_person_id == actor.person_id)
     rows = (
         await session.execute(
             select(post_work_orders)
@@ -954,9 +952,7 @@ async def work_order_inbox(actor: CurrentActor, session: DbSession) -> dict[str,
                     # artist must never be shown work they are unable to
                     # reserve or act on yet.
                     post_work_orders.c.status.in_(("in_progress", "ready_for_review")),
-                    or_(
                     post_work_orders.c.assignee_person_id == actor.person_id,
-                    ),
                 )
             )
             .order_by(
@@ -1061,9 +1057,7 @@ async def create_work_order(
             kind=payload.kind,
             title=payload.title.strip(),
             description=payload.description.strip() if payload.description else None,
-            department=None,
             assignee_person_id=payload.assignee_person_id,
-            assignee_role=None,
             priority=payload.priority,
             is_blocking=blocking,
             status="in_progress" if payload.kind == "qc_exception" else "open",
@@ -1133,10 +1127,7 @@ async def update_work_order(
     work_order = await _work_order_or_404(session, actor, work_order_id, lock=True)
     may_manage = await has_permission(session, actor, "manage_work_orders")
     may_update_assigned = await has_permission(session, actor, "update_assigned_work")
-    is_assigned = bool(
-        actor.person_id
-        and work_order.assignee_person_id == actor.person_id
-    )
+    is_assigned = bool(actor.person_id and work_order.assignee_person_id == actor.person_id)
     if not may_manage and not (may_update_assigned and is_assigned):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only update work assigned to you.")
 
@@ -1550,9 +1541,6 @@ async def update_work_order(
 
     now = datetime.now(UTC)
     values = payload.model_dump(exclude_unset=True)
-    # Clear legacy fields on the next ordinary edit. They are retained as
-    # nullable columns only to preserve historical records during rollout.
-    values.update({"department": None, "assignee_role": None})
     values.pop("approval_note", None)
     values.pop("overrun_reason", None)
     values.pop("client_po_overrun_reason", None)
@@ -1764,10 +1752,7 @@ async def reserve_work_order_room(
     work_order = await _work_order_or_404(session, actor, work_order_id)
     may_manage = await has_permission(session, actor, "manage_production")
     may_record_time = await has_permission(session, actor, "update_assigned_work")
-    is_assigned = bool(
-        actor.person_id
-        and work_order.assignee_person_id == actor.person_id
-    )
+    is_assigned = bool(actor.person_id and work_order.assignee_person_id == actor.person_id)
     if not may_manage and not (may_record_time and is_assigned):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only schedule work assigned to you.")
     if work_order.work_type != "internal":
