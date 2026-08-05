@@ -733,7 +733,11 @@ async def work_order_inbox(actor: CurrentActor, session: DbSession) -> dict[str,
             .where(
                 and_(
                     post_work_orders.c.organization_id == actor.organization_id,
-                    post_work_orders.c.status.not_in(("complete", "cancelled")),
+                    # This feed powers the personal calendar's “Ready to
+                    # schedule” tray.  Keep unapproved work out of it: an
+                    # artist must never be shown work they are unable to
+                    # reserve or act on yet.
+                    post_work_orders.c.status.in_(("in_progress", "ready_for_review")),
                     or_(
                         post_work_orders.c.assignee_person_id == actor.person_id,
                         post_work_orders.c.assignee_role == actor.person_role,

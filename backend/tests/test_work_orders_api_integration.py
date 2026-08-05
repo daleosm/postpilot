@@ -738,6 +738,57 @@ def test_assigned_artist_sees_only_their_work_and_can_update_operational_progres
     assert detail_change.status_code == create.status_code == 403
 
 
+def test_assigned_work_inboxes_hide_orders_until_a_manager_approves_them(
+    production_lab: ProductionApiLab,
+) -> None:
+    """An artist must not receive a task before it can be scheduled or worked."""
+    viewer_person_id = production_lab.fetchval(
+        "SELECT id::text FROM people WHERE organization_id = $1 AND user_id = $2",
+        production_lab.data.organization_id,
+        production_lab.data.viewer_user_id,
+    )
+    production_lab.sign_in_as_manager()
+    created = production_lab.client.post(
+        "/v1/work-orders",
+        json=_payload(
+            production_lab,
+            title="Awaiting approval before scheduling",
+            assignee_person_id=viewer_person_id,
+        ),
+    )
+    assert created.status_code == 201, created.text
+    work_order_id = created.json()["id"]
+    submitted = production_lab.client.patch(
+        f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}
+    )
+    assert submitted.status_code == 200, submitted.text
+
+    production_lab.sign_out()
+    production_lab.sign_in_as_viewer()
+    personal_calendar = production_lab.client.get("/v1/work-orders/inbox")
+    my_work = production_lab.client.get("/v1/approvals")
+
+    assert personal_calendar.status_code == my_work.status_code == 200
+    assert work_order_id not in {item["id"] for item in personal_calendar.json()["work_orders"]}
+    assert work_order_id not in {item["id"] for item in my_work.json()["work_orders"]}
+
+    production_lab.sign_out()
+    production_lab.sign_in_as_manager()
+    approved = production_lab.client.patch(
+        f"/v1/work-orders/{work_order_id}",
+        json={"status": "in_progress", "approval_note": "Approved for facility scheduling."},
+    )
+    assert approved.status_code == 200, approved.text
+
+    production_lab.sign_out()
+    production_lab.sign_in_as_viewer()
+    personal_calendar = production_lab.client.get("/v1/work-orders/inbox")
+    my_work = production_lab.client.get("/v1/approvals")
+
+    assert work_order_id in {item["id"] for item in personal_calendar.json()["work_orders"]}
+    assert work_order_id in {item["id"] for item in my_work.json()["work_orders"]}
+
+
 def test_booking_an_unbooked_ready_for_review_internal_work_order_resumes_it(
     production_lab: ProductionApiLab,
 ) -> None:

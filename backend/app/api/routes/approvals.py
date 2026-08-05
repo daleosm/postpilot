@@ -89,7 +89,11 @@ async def approval_inbox(actor: CurrentActor, session: DbSession) -> dict[str, o
             .where(
                 and_(
                     post_work_orders.c.organization_id == actor.organization_id,
-                    post_work_orders.c.status.not_in(("complete", "cancelled")),
+                    # My Work is an operational inbox, not an approval queue.
+                    # An assignee cannot reserve a room or record time until a
+                    # manager has approved the work order, so do not surface
+                    # draft, submitted, or returned work as actionable work.
+                    post_work_orders.c.status.in_(("in_progress", "ready_for_review")),
                     or_(
                         post_work_orders.c.assignee_person_id == actor.person_id,
                         post_work_orders.c.assignee_role == actor.person_role,

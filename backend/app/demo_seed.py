@@ -1713,6 +1713,89 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
         )
     )
 
+    # Confirmed bookings must carry commercial snapshots before an artist can
+    # submit actual time. Seed both the booked room and artist components from
+    # the same master-card rows the booking resolver would select in normal
+    # operation; tentative holds deliberately remain unpriced.
+    artist_rate_positions = {role: index for index, (role, _, _) in enumerate(artist_rate_specs, start=1)}
+    room_types = ("edit_bay", "edit_bay", "color_suite", "mix_room", "qc_room")
+    booking_component_rows: list[dict[str, object]] = []
+    for index, spec in enumerate(booking_specs, start=1):
+        (
+            room_position,
+            _episode_position,
+            role,
+            _start_day,
+            start_hour,
+            _end_day,
+            end_hour,
+            _booking_type,
+            booking_status,
+            is_option,
+            _option_rank,
+            _title,
+            _actual_day,
+            _actual_end_hour,
+        ) = spec
+        if booking_status != "confirmed" or is_option:
+            continue
+        quantity = Decimal(end_hour - start_hour)
+        room_category, room_rate = DEMO_ROOM_HOURLY_RATES[room_types[room_position - 1]]
+        artist_rate = DEMO_ARTIST_HOURLY_RATES[role]
+        artist_item_position = artist_rate_positions[role]
+        resource_rows = (
+            {
+                "component_type": "room",
+                "room_id": room_id(room_position),
+                "person_id": None,
+                "resource_name": tenant["rooms"][room_position - 1],
+                "category": room_category,
+                "rate": room_rate,
+                "internal_rate": room_rate * Decimal("0.55"),
+                "rate_item_position": len(artist_rate_specs) + room_position,
+            },
+            {
+                "component_type": "person",
+                "room_id": None,
+                "person_id": person_id(role_indices[role]),
+                "resource_name": tenant["people"][role_indices[role] - 1][0],
+                "category": role_label(role),
+                "rate": artist_rate,
+                "internal_rate": artist_rate * Decimal("0.60"),
+                "rate_item_position": artist_item_position,
+            },
+        )
+        for component_position, resource in enumerate(resource_rows, start=1):
+            client_rate = Decimal(resource["rate"]) * multiplier
+            booking_component_rows.append(
+                {
+                    "id": uid(number, "4f", (index * 2) - 2 + component_position),
+                    "organization_id": organization_id,
+                    "booking_id": booking_id(index),
+                    "component_type": resource["component_type"],
+                    "room_id": resource["room_id"],
+                    "person_id": resource["person_id"],
+                    "resource_name": resource["resource_name"],
+                    "category": resource["category"],
+                    "billing_unit": "hour",
+                    "client_rate": client_rate,
+                    "internal_cost_rate": Decimal(resource["internal_rate"]) * multiplier,
+                    "currency": currency,
+                    "rate_source": "master_rate_card",
+                    "rate_card_scope": "master",
+                    "rate_card_id": master_card_id,
+                    "rate_card_item_id": uid(number, "46", int(resource["rate_item_position"])),
+                    "is_negotiated_override": False,
+                    "estimated_quantity": quantity,
+                    "estimated_amount": client_rate * quantity,
+                    "actual_overtime_quantity": Decimal("0"),
+                    "overtime_multiplier": Decimal("1.5"),
+                    "created_at": now_at(0),
+                    "updated_at": now_at(0),
+                }
+            )
+    await connection.execute(insert(t.booking_charge_components).values(booking_component_rows))
+
     client_po_id = uid(number, "52", 1)
     billable_id = uid(number, "31", 1)
     billable_amount = Decimal("18400") * multiplier

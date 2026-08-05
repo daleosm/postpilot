@@ -158,6 +158,42 @@ def test_booking_preview_and_confirmation_snapshot_room_and_named_artist_rates(
     assert {item["component_type"]: item for item in unchanged.json()["components"]}["person"]["rate"] == 175.0
 
 
+def test_confirmed_qc_booking_snapshots_an_hourly_commercial_component(
+    production_lab: ProductionApiLab,
+) -> None:
+    """QC scheduling resolves a room/session rate, rather than an episode fee."""
+    production_lab.sign_in_as_manager()
+    service = production_lab.client.post(
+        "/v1/rate-cards/services",
+        json={"name": "QC room session", "category": "QC", "unit": "hour", "rate": 100},
+    )
+    assert service.status_code == 201, service.text
+    master = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={"scope": "master", "service_rate_id": service.json()["id"], "rate": 100},
+    )
+    assert master.status_code == 201, master.text
+
+    created = production_lab.client.post(
+        "/v1/bookings",
+        json={
+            "title": "Photosensitivity correction QC",
+            "episode_id": _episode_id(production_lab),
+            "room_id": production_lab.data.room_id,
+            "starts_at": "2035-10-02T09:00:00Z",
+            "ends_at": "2035-10-02T11:00:00Z",
+            "booking_type": "qc",
+            "status": "confirmed",
+        },
+    )
+    assert created.status_code == 201, created.text
+    components = created.json()["commercial_preview"]
+    assert len(components) == 1
+    assert components[0]["component_type"] == "room"
+    assert components[0]["unit"] == "hour"
+    assert components[0]["estimated_charge"] == 200.0
+
+
 def test_booking_uses_the_assigned_artists_role_rate_without_a_named_person_row(
     production_lab: ProductionApiLab,
 ) -> None:

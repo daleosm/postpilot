@@ -15,7 +15,11 @@ BOOKING_RATE_DEFINITIONS: dict[str, tuple[str, str]] = {
     "edit": ("Edit suite", "hour"),
     "color": ("Colour", "hour"),
     "mix": ("Audio suite", "hour"),
-    "qc": ("QC", "episode"),
+    # QC sessions occupy a room and operator time, so they use the same
+    # hourly rate-card resolution as the rest of facility scheduling. A
+    # separate fixed-fee QC service can still be selected explicitly when a
+    # facility sells QC per episode.
+    "qc": ("QC", "hour"),
     "client_review": ("Edit suite", "hour"),
     "ingest": ("Edit suite", "hour"),
     "conform": ("Online conform", "hour"),
