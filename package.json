@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:all": "pnpm test:e2e",
-    "test:e2e": "pnpm test:client && playwright test && playwright test --config playwright.auth.config.ts && playwright test --config playwright.microsoft-sso.config.ts",
+    "test:e2e": "playwright test && playwright test --config playwright.auth.config.ts && playwright test --config playwright.microsoft-sso.config.ts",
     "test:client": "node --experimental-strip-types --test tests/client/*.test.ts",
     "test:ui": "playwright test",
     "test:auth": "playwright test --config playwright.auth.config.ts",
