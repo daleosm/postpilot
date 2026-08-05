@@ -207,7 +207,7 @@ def test_golden_episode_ledger_and_invoice_match_the_checked_in_penny_fixture(
         json={
             "episode_id": episode_id,
             "workflow_stage_id": lab.data.workflow_stage_id,
-                "title": "Golden client editorial change",
+            "title": "Golden client editorial change",
             "work_type": "internal",
             "billing_scope": "billable_change",
             "client_purchase_order_id": client_po_id,

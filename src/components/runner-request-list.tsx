@@ -51,8 +51,13 @@ export function RunnerRequestList({ requests }: { requests: Request[] }) {
   }, []);
 
   useEffect(() => {
-    setLiveRequests(requests);
-    knownRequestIds.current = new Set(requests.map((request) => request.id));
+    // Parent data can refresh independently of the 10-second poll. Defer the
+    // local reconciliation to avoid a synchronous render cascade.
+    const timer = window.setTimeout(() => {
+      setLiveRequests(requests);
+      knownRequestIds.current = new Set(requests.map((request) => request.id));
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [requests]);
 
   useEffect(() => {

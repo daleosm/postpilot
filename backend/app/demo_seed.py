@@ -1643,9 +1643,7 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
     )
 
     artist_rate_specs = [
-        (role, role_label(role), rate)
-        for role, rate in DEMO_ARTIST_HOURLY_RATES.items()
-        if role in role_indices
+        (role, role_label(role), rate) for role, rate in DEMO_ARTIST_HOURLY_RATES.items() if role in role_indices
     ]
     service_rows = [
         {
@@ -1679,38 +1677,40 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
         insert(t.rate_card_items).values(
             nullable_rows(
                 [
-                {
-                    "id": uid(number, "46", index),
-                    "organization_id": organization_id,
-                    "rate_card_id": master_card_id,
-                    "service_rate_id": uid(number, "36", index),
-                    "target_type": "service",
-                    "category": category,
-                    "artist_role": role,
-                    "unit": "hour",
-                    "rate": rate * multiplier,
-                    "internal_cost_rate": rate * multiplier * Decimal("0.60"),
-                }
-                for index, (role, category, rate) in enumerate(artist_rate_specs, start=1)
-            ]
-            + [
-                {
-                    "id": uid(number, "46", len(artist_rate_specs) + index),
-                    "organization_id": organization_id,
-                    "rate_card_id": master_card_id,
-                    "target_type": "room",
-                    "room_id": room_id(index),
-                    "category": DEMO_ROOM_HOURLY_RATES.get(room_type, ("Specialist room", Decimal("125")))[0],
-                    "unit": "hour",
-                    "rate": DEMO_ROOM_HOURLY_RATES.get(room_type, ("Specialist room", Decimal("125")))[1]
-                    * multiplier,
-                    "internal_cost_rate": DEMO_ROOM_HOURLY_RATES.get(room_type, ("Specialist room", Decimal("125")))[1]
-                    * multiplier
-                    * Decimal("0.55"),
-                }
-                for index, room_type in enumerate(
-                    ("edit_bay", "edit_bay", "color_suite", "mix_room", "qc_room"), start=1
-                )
+                    {
+                        "id": uid(number, "46", index),
+                        "organization_id": organization_id,
+                        "rate_card_id": master_card_id,
+                        "service_rate_id": uid(number, "36", index),
+                        "target_type": "service",
+                        "category": category,
+                        "artist_role": role,
+                        "unit": "hour",
+                        "rate": rate * multiplier,
+                        "internal_cost_rate": rate * multiplier * Decimal("0.60"),
+                    }
+                    for index, (role, category, rate) in enumerate(artist_rate_specs, start=1)
+                ]
+                + [
+                    {
+                        "id": uid(number, "46", len(artist_rate_specs) + index),
+                        "organization_id": organization_id,
+                        "rate_card_id": master_card_id,
+                        "target_type": "room",
+                        "room_id": room_id(index),
+                        "category": DEMO_ROOM_HOURLY_RATES.get(room_type, ("Specialist room", Decimal("125")))[0],
+                        "unit": "hour",
+                        "rate": DEMO_ROOM_HOURLY_RATES.get(room_type, ("Specialist room", Decimal("125")))[1]
+                        * multiplier,
+                        "internal_cost_rate": DEMO_ROOM_HOURLY_RATES.get(
+                            room_type, ("Specialist room", Decimal("125"))
+                        )[1]
+                        * multiplier
+                        * Decimal("0.55"),
+                    }
+                    for index, room_type in enumerate(
+                        ("edit_bay", "edit_bay", "color_suite", "mix_room", "qc_room"), start=1
+                    )
                 ]
             )
         )

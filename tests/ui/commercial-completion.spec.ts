@@ -103,13 +103,15 @@ test.describe("Commercial completion journeys", () => {
     await Promise.all([page.waitForURL(/episode=/), episode.click()]);
     await page.getByRole("button", { name: "Build estimate" }).click();
     const builder = page.getByRole("dialog", { name: "Build episode estimate" });
-    await builder.getByRole("combobox").nth(2).selectOption({ label: "Mix stage" });
+    // Select a real seeded service. The builder no longer mixes rooms and
+    // services into one selector, and service labels are tenant-configurable.
+    await builder.getByLabel("Estimate service").selectOption({ index: 1 });
     const body = await captureJsonWrite(page, "**/v1/budget/lines", { id: "fb000000-0000-4000-8000-000000000005" }, 201);
 
     await builder.getByRole("button", { name: "Save estimate" }).click();
 
     await expect.poll(body).toMatchObject({
-      category: "Sound",
+      category: expect.any(String),
       planned_quantity: 1,
       planned_unit: "hour",
       rate_resource_type: "service",

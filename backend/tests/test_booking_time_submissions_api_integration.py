@@ -205,8 +205,8 @@ def test_assigned_artist_confirms_linked_booking_actuals_with_saved_room_and_per
     components = {item["component_type"]: item for item in body["cost"]["components"]}
     assert components["room"] == {
         "id": components["room"]["id"],
-            "component_type": "room",
-            "category": "Edit suite",
+        "component_type": "room",
+        "category": "Edit suite",
         "resource": "Python Edit Bay",
         "resource_id": production_lab.data.room_id,
         "unit": "hour",

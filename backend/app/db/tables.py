@@ -831,10 +831,21 @@ booking_charge_components = Table(
     ),
     CheckConstraint("estimated_quantity >= 0", name="booking_charge_components_quantity_non_negative_check"),
     CheckConstraint("estimated_amount >= 0", name="booking_charge_components_amount_non_negative_check"),
-    CheckConstraint("actual_quantity IS NULL OR actual_quantity >= 0", name="booking_charge_components_actual_quantity_non_negative_check"),
-    CheckConstraint("actual_overtime_quantity >= 0", name="booking_charge_components_actual_overtime_non_negative_check"),
-    CheckConstraint("actual_client_amount IS NULL OR actual_client_amount >= 0", name="booking_charge_components_actual_client_non_negative_check"),
-    CheckConstraint("actual_internal_amount IS NULL OR actual_internal_amount >= 0", name="booking_charge_components_actual_internal_non_negative_check"),
+    CheckConstraint(
+        "actual_quantity IS NULL OR actual_quantity >= 0",
+        name="booking_charge_components_actual_quantity_non_negative_check",
+    ),
+    CheckConstraint(
+        "actual_overtime_quantity >= 0", name="booking_charge_components_actual_overtime_non_negative_check"
+    ),
+    CheckConstraint(
+        "actual_client_amount IS NULL OR actual_client_amount >= 0",
+        name="booking_charge_components_actual_client_non_negative_check",
+    ),
+    CheckConstraint(
+        "actual_internal_amount IS NULL OR actual_internal_amount >= 0",
+        name="booking_charge_components_actual_internal_non_negative_check",
+    ),
     CheckConstraint("overtime_multiplier >= 1", name="booking_charge_components_overtime_multiplier_check"),
     CheckConstraint(
         "(is_negotiated_override IS FALSE AND override_reason IS NULL) "
@@ -847,7 +858,9 @@ booking_charge_components = Table(
         "OR (component_type IN ('service', 'overtime', 'fixed_fee') AND room_id IS NULL AND person_id IS NULL)",
         name="booking_charge_components_resource_check",
     ),
-    UniqueConstraint("booking_id", "component_type", "resource_name", name="booking_charge_components_booking_type_unique"),
+    UniqueConstraint(
+        "booking_id", "component_type", "resource_name", name="booking_charge_components_booking_type_unique"
+    ),
 )
 
 # Work orders share the same commercial vocabulary as bookings, but do not
@@ -1381,8 +1394,15 @@ client_invoice_line_reversals = Table(
     metadata,
     Column("id", UUID(as_uuid=False), primary_key=True),
     Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
-    Column("client_invoice_id", UUID(as_uuid=False), ForeignKey("client_invoices.id", ondelete="CASCADE"), nullable=False),
-    Column("client_invoice_item_id", UUID(as_uuid=False), ForeignKey("client_invoice_items.id", ondelete="RESTRICT"), nullable=False),
+    Column(
+        "client_invoice_id", UUID(as_uuid=False), ForeignKey("client_invoices.id", ondelete="CASCADE"), nullable=False
+    ),
+    Column(
+        "client_invoice_item_id",
+        UUID(as_uuid=False),
+        ForeignKey("client_invoice_items.id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
     Column("reversal_type", Text, nullable=False),
     Column("quantity", Numeric(14, 6), nullable=False),
     Column("unit_amount", Numeric(14, 6), nullable=False),
@@ -1391,7 +1411,9 @@ client_invoice_line_reversals = Table(
     Column("created_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
     Column("created_at", DateTime(timezone=True), nullable=False),
     CheckConstraint("reversal_type IN ('void', 'credit')", name="client_invoice_line_reversals_type_check"),
-    CheckConstraint("quantity > 0 AND unit_amount >= 0 AND amount < 0", name="client_invoice_line_reversals_amount_check"),
+    CheckConstraint(
+        "quantity > 0 AND unit_amount >= 0 AND amount < 0", name="client_invoice_line_reversals_amount_check"
+    ),
     UniqueConstraint("client_invoice_item_id", name="client_invoice_line_reversals_item_unique"),
 )
 

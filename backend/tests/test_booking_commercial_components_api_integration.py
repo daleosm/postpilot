@@ -126,11 +126,14 @@ def test_booking_preview_and_confirmation_snapshot_room_and_named_artist_rates(
     assert saved_components["person"]["billing_treatment"] == "billable"
     assert saved_components["person"]["estimated_charge"] == 525.0
     assert saved_components["person"]["source"] == "master_rate_card"
-    assert production_lab.fetchval(
-        "SELECT count(*) FROM booking_charge_components WHERE organization_id = $1 AND booking_id = $2",
-        production_lab.data.organization_id,
-        booking_id,
-    ) == 2
+    assert (
+        production_lab.fetchval(
+            "SELECT count(*) FROM booking_charge_components WHERE organization_id = $1 AND booking_id = $2",
+            production_lab.data.organization_id,
+            booking_id,
+        )
+        == 2
+    )
     audit_actions = production_lab.fetchval(
         """
         SELECT count(*)
@@ -339,9 +342,7 @@ def test_flat_fee_budget_forecast_surfaces_operational_margin_risk_without_an_es
         },
     )
     assert actual.status_code == 201, actual.text
-    overview = production_lab.client.get(
-        f"/v1/budget/episodes/{_episode_id(production_lab)}/estimate-overview"
-    )
+    overview = production_lab.client.get(f"/v1/budget/episodes/{_episode_id(production_lab)}/estimate-overview")
     assert overview.status_code == 200, overview.text
     estimate = overview.json()["estimate"]
     assert estimate["unallocated_operational_actual"] == 712.5
@@ -352,9 +353,7 @@ def test_flat_fee_budget_forecast_surfaces_operational_margin_risk_without_an_es
         "flat_fee_forecast_margin": -212.5,
         "flat_fee_margin_at_risk": True,
     }
-    ledger = production_lab.client.get(
-        f"/v1/budget/episodes/{_episode_id(production_lab)}/operational-ledger"
-    )
+    ledger = production_lab.client.get(f"/v1/budget/episodes/{_episode_id(production_lab)}/operational-ledger")
     assert ledger.status_code == 200, ledger.text
     assert {item["component_type"] for item in ledger.json()["ledger"]["unallocated_actuals"]} == {"room", "person"}
 
@@ -417,16 +416,19 @@ def test_authorised_fixed_fee_override_is_a_reasoned_booking_snapshot(
     assert component["source"] == "negotiated_booking_override"
     assert component["is_negotiated_override"] is True
     assert component["override_reason"] == "Client approved a reduced finishing package."
-    assert production_lab.fetchval(
-        """
+    assert (
+        production_lab.fetchval(
+            """
         SELECT count(*)
         FROM activity_log
         WHERE organization_id = $1 AND entity_type = 'booking' AND entity_id = $2
           AND action = 'booking.price_override_approved'
         """,
-        production_lab.data.organization_id,
-        created.json()["id"],
-    ) == 1
+            production_lab.data.organization_id,
+            created.json()["id"],
+        )
+        == 1
+    )
 
 
 def test_flat_fee_work_order_creates_one_billable_fee_and_included_service_components(
@@ -503,9 +505,10 @@ def test_pencil_booking_rates_re_resolve_until_confirmation_without_creating_ten
     assert {item["component_type"]: item for item in pencil_preview.json()["components"]}["room"]["rate"] == 100.0
     tentative = production_lab.client.post("/v1/bookings", json=pencil_payload)
     assert tentative.status_code == 201, tentative.text
-    assert production_lab.client.get(
-        f"/v1/bookings/{tentative.json()['id']}/commercial-components"
-    ).json()["components"] == []
+    assert (
+        production_lab.client.get(f"/v1/bookings/{tentative.json()['id']}/commercial-components").json()["components"]
+        == []
+    )
 
     updated_master = production_lab.client.post(
         "/v1/rate-cards/overrides",
@@ -540,19 +543,25 @@ def test_confirmed_booking_creation_replays_idempotently_without_duplicate_compo
     assert first.status_code == replay.status_code == 201
     assert replay.headers["Idempotency-Replayed"] == "true"
     assert replay.json()["id"] == first.json()["id"]
-    assert production_lab.fetchval(
-        """
+    assert (
+        production_lab.fetchval(
+            """
         SELECT count(*) FROM booking_charge_components
         WHERE organization_id = $1 AND booking_id = $2
         """,
-        production_lab.data.organization_id,
-        first.json()["id"],
-    ) == 2
-    assert production_lab.fetchval(
-        "SELECT count(*) FROM bookings WHERE organization_id = $1 AND title = $2",
-        production_lab.data.organization_id,
-        payload["title"],
-    ) == 1
+            production_lab.data.organization_id,
+            first.json()["id"],
+        )
+        == 2
+    )
+    assert (
+        production_lab.fetchval(
+            "SELECT count(*) FROM bookings WHERE organization_id = $1 AND title = $2",
+            production_lab.data.organization_id,
+            payload["title"],
+        )
+        == 1
+    )
 
 
 def test_historic_work_order_review_flag_preserves_its_recorded_commercial_values(
@@ -588,7 +597,10 @@ def test_historic_work_order_review_flag_preserves_its_recorded_commercial_value
 
     assert fetched.status_code == 200, fetched.text
     assert fetched.json()["commercial_review_required"] is True
-    assert fetched.json()["commercial_review_reason"] == "Historic work order has no confirmed commercial treatment snapshot."
+    assert (
+        fetched.json()["commercial_review_reason"]
+        == "Historic work order has no confirmed commercial treatment snapshot."
+    )
     assert fetched.json()["commercial_treatment"] == "flat_project_fee"
     assert fetched.json()["client_quote_amount"] == "1750.25"
 

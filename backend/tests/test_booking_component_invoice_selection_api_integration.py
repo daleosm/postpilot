@@ -273,7 +273,11 @@ def test_actual_correction_reconciles_selected_component_and_cancelled_booking_i
     booking_id = booking.json()["id"]
     first_actual = lab.client.post(
         f"/v1/bookings/{booking_id}/time-submissions",
-        json={"actual_starts_at": "2035-12-12T09:00:00Z", "actual_ends_at": "2035-12-12T11:00:00Z", "overtime_minutes": 0},
+        json={
+            "actual_starts_at": "2035-12-12T09:00:00Z",
+            "actual_ends_at": "2035-12-12T11:00:00Z",
+            "overtime_minutes": 0,
+        },
     )
     assert first_actual.status_code == 201, first_actual.text
     component = lab.client.get(f"/v1/billing/episodes/{episode_id}/booking-components").json()["booking_components"][0]

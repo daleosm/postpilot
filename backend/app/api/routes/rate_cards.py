@@ -237,9 +237,7 @@ async def _scope_target_from_query(
     if scope == "show":
         show = (
             await session.execute(
-                select(shows.c.id).where(
-                    and_(shows.c.id == show_id, shows.c.organization_id == actor.organization_id)
-                )
+                select(shows.c.id).where(and_(shows.c.id == show_id, shows.c.organization_id == actor.organization_id))
             )
         ).first()
         if not show:
@@ -343,9 +341,7 @@ async def _service_or_404(session: DbSession, actor: CurrentActor, service_rate_
     return service
 
 
-async def _item_target(
-    session: DbSession, actor: CurrentActor, payload: RateCardOverrideRequest
-) -> dict[str, object]:
+async def _item_target(session: DbSession, actor: CurrentActor, payload: RateCardOverrideRequest) -> dict[str, object]:
     """Resolve an explicit, tenant-owned rate-card target.
 
     A resource ID from another organization must be indistinguishable from a
@@ -1057,9 +1053,7 @@ async def search_rate_card_artists(
             .limit(12)
         )
     ).all()
-    return {
-        "people": [{"id": str(person.id), "name": person.name, "role": person.role} for person in rows]
-    }
+    return {"people": [{"id": str(person.id), "name": person.name, "role": person.role} for person in rows]}
 
 
 @router.get("/artist-rates")

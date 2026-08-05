@@ -43,7 +43,6 @@ export function EpisodeWorkOrders({ episodeId, initialWorkOrders, people, stages
   const stageId = useWatch({ control: form.control, name: "workflowStageId" });
   const scope = useWatch({ control: form.control, name: "billingScope" });
   const commercialTreatment = useWatch({ control: form.control, name: "commercialTreatment" });
-  const allowOvertimeBilling = useWatch({ control: form.control, name: "allowOvertimeBilling" });
   const purchaseOrderKey = workType === "external_vendor" && vendorId ? `${vendorId}:${episodeId}` : "";
   const purchaseOrders = purchaseOrderResult.key === purchaseOrderKey ? purchaseOrderResult.orders : [];
   const vendorField = form.register("vendorCompanyId");

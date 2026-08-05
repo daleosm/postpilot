@@ -780,9 +780,7 @@ def test_assigned_work_inboxes_hide_orders_until_a_manager_approves_them(
     )
     assert created.status_code == 201, created.text
     work_order_id = created.json()["id"]
-    submitted = production_lab.client.patch(
-        f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"}
-    )
+    submitted = production_lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"})
     assert submitted.status_code == 200, submitted.text
 
     production_lab.sign_out()
@@ -987,7 +985,13 @@ def test_work_order_room_reservations_preserve_treatment_snapshots_and_prevent_d
     for treatment, title, start, quote, assignee_person_id in (
         ("wet_hire", "Wet-hire picture fix", "2035-09-10T09:00:00Z", None, production_lab.data.editor_person_id),
         ("dry_hire", "Dry-hire suite reservation", "2035-09-10T12:00:00Z", None, None),
-        ("flat_project_fee", "Flat-fee client change", "2035-09-10T15:00:00Z", 900, production_lab.data.editor_person_id),
+        (
+            "flat_project_fee",
+            "Flat-fee client change",
+            "2035-09-10T15:00:00Z",
+            900,
+            production_lab.data.editor_person_id,
+        ),
     ):
         created = production_lab.client.post(
             "/v1/work-orders",

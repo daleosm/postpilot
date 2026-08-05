@@ -631,13 +631,16 @@ def test_artist_role_rate_applies_automatically_until_a_named_artist_override(
         },
     )
     assert named.status_code == 201, named.text
-    assert _effective(
-        production_lab,
-        episode_id,
-        category="Unrelated booking category",
-        target_type="person",
-        target_id=production_lab.data.manager_person_id,
-    )["rate"] == 170
+    assert (
+        _effective(
+            production_lab,
+            episode_id,
+            category="Unrelated booking category",
+            target_type="person",
+            target_id=production_lab.data.manager_person_id,
+        )["rate"]
+        == 170
+    )
 
     invalid = production_lab.client.post(
         "/v1/rate-cards/services",
@@ -837,22 +840,28 @@ def test_removing_a_named_artist_rate_restores_the_scoped_generic_fallback(
     )
     assert after["rate"] == 120
     assert after["source"] == "master_rate_card"
-    assert production_lab.fetchval(
-        """
+    assert (
+        production_lab.fetchval(
+            """
         SELECT count(*)
         FROM rate_card_items
         WHERE organization_id = $1 AND id = $2 AND target_type = 'person'
         """,
-        production_lab.data.organization_id,
-        item_id,
-    ) == 0
+            production_lab.data.organization_id,
+            item_id,
+        )
+        == 0
+    )
     assert production_lab.client.delete(f"/v1/rate-cards/items/{item_id}").status_code == 404
-    assert production_lab.fetchval(
-        """
+    assert (
+        production_lab.fetchval(
+            """
         SELECT count(*) FROM activity_log
         WHERE organization_id = $1 AND action = 'rate_card.override_removed'
           AND metadata ->> 'itemId' = $2
         """,
-        production_lab.data.organization_id,
-        item_id,
-    ) == 1
+            production_lab.data.organization_id,
+            item_id,
+        )
+        == 1
+    )

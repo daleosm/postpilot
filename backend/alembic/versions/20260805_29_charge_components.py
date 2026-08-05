@@ -13,8 +13,9 @@ ledger. No historic prices are guessed or backfilled.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision: str = "20260805_29"
 down_revision: str | Sequence[str] | None = "20260805_28"
@@ -42,7 +43,9 @@ def upgrade() -> None:
     op.create_check_constraint(
         "booking_charge_components_billing_treatment_check", "booking_charge_components", _BILLING_TREATMENTS
     )
-    op.create_check_constraint("booking_charge_components_tax_treatment_check", "booking_charge_components", _TAX_TREATMENTS)
+    op.create_check_constraint(
+        "booking_charge_components_tax_treatment_check", "booking_charge_components", _TAX_TREATMENTS
+    )
     op.create_check_constraint(
         "booking_charge_components_resource_check",
         "booking_charge_components",
@@ -133,7 +136,10 @@ def upgrade() -> None:
             name="work_order_charge_components_resource_check",
         ),
         sa.UniqueConstraint(
-            "work_order_id", "component_type", "resource_name", name="work_order_charge_components_work_order_type_unique"
+            "work_order_id",
+            "component_type",
+            "resource_name",
+            name="work_order_charge_components_work_order_type_unique",
         ),
     )
     op.create_index(

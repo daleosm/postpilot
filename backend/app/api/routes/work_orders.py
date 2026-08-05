@@ -11,8 +11,17 @@ from sqlalchemy import and_, delete, func, insert, or_, select, update
 
 from app.api.dependencies import CurrentActor, DbSession
 from app.api.production import may_view_all_episodes
-from app.api.routes.bookings import _audit_booking_charge_snapshot, _resolve_booking_commercial_components, _sync_booking_commercial_components
-from app.api.schemas import BookingCreateRequest, WorkOrderBookingRequest, WorkOrderCreateRequest, WorkOrderUpdateRequest
+from app.api.routes.bookings import (
+    _audit_booking_charge_snapshot,
+    _resolve_booking_commercial_components,
+    _sync_booking_commercial_components,
+)
+from app.api.schemas import (
+    BookingCreateRequest,
+    WorkOrderBookingRequest,
+    WorkOrderCreateRequest,
+    WorkOrderUpdateRequest,
+)
 from app.auth import has_permission, require_permission
 from app.booking_logic import booking_conflicts
 from app.budget_logic import decimal_amount, json_safe
@@ -247,9 +256,9 @@ async def _sync_work_order_charge_components(
         )
 
     if work_order.allow_overtime_billing and work_order.overtime_hourly_base_rate is not None:
-        overtime_rate = (_decimal(work_order.overtime_hourly_base_rate) * _decimal(work_order.overtime_multiplier)).quantize(
-            Decimal("0.01")
-        )
+        overtime_rate = (
+            _decimal(work_order.overtime_hourly_base_rate) * _decimal(work_order.overtime_multiplier)
+        ).quantize(Decimal("0.01"))
         values.append(
             {
                 "id": str(uuid4()),
@@ -268,7 +277,9 @@ async def _sync_work_order_charge_components(
                 "rate_source": "work_order_overtime_policy",
                 "rate_card_id": None,
                 "rate_card_item_id": None,
-                "billing_treatment": "billable" if work_order.commercial_treatment != "flat_project_fee" else "included",
+                "billing_treatment": "billable"
+                if work_order.commercial_treatment != "flat_project_fee"
+                else "included",
                 "tax_treatment": "standard",
                 "override_reason": None,
                 "estimated_quantity": Decimal(0),
@@ -1300,8 +1311,10 @@ async def update_work_order(
         )
     linked_booking_id = str(work_order.booking_id) if work_order.booking_id else None
     linked_booking = await _tenant_record(session, bookings, actor, linked_booking_id, "Linked booking")
-    if linked_booking and next_commercial_treatment == "wet_hire" and (
-        not linked_booking.room_id or not linked_booking.person_id
+    if (
+        linked_booking
+        and next_commercial_treatment == "wet_hire"
+        and (not linked_booking.room_id or not linked_booking.person_id)
     ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1579,7 +1592,9 @@ async def update_work_order(
             "commercial_treatment": next_commercial_treatment,
             "commercial_treatment_snapshot_at": (
                 work_order.commercial_treatment_snapshot_at
-                or (now if next_status in {"awaiting_approval", "in_progress", "ready_for_review", "complete"} else None)
+                or (
+                    now if next_status in {"awaiting_approval", "in_progress", "ready_for_review", "complete"} else None
+                )
             ),
             "client_quote_amount": next_client_quote_amount,
             "client_quote_currency": actor.active_organization.currency
@@ -1868,7 +1883,7 @@ async def reserve_work_order_room(
     # Resolve exactly the same tenant rate-card data as a normal booking.
     # This happens before the insert so a work-order reservation carries a
     # single authoritative commercial agreement into actual-time and billing.
-    commercial_preview = await _resolve_booking_commercial_components(session, actor, booking_payload)
+    await _resolve_booking_commercial_components(session, actor, booking_payload)
     created = await session.execute(
         insert(bookings)
         .values(

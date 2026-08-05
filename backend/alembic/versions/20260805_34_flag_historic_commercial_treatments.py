@@ -15,7 +15,6 @@ absent. It never consults current rate cards or resource records.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -62,6 +61,8 @@ def upgrade() -> None:
         WHERE commercial_treatment_snapshot_at IS NULL
         """
     )
+
+
 def downgrade() -> None:
     op.drop_index("post_work_orders_organization_commercial_review_idx", table_name="post_work_orders")
     op.drop_column("post_work_orders", "commercial_review_marked_at")

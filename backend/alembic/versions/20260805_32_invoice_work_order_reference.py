@@ -12,6 +12,7 @@ the human reference that was agreed when the invoice was issued.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "20260805_32"

@@ -103,11 +103,7 @@ export function BookingFormDialog({ resources, initialStart, booking, onClose }:
   };
 
   useEffect(() => {
-    if (!hasCommercialSelection) {
-      setCommercialPreview([]);
-      setCommercialPreviewLoading(false);
-      return;
-    }
+    if (!hasCommercialSelection) return;
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       setCommercialPreviewLoading(true);

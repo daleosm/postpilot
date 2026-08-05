@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import and_, case, delete, func, insert, or_, select, update
+from sqlalchemy import and_, case, delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import CurrentActor, DbSession
@@ -24,14 +24,14 @@ from app.api.schemas import (
     BudgetManualActualAdjustmentRequest,
 )
 from app.auth import require_permission
-from app.budget_actuals import record_budget_actual
 from app.booking_costs import confirmed_hours, cost_for_hours
+from app.budget_actuals import record_budget_actual
 from app.budget_logic import can_commit_po, cost_totals, decimal_amount, json_safe, monetary
 from app.budget_rate_resolution import resolve_budget_rate_snapshot
 from app.db.tables import (
     activity_log,
-    bookings,
     booking_charge_components,
+    bookings,
     budget_actual_allocations,
     budget_lines,
     crm_companies,

@@ -193,9 +193,7 @@ def test_passed_re_qc_reconciles_stale_failed_delivery_items(production_lab: Pro
     passed = _report(production_lab, episode_id, "passed", summary="Corrected package passed re-QC.")
 
     assert passed.status_code == 200, passed.text
-    qc_item = production_lab.fetchrow(
-        "SELECT status, qc_result FROM episode_delivery_items WHERE id = $1", qc_item_id
-    )
+    qc_item = production_lab.fetchrow("SELECT status, qc_result FROM episode_delivery_items WHERE id = $1", qc_item_id)
     metadata_item = production_lab.fetchrow(
         "SELECT status, qc_result FROM episode_delivery_items WHERE id = $1", metadata_item_id
     )

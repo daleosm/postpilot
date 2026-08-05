@@ -70,7 +70,12 @@ export function RoomRateCard({ scope }: { scope: Scope }) {
     setLoading(false);
   }, [params]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    // Defer the initial read so this effect subscribes to the card scope
+    // rather than synchronously cascading local state updates during render.
+    const timer = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
 
   return <section className="overflow-hidden rounded-lg border border-[#ebeae6] bg-[#fefefa]">
     <div className="border-b border-[#ebeae6] px-5 py-4">

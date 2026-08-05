@@ -36,9 +36,9 @@ from app.budget_actuals import record_budget_actual
 from app.budget_logic import json_safe
 from app.db.tables import (
     activity_log,
-    budget_actual_allocations,
     booking_charge_components,
     bookings,
+    budget_actual_allocations,
     budget_lines,
     client_invoice_items,
     episode_team_assignments,
@@ -360,9 +360,7 @@ async def _actual_cost(
         client_rate = _decimal(component.client_rate) or Decimal(0)
         internal_rate = _decimal(component.internal_cost_rate)
         client_amount = (
-            cost_for_hours(client_rate, unit, base_hours)
-            if component.billing_treatment == "billable"
-            else Decimal(0)
+            cost_for_hours(client_rate, unit, base_hours) if component.billing_treatment == "billable" else Decimal(0)
         )
         internal_amount = cost_for_hours(internal_rate, unit, base_hours) if internal_rate is not None else None
         if overtime_hours and supports_overtime(unit):
@@ -400,7 +398,9 @@ async def _actual_cost(
             "component_type": component.component_type,
             "category": component.category,
             "resource": component.resource_name,
-            "resource_id": str(component.room_id or component.person_id) if component.room_id or component.person_id else None,
+            "resource_id": str(component.room_id or component.person_id)
+            if component.room_id or component.person_id
+            else None,
             "unit": unit,
             "currency": component.currency,
             "source": component.rate_source,
@@ -450,7 +450,9 @@ def _commercial_component_response(component: object) -> dict[str, object]:
         "id": str(component.id),
         "component_type": component.component_type,
         "resource": component.resource_name,
-        "resource_id": str(component.room_id or component.person_id) if component.room_id or component.person_id else None,
+        "resource_id": str(component.room_id or component.person_id)
+        if component.room_id or component.person_id
+        else None,
         "category": component.category,
         "rate": _money(_decimal(component.client_rate) or Decimal(0)),
         "internal_cost_rate": (
@@ -472,9 +474,7 @@ def _commercial_component_response(component: object) -> dict[str, object]:
         "estimated_quantity": _money(_decimal(component.estimated_quantity) or Decimal(0)),
         "estimated_charge": _money(_decimal(component.estimated_amount) or Decimal(0)),
         "actual_quantity": (
-            _money(_decimal(component.actual_quantity) or Decimal(0))
-            if component.actual_quantity is not None
-            else None
+            _money(_decimal(component.actual_quantity) or Decimal(0)) if component.actual_quantity is not None else None
         ),
         "actual_overtime_quantity": _money(_decimal(component.actual_overtime_quantity) or Decimal(0)),
         "actual_client_charge": (
@@ -514,7 +514,11 @@ async def _resolve_booking_commercial_components(
         # room/person rows below remain included cost/forecast components,
         # which prevents a flat fee being billed again as hourly time.
         fixed_fee_override = overrides.get("fixed_fee")
-        fee = _decimal(fixed_fee_override.rate) if fixed_fee_override else _decimal(payload.client_quote_amount) or Decimal(0)
+        fee = (
+            _decimal(fixed_fee_override.rate)
+            if fixed_fee_override
+            else _decimal(payload.client_quote_amount) or Decimal(0)
+        )
         components.append(
             {
                 "component_type": "fixed_fee",
@@ -699,13 +703,14 @@ async def _sync_booking_commercial_components(
         delete_statement = delete_statement.where(booking_charge_components.c.component_type.not_in(resolved_types))
     await session.execute(delete_statement)
 
-    overtime_multiplier = _decimal(
-        await session.scalar(
-            select(organizations.c.overtime_multiplier)
-            .where(organizations.c.id == actor.organization_id)
-            .limit(1)
+    overtime_multiplier = (
+        _decimal(
+            await session.scalar(
+                select(organizations.c.overtime_multiplier).where(organizations.c.id == actor.organization_id).limit(1)
+            )
         )
-    ) or OVERTIME_MULTIPLIER
+        or OVERTIME_MULTIPLIER
+    )
     now = datetime.now(UTC)
     for component in resolved:
         values = {
@@ -1832,9 +1837,7 @@ async def create_booking(payload: BookingCreateRequest, actor: CurrentActor, ses
         .returning(bookings)
     )
     row = created.one()
-    commercial_preview = await _sync_booking_commercial_components(
-        session, actor, booking=row, payload=values
-    )
+    commercial_preview = await _sync_booking_commercial_components(session, actor, booking=row, payload=values)
     if values.status == "confirmed" and not values.is_option:
         await _audit_booking_charge_snapshot(session, actor, booking=row, components=commercial_preview)
     await _resequence_active_options(session, actor, values)

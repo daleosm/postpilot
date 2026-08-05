@@ -1863,9 +1863,9 @@ def test_booking_client_attendee_is_added_to_the_episode_team(production_lab: Pr
             "episode_id": episode_id,
             "guest_person_id": production_lab.data.client_person_id,
             "starts_at": "2035-05-03T10:00:00Z",
-                "ends_at": "2035-05-03T11:00:00Z",
-                "booking_type": "client_review",
-                "commercial_treatment": "dry_hire",
+            "ends_at": "2035-05-03T11:00:00Z",
+            "booking_type": "client_review",
+            "commercial_treatment": "dry_hire",
         },
     )
 
@@ -1912,12 +1912,12 @@ def test_member_without_production_capability_cannot_create_or_preview_bookings(
         )
     )
     payload = {
-            "title": "Viewer booking attempt",
-            "episode_id": episode_id,
-            "room_id": production_lab.data.room_id,
+        "title": "Viewer booking attempt",
+        "episode_id": episode_id,
+        "room_id": production_lab.data.room_id,
         "starts_at": "2035-05-02T10:00:00Z",
-            "ends_at": "2035-05-02T11:00:00Z",
-            "commercial_treatment": "dry_hire",
+        "ends_at": "2035-05-02T11:00:00Z",
+        "commercial_treatment": "dry_hire",
     }
 
     assert production_lab.client.post("/v1/bookings", json=payload).status_code == 403
@@ -1954,9 +1954,9 @@ def test_client_can_see_only_their_own_shared_review_booking(production_lab: Pro
             "episode_id": episode_id,
             "guest_person_id": production_lab.data.client_person_id,
             "starts_at": "2035-05-04T10:00:00Z",
-                "ends_at": "2035-05-04T11:00:00Z",
-                "booking_type": "client_review",
-                "commercial_treatment": "dry_hire",
+            "ends_at": "2035-05-04T11:00:00Z",
+            "booking_type": "client_review",
+            "commercial_treatment": "dry_hire",
         },
     )
     internal = production_lab.client.post(

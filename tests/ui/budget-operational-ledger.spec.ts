@@ -39,22 +39,24 @@ test.describe("Episode estimate to actual UI", () => {
     await page.goto(`/budget?network=Slate%2B&show=Crossing%20Point&episode=${TEST_EPISODE_ID}`);
     await page.getByRole("button", { name: "Build estimate" }).click();
     const builder = page.getByRole("heading", { name: "Build estimate" }).locator("xpath=ancestor::section[1]");
-    const fields = builder.getByRole("combobox");
-    await fields.nth(2).selectOption({ label: "Edit bay" });
+    // The builder now has separate item-type and resource controls. Select a
+    // seeded master-card service rather than relying on a retired combined
+    // "Edit bay" option label.
+    await builder.getByLabel("Estimate service").selectOption({ index: 1 });
     const previewResponse = page.waitForResponse((response) => response.url().includes("/v1/budget/estimate-preview") && response.request().method() === "POST");
     await builder.getByRole("button", { name: "Resolve rate", exact: true }).click();
-    await expect((await previewResponse).json()).resolves.toMatchObject({ category: "Edit suite", rate_source: "master_rate_card" });
+    const preview = await (await previewResponse).json() as { category: string; unit: string; estimate: number; rate_source: string };
+    expect(preview).toMatchObject({ category: expect.any(String), rate_source: "master_rate_card" });
     await expect(builder.getByText("Master Rate Card", { exact: true })).toBeVisible();
 
     const saveResponse = page.waitForResponse((response) => response.url().endsWith("/v1/budget/lines") && response.request().method() === "POST");
     await builder.getByRole("button", { name: "Save estimate" }).click();
 
-    const preview = await (await previewResponse).json() as { estimate: number };
     await expect((await saveResponse).json()).resolves.toMatchObject({
       episode_id: TEST_EPISODE_ID,
-      category: "Edit suite",
+      category: preview.category,
       planned_quantity: 1,
-      planned_unit: "hour",
+      planned_unit: preview.unit,
       rate_source: "master_rate_card",
       estimated_amount: preview.estimate,
     });

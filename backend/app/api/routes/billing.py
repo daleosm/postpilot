@@ -132,7 +132,8 @@ def _component_line_amounts(component: object) -> tuple[Decimal, Decimal]:
 
 
 def _component_invoice_item_values(
-    *, organization_id: str,
+    *,
+    organization_id: str,
     invoice_id: str,
     component: object,
     episode: object,
@@ -945,9 +946,7 @@ async def set_booking_component_invoice_selection(
         session,
         actor,
         action=(
-            "booking_component.invoice_included"
-            if payload.include_in_invoice
-            else "booking_component.invoice_excluded"
+            "booking_component.invoice_included" if payload.include_in_invoice else "booking_component.invoice_excluded"
         ),
         entity_type="booking_charge_component",
         entity_id=component_id,
@@ -1082,7 +1081,10 @@ async def create_billable_from_work_order(
     if work_order.booking_id:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This work order is billed from its linked booking components; do not post a second work-order billable.",
+            detail=(
+                "This work order is billed from its linked booking components; "
+                "do not post a second work-order billable."
+            ),
         )
     if work_order.status != "complete" or not work_order.approved_at:
         raise HTTPException(
@@ -1552,11 +1554,7 @@ async def issue_client_invoice(
             detail="The selected booking components did not produce billable invoice lines.",
         )
     created_items = (
-        await session.execute(
-            insert(client_invoice_items)
-            .values(invoice_item_values)
-            .returning(client_invoice_items)
-        )
+        await session.execute(insert(client_invoice_items).values(invoice_item_values).returning(client_invoice_items))
     ).all()
     overrun_reasons = {item.client_purchase_order_id: item.reason.strip() for item in payload.client_po_overruns}
     client_po_events: list[tuple[str, str, bool]] = []
@@ -2084,9 +2082,7 @@ async def exportable_invoice(invoice_id: str, actor: CurrentActor, session: DbSe
                 ),
                 "saved_rate": monetary(decimal_amount(item.saved_rate)) if item.saved_rate is not None else None,
                 "overtime_multiplier": (
-                    monetary(decimal_amount(item.overtime_multiplier))
-                    if item.overtime_multiplier is not None
-                    else None
+                    monetary(decimal_amount(item.overtime_multiplier)) if item.overtime_multiplier is not None else None
                 ),
                 "source_booking_id": str(item.source_booking_id) if item.source_booking_id else None,
                 "source_work_order_id": str(item.source_work_order_id) if item.source_work_order_id else None,
