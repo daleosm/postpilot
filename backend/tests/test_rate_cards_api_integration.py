@@ -107,6 +107,40 @@ def _effective(
     return response.json()["effective_rate"]
 
 
+@pytest.mark.parametrize("unit", ["hour", "half_day", "day", "week", "fixed", "unit"])
+def test_supported_billing_units_resolve_from_master_rate_cards(
+    production_lab: ProductionApiLab,
+    unit: str,
+) -> None:
+    production_lab.sign_in_as_manager()
+    episode_id = _episode_id(production_lab)
+    category = f"Python {unit} service {uuid4().hex[:8]}"
+    service_rate_id = _service(
+        production_lab,
+        name=category,
+        category=category,
+        unit=unit,
+        rate=100,
+    )
+    _override(production_lab, scope="master", service_rate_id=service_rate_id, rate=125)
+
+    effective = _effective(production_lab, episode_id, category=category, unit=unit)
+
+    assert effective["rate"] == 125
+    assert effective["source"] == "master_rate_card"
+
+
+def test_effective_rate_rejects_an_unknown_billing_unit(production_lab: ProductionApiLab) -> None:
+    production_lab.sign_in_as_manager()
+    response = production_lab.client.get(
+        "/v1/rate-cards/effective",
+        params={"episode_id": _episode_id(production_lab), "category": "Colourist", "unit": "month"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Choose a supported billing unit."
+
+
 def test_rate_cards_resolve_episode_show_network_client_and_master_in_order(
     production_lab: ProductionApiLab,
 ) -> None:
@@ -204,11 +238,11 @@ def test_rate_card_service_catalogue_fallback_updates_and_override_removal(
     }
 
 
-def test_service_catalogue_accepts_hourly_rates_and_rejects_new_daily_rates(
+def test_service_catalogue_accepts_hourly_and_daily_rates(
     production_lab: ProductionApiLab,
 ) -> None:
     production_lab.sign_in_as_manager()
-    rejected = production_lab.client.post(
+    daily = production_lab.client.post(
         "/v1/rate-cards/services",
         json={
             "name": "Legacy daily colour suite",
@@ -227,7 +261,8 @@ def test_service_catalogue_accepts_hourly_rates_and_rejects_new_daily_rates(
         },
     )
 
-    assert rejected.status_code == 422
+    assert daily.status_code == 201, daily.text
+    assert daily.json()["unit"] == "day"
     assert created.status_code == 201, created.text
     assert created.json()["unit"] == "hour"
 
@@ -488,6 +523,74 @@ def test_master_room_rates_are_selected_from_the_tenant_room_register(
         "currency": "GBP",
     }
     assert all(room["id"] != production_lab.data.foreign_room_id for room in register.json()["rooms"])
+
+
+def test_network_and_show_room_cards_show_inherited_prices_and_save_narrow_overrides(
+    production_lab: ProductionApiLab,
+) -> None:
+    """Rooms are visible on every commercial scope, not only the master card."""
+    production_lab.sign_in_as_manager()
+    room_payload = {
+        "target_type": "room",
+        "room_id": production_lab.data.room_id,
+        "category": "Python finishing suite",
+        "unit": "hour",
+        "internal_cost_rate": 120,
+    }
+    master = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={"scope": "master", "rate": 245, **room_payload},
+    )
+    assert master.status_code == 201, master.text
+
+    network = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={"scope": "network", "network": "Python Network", "rate": 275, **room_payload},
+    )
+    assert network.status_code == 201, network.text
+    network_register = production_lab.client.get(
+        "/v1/rate-cards/room-rates",
+        params={"scope": "network", "network": "Python Network"},
+    )
+    assert network_register.status_code == 200, network_register.text
+    network_room = next(room for room in network_register.json()["rooms"] if room["id"] == production_lab.data.room_id)
+    assert network_room["own_rate"] == {
+        "id": network_room["own_rate"]["id"],
+        "category": "Python finishing suite",
+        "unit": "hour",
+        "rate": 275,
+        "internal_cost_rate": 120,
+        "currency": "GBP",
+        "source_scope": "network",
+    }
+    assert network_room["inherited_rate"]["rate"] == 245
+    assert network_room["inherited_rate"]["source_scope"] == "master"
+
+    show_register = production_lab.client.get(
+        "/v1/rate-cards/room-rates",
+        params={"scope": "show", "show_id": production_lab.data.show_id},
+    )
+    assert show_register.status_code == 200, show_register.text
+    show_room = next(room for room in show_register.json()["rooms"] if room["id"] == production_lab.data.room_id)
+    assert show_room["own_rate"] is None
+    assert show_room["inherited_rate"]["rate"] == 275
+    assert show_room["inherited_rate"]["source_scope"] == "network"
+
+    show = production_lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={"scope": "show", "show_id": production_lab.data.show_id, "rate": 295, **room_payload},
+    )
+    assert show.status_code == 201, show.text
+    updated_show_register = production_lab.client.get(
+        "/v1/rate-cards/room-rates",
+        params={"scope": "show", "show_id": production_lab.data.show_id},
+    )
+    updated_show_room = next(
+        room for room in updated_show_register.json()["rooms"] if room["id"] == production_lab.data.room_id
+    )
+    assert updated_show_room["own_rate"]["rate"] == 295
+    assert updated_show_room["inherited_rate"]["rate"] == 275
+    assert all(room["id"] != production_lab.data.foreign_room_id for room in updated_show_register.json()["rooms"])
 
 
 def test_artist_role_rate_applies_automatically_until_a_named_artist_override(

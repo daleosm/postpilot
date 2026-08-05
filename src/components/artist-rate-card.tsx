@@ -7,6 +7,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { postpilotUiFetch } from "@/lib/postpilot-api-client";
 
+const billingUnits = [
+  ["hour", "Hour"],
+  ["half_day", "Half-day"],
+  ["day", "Day"],
+  ["week", "Week"],
+  ["fixed", "Fixed fee"],
+  ["unit", "Unit"],
+  ["episode", "Per episode"],
+] as const;
+
 type Scope =
   | { type: "master" }
   | { type: "network"; network: string }
@@ -42,6 +52,10 @@ function money(value: string | number | null, currency: string) {
   } catch {
     return `${currency} ${Number(value).toFixed(2)}`;
   }
+}
+
+function billingUnitLabel(unit: string) {
+  return billingUnits.find(([value]) => value === unit)?.[1] ?? titleCase(unit);
 }
 
 /** Explicit named-artist prices override the selected person's role rate. */
@@ -113,7 +127,7 @@ function ArtistRateRow({ rate, scope, onChanged }: { rate: ArtistRate; scope: Sc
   return <div className="flex flex-col justify-between gap-3 px-5 py-4 sm:flex-row sm:items-center">
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-2"><UserRound size={14} className="text-[#668273]" /><p className="truncate text-sm font-semibold text-[#404844]">{rate.person.name}</p></div>
-      <p className="mt-1.5 text-xs text-[#7d837f]">{titleCase(rate.person.role)} · {rate.unit === "fixed" ? "Fixed service" : `per ${rate.unit}`}</p>
+      <p className="mt-1.5 text-xs text-[#7d837f]">{titleCase(rate.person.role)} · {rate.unit === "fixed" ? "Fixed fee" : `per ${billingUnitLabel(rate.unit)}`}</p>
     </div>
     <div className="flex flex-wrap items-center gap-2 sm:justify-end">
       <div className="mr-1 text-right text-xs"><p className="font-semibold text-[#3d4642]">{money(rate.clientRate, rate.currency)}</p><p className="mt-0.5 text-[#858a87]">Internal {money(rate.internalCostRate, rate.currency)}</p></div>
@@ -186,7 +200,7 @@ function ArtistRateDialog({ scope, initialRate, existingPeople, onClose, onSaved
         <label className="block text-xs font-medium text-[#535b57]">Artist<div className="relative mt-1.5"><Search size={14} className="absolute left-3 top-3 text-[#8b918d]" /><input value={search} disabled={editing} onChange={(event) => { setSearch(event.target.value); setSelected(null); }} placeholder="Search people by name or role" className="h-10 w-full rounded-md border border-[#dedfda] bg-white py-2 pl-9 pr-3 text-sm disabled:bg-[#f3f3ef]" /></div></label>
         {!editing && search.trim().length >= 2 && <div className="max-h-40 overflow-y-auto rounded-md border border-[#dedfda] bg-white">{visibleMatches.map((person) => <button key={person.id} type="button" onClick={() => { setSelected(person); setSearch(person.name); setMatches([]); }} className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-xs hover:bg-[#f3f6f3]"><span className="font-medium text-[#47514c]">{person.name}</span><span className="shrink-0 text-[#858d88]">{titleCase(person.role)}</span></button>)}{!visibleMatches.length && <p className="px-3 py-2.5 text-xs text-[#858d88]">No eligible people found.</p>}</div>}
         {selected && <div className="rounded-md border border-[#dce7df] bg-[#f2f8f3] px-3 py-2 text-xs text-[#486454]"><b>{selected.name}</b><span className="ml-2 text-[#718078]">{titleCase(selected.role)}</span></div>}
-        <div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-medium text-[#535b57]">Billing unit<select value={unit} onChange={(event) => setUnit(event.target.value)} className="mt-1.5 h-10 w-full rounded-md border border-[#dedfda] bg-white px-2 text-sm"><option value="hour">Hour</option><option value="episode">Episode</option><option value="fixed">Fixed service</option></select></label><label className="text-xs font-medium text-[#535b57]">Client rate<input value={clientRate} onChange={(event) => setClientRate(event.target.value)} type="number" min="0.01" step="0.01" className="mt-1.5 h-10 w-full rounded-md border border-[#dedfda] bg-white px-3 text-sm" /></label></div>
+        <div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-medium text-[#535b57]">Billing unit<select value={unit} onChange={(event) => setUnit(event.target.value)} className="mt-1.5 h-10 w-full rounded-md border border-[#dedfda] bg-white px-2 text-sm">{billingUnits.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-xs font-medium text-[#535b57]">Client rate<input value={clientRate} onChange={(event) => setClientRate(event.target.value)} type="number" min="0.01" step="0.01" className="mt-1.5 h-10 w-full rounded-md border border-[#dedfda] bg-white px-3 text-sm" /></label></div>
         <label className="block text-xs font-medium text-[#535b57]">Internal cost rate <span className="font-normal text-[#858a87]">(optional)</span><input value={internalCostRate} onChange={(event) => setInternalCostRate(event.target.value)} type="number" min="0" step="0.01" className="mt-1.5 h-10 w-full rounded-md border border-[#dedfda] bg-white px-3 text-sm" /></label>
         {error && <p role="alert" className="text-xs text-[#a35e41]">{error}</p>}
       </div>

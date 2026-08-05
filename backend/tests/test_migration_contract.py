@@ -120,3 +120,23 @@ def test_budget_metadata_backfill_preserves_existing_amounts_as_transparent_lega
         "recalculates monetary values nor upgrades legacy estimates",
     ):
         assert phrase in migration
+
+
+def test_historic_commercial_treatments_are_flagged_without_repricing_or_rewriting_invoices() -> None:
+    migration = (ROOT / "backend/alembic/versions/20260805_34_flag_historic_commercial_treatments.py").read_text()
+
+    for phrase in (
+        "commercial_review_required",
+        "Historic booking has no confirmed commercial treatment snapshot.",
+        "Historic work order has no confirmed commercial treatment snapshot.",
+        "commercial_treatment_snapshot_at IS NULL",
+        "never consults current rate cards or resource records",
+        "Existing rate snapshots, actual time and invoices remain untouched.",
+    ):
+        assert phrase in migration
+
+
+def test_historic_work_order_review_flag_defaults_to_not_required() -> None:
+    migration = (ROOT / "backend/alembic/versions/20260805_35_work_order_commercial_review_default.py").read_text()
+
+    assert 'op.alter_column("post_work_orders", "commercial_review_required", server_default=sa.false())' in migration

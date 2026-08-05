@@ -67,10 +67,13 @@ def _create_linked_booking(lab: ProductionApiLab) -> tuple[str, str]:
         INSERT INTO post_work_orders (
           id, organization_id, episode_id, booking_id, work_type, kind, title,
           assignee_person_id, priority, is_blocking, status, billing_scope,
-          billing_status, currency
+          billing_status, currency, allow_overtime_billing, planned_duration_quantity,
+          planned_duration_unit, standard_day_hours_snapshot, overtime_multiplier,
+          overtime_hourly_base_rate
         ) VALUES (
           $1, $2, $3, $4, 'internal', 'work_order', 'Editorial title adjustment',
-          $5, 'normal', false, 'in_progress', 'included', 'not_billable', 'GBP'
+          $5, 'normal', false, 'in_progress', 'billable_change', 'draft', 'GBP', true,
+          1, 'hour', 10, 1.5, 100
         )
         """,
         work_order_id,
@@ -202,7 +205,8 @@ def test_assigned_artist_confirms_linked_booking_actuals_with_saved_room_and_per
     components = {item["component_type"]: item for item in body["cost"]["components"]}
     assert components["room"] == {
         "id": components["room"]["id"],
-        "component_type": "room",
+            "component_type": "room",
+            "category": "Edit suite",
         "resource": "Python Edit Bay",
         "resource_id": production_lab.data.room_id,
         "unit": "hour",
@@ -216,6 +220,8 @@ def test_assigned_artist_confirms_linked_booking_actuals_with_saved_room_and_per
         "overtime_multiplier": 1.5,
         "actual_client_charge": 375.0,
         "actual_internal_cost": 375.0,
+        "billing_treatment": "billable",
+        "tax_treatment": "standard",
     }
     assert components["person"]["internal_cost_rate"] == 50.0
     assert components["person"]["actual_internal_cost"] == 187.5
@@ -414,7 +420,9 @@ def test_booking_actuals_enforce_owner_tenant_and_input_boundaries(production_la
     assert client_submission.status_code == 403
 
 
-def test_confirmed_time_uses_the_booking_budget_item_saved_rate_snapshot(production_lab: ProductionApiLab) -> None:
+def test_confirmed_time_allocates_each_saved_booking_component_to_the_selected_budget_item(
+    production_lab: ProductionApiLab,
+) -> None:
     booking_id, budget_line_id = _create_budgeted_booking(production_lab)
     resources = production_lab.client.get("/v1/bookings/resources")
     assert resources.status_code == 200, resources.text
@@ -435,7 +443,12 @@ def test_confirmed_time_uses_the_booking_budget_item_saved_rate_snapshot(product
     assert submitted.json()["actual_internal_cost"] >= 0
     allocation = production_lab.fetchrow(
         """
-        SELECT budget_line_id::text, source_type, amount::text, currency
+        SELECT
+          min(budget_line_id::text) AS budget_line_id,
+          min(source_type) AS source_type,
+          count(*)::int AS component_count,
+          sum(amount)::text AS amount,
+          min(currency) AS currency
         FROM budget_actual_allocations
         WHERE organization_id = $1 AND booking_id = $2
         """,
@@ -445,15 +458,16 @@ def test_confirmed_time_uses_the_booking_budget_item_saved_rate_snapshot(product
     assert allocation is not None
     assert dict(allocation) == {
         "budget_line_id": budget_line_id,
-        "source_type": "booking",
-        "amount": "350.00",
+        "source_type": "booking_component",
+        "component_count": 2,
+        "amount": "750.00",
         "currency": "GBP",
     }
     budget_actual = production_lab.fetchval(
         "SELECT actual_amount::text FROM budget_lines WHERE id = $1",
         budget_line_id,
     )
-    assert budget_actual == "350.00"
+    assert budget_actual == "750.00"
     listed = production_lab.client.get("/v1/bookings")
     row = next(item for item in listed.json()["bookings"] if item["id"] == booking_id)
     assert row["budget_line_id"] == budget_line_id
@@ -484,17 +498,113 @@ def test_actual_time_without_a_budget_item_is_visible_as_unallocated(production_
     listed = production_lab.client.get("/v1/bookings")
     row = next(item for item in listed.json()["bookings"] if item["id"] == booking_id)
     assert row["actual_budget_status"] == "unallocated"
+    production_lab.sign_out()
+    production_lab.sign_in_as_manager()
+    episode_id = _episode_id(production_lab)
+    ledger = production_lab.client.get(f"/v1/budget/episodes/{episode_id}/operational-ledger")
+    assert ledger.status_code == 200, ledger.text
+    unallocated = ledger.json()["ledger"]["unallocated_actuals"]
+    assert {item["component_type"] for item in unallocated} == {"room", "person"}
+    assert {item["resource_name"] for item in unallocated} == {"Python Edit Bay", "Python Production Viewer"}
+
+
+def test_exact_room_estimate_is_matched_automatically_without_selecting_a_budget_item(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    episode_id = _episode_id(production_lab)
+    service_id = str(uuid4())
+    production_lab.execute(
+        """
+        INSERT INTO service_rates (id, organization_id, name, category, unit, rate, currency, is_active)
+        VALUES ($1, $2, 'Auto-matched edit suite', 'Edit suite', 'hour', 100, 'GBP', true)
+        """,
+        service_id,
+        production_lab.data.organization_id,
+    )
+    estimate = production_lab.client.post(
+        "/v1/budget/lines",
+        json={
+            "episode_id": episode_id,
+            "category": "Edit suite",
+            "planned_quantity": 3,
+            "planned_unit": "hour",
+            "rate_resource_type": "room",
+            "rate_resource_id": production_lab.data.room_id,
+            "manual_rate_override": "100.00",
+            "manual_override_reason": "Approved room estimate pending a client-specific rate card.",
+        },
+    )
+    assert estimate.status_code == 201, estimate.text
+    booking = production_lab.client.post(
+        "/v1/bookings",
+        json={
+            "title": "Automatically matched room actual",
+            "episode_id": episode_id,
+            "room_id": production_lab.data.room_id,
+            "starts_at": "2035-09-25T09:00:00Z",
+            "ends_at": "2035-09-25T12:00:00Z",
+            "booking_type": "edit",
+            "commercial_treatment": "dry_hire",
+            "status": "confirmed",
+        },
+    )
+    assert booking.status_code == 201, booking.text
+    submitted = production_lab.client.post(
+        f"/v1/bookings/{booking.json()['id']}/time-submissions",
+        json={
+            "actual_starts_at": "2035-09-25T09:00:00Z",
+            "actual_ends_at": "2035-09-25T12:00:00Z",
+            "overtime_minutes": 0,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    budget_actual = submitted.json()["budget_actual"]
+    assert budget_actual["status"] == "allocated"
+    assert budget_actual["unallocated_components"] == []
+    assert budget_actual["allocated_components"] == [
+        {
+            "component_id": budget_actual["allocated_components"][0]["component_id"],
+            "resource": "Python Edit Bay",
+            "component_type": "room",
+            "budget_line_id": estimate.json()["id"],
+            "budget_item_label": "Edit suite",
+            "amount": 300.0,
+            "currency": "GBP",
+        }
+    ]
+    saved = production_lab.fetchrow(
+        """
+        SELECT source_type, amount::text, budget_line_id::text
+        FROM budget_actual_allocations
+        WHERE organization_id = $1 AND booking_id = $2
+        """,
+        production_lab.data.organization_id,
+        booking.json()["id"],
+    )
+    assert saved and dict(saved) == {
+        "source_type": "booking_component",
+        "amount": "300.00",
+        "budget_line_id": estimate.json()["id"],
+    }
 
 
 @pytest.mark.parametrize(
-    ("unit", "rate", "expected_base_quantity", "expected_overtime_quantity", "expected_amount"),
+    (
+        "unit",
+        "rate",
+        "expected_base_quantity",
+        "expected_overtime_quantity",
+        "expected_client_amount",
+        "expected_internal_amount",
+    ),
     [
-        ("hour", 100, 3.0, 0.5, 375.0),
-        ("half_day", 90, 0.67, 0.11, 75.0),
-        ("day", 180, 0.33, 0.06, 75.0),
-        ("week", 900, 0.07, 0.01, 75.0),
-        ("fixed", 250, 1.0, 0.0, 250.0),
-        ("unit", 250, 1.0, 0.0, 250.0),
+        ("hour", 100, 3.0, 0.5, 300.0, 375.0),
+        ("half_day", 90, 0.67, 0.11, 60.0, 75.0),
+        ("day", 180, 0.33, 0.06, 60.0, 75.0),
+        ("week", 900, 0.07, 0.01, 60.0, 75.0),
+        ("fixed", 250, 1.0, 0.0, 250.0, 250.0),
+        ("unit", 250, 1.0, 0.0, 250.0, 250.0),
     ],
 )
 def test_actual_time_applies_each_saved_billing_unit_and_overtime_rule(
@@ -503,9 +613,10 @@ def test_actual_time_applies_each_saved_billing_unit_and_overtime_rule(
     rate: int,
     expected_base_quantity: float,
     expected_overtime_quantity: float,
-    expected_amount: float,
+    expected_client_amount: float,
+    expected_internal_amount: float,
 ) -> None:
-    """Actuals honour the snapshot unit; fixed values do not gain OT charges."""
+    """Unapproved booking overtime remains an internal cost, not a client charge."""
     production_lab.sign_in_as_manager()
     booking_id = str(uuid4())
     person_id = _viewer_person_id(production_lab)
@@ -527,12 +638,12 @@ def test_actual_time_applies_each_saved_billing_unit_and_overtime_rule(
     production_lab.execute(
         """
         INSERT INTO booking_charge_components (
-          id, organization_id, booking_id, component_type, room_id, resource_name, category,
-          billing_unit, client_rate, internal_cost_rate, currency, rate_source, rate_card_scope,
-          is_negotiated_override, estimated_quantity, estimated_amount,
-          actual_overtime_quantity, overtime_multiplier
-        ) VALUES ($1, $2, $3, 'room', $4, 'Python Edit Bay', 'Edit suite',
-          $5, $6, $6, 'GBP', 'master_rate_card', 'master', false, 1, $6, 0, 1.5)
+              id, organization_id, booking_id, component_type, room_id, resource_name, category,
+              billing_unit, client_rate, internal_cost_rate, currency, rate_source, rate_card_scope,
+              is_negotiated_override, estimated_quantity, estimated_amount,
+              commercial_treatment, actual_overtime_quantity, overtime_multiplier
+            ) VALUES ($1, $2, $3, 'room', $4, 'Python Edit Bay', 'Edit suite',
+              $5, $6, $6, 'GBP', 'master_rate_card', 'master', false, 1, $6, 'wet_hire', 0, 1.5)
         """,
         str(uuid4()),
         production_lab.data.organization_id,
@@ -557,8 +668,8 @@ def test_actual_time_applies_each_saved_billing_unit_and_overtime_rule(
     component = submitted.json()["cost"]["components"][0]
     assert component["actual_quantity"] == expected_base_quantity
     assert component["overtime_quantity"] == expected_overtime_quantity
-    assert component["actual_client_charge"] == expected_amount
-    assert component["actual_internal_cost"] == expected_amount
+    assert component["actual_client_charge"] == expected_client_amount
+    assert component["actual_internal_cost"] == expected_internal_amount
 
 
 def test_booking_budget_item_rejects_foreign_and_wrong_episode_links(production_lab: ProductionApiLab) -> None:
@@ -582,6 +693,7 @@ def test_booking_budget_item_rejects_foreign_and_wrong_episode_links(production_
         json={
             "title": "Foreign budget item",
             "room_id": production_lab.data.room_id,
+            "person_id": production_lab.data.manager_person_id,
             "episode_id": episode_id,
             "budget_line_id": foreign_line_id,
             "starts_at": "2035-10-20T09:00:00Z",

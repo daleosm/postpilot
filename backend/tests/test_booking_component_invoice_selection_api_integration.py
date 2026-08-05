@@ -70,6 +70,25 @@ def test_booking_components_are_selected_individually_and_become_itemised_invoic
         },
     )
     assert booking.status_code == 201, booking.text
+    overtime_work_order = lab.client.post(
+        "/v1/work-orders",
+        json={
+            "episode_id": episode_id,
+            "title": "Client editorial review overtime approval",
+            "billing_scope": "billable_change",
+            "client_quote_amount": "100.00",
+            "planned_duration_quantity": "3.00",
+            "planned_duration_unit": "hour",
+            "allow_overtime_billing": True,
+        },
+    )
+    assert overtime_work_order.status_code == 201, overtime_work_order.text
+    lab.execute(
+        "UPDATE post_work_orders SET booking_id = $1 WHERE organization_id = $2 AND id = $3",
+        booking.json()["id"],
+        lab.data.organization_id,
+        overtime_work_order.json()["id"],
+    )
     actual = lab.client.post(
         f"/v1/bookings/{booking.json()['id']}/time-submissions",
         json={
@@ -224,3 +243,185 @@ def test_booking_components_are_selected_individually_and_become_itemised_invoic
     assert immutable_export.status_code == 200, immutable_export.text
     assert [item["amount"] for item in immutable_export.json()["items"]] == [300.0, 75.0]
     assert [item["saved_rate"] for item in immutable_export.json()["items"]] == [100.0, 100.0]
+
+
+def test_actual_correction_reconciles_selected_component_and_cancelled_booking_is_not_billable(
+    production_lab: ProductionApiLab,
+) -> None:
+    """Pre-issue corrections stay selectable; cancellation removes the source."""
+    lab = production_lab
+    lab.sign_in_as_manager()
+    episode_id = _episode_id(lab)
+    _ready_invoice_profile(lab, episode_id)
+    rate = lab.client.post(
+        "/v1/rate-cards/services",
+        json={"name": "Correction-safe edit suite", "category": "Edit suite", "unit": "hour", "rate": "100.00"},
+    )
+    assert rate.status_code == 201, rate.text
+    booking_payload = {
+        "title": "Correctable client review",
+        "episode_id": episode_id,
+        "room_id": lab.data.room_id,
+        "starts_at": "2035-12-12T09:00:00Z",
+        "ends_at": "2035-12-12T11:00:00Z",
+        "booking_type": "edit",
+        "status": "confirmed",
+        "commercial_treatment": "dry_hire",
+    }
+    booking = lab.client.post("/v1/bookings", json=booking_payload)
+    assert booking.status_code == 201, booking.text
+    booking_id = booking.json()["id"]
+    first_actual = lab.client.post(
+        f"/v1/bookings/{booking_id}/time-submissions",
+        json={"actual_starts_at": "2035-12-12T09:00:00Z", "actual_ends_at": "2035-12-12T11:00:00Z", "overtime_minutes": 0},
+    )
+    assert first_actual.status_code == 201, first_actual.text
+    component = lab.client.get(f"/v1/billing/episodes/{episode_id}/booking-components").json()["booking_components"][0]
+    assert component["actual_amount"] == 200.0
+    selected = lab.client.put(
+        f"/v1/billing/booking-components/{component['id']}/invoice-selection",
+        json={"include_in_invoice": True},
+    )
+    assert selected.status_code == 200, selected.text
+
+    corrected = lab.client.post(
+        f"/v1/bookings/{booking_id}/time-submissions",
+        json={
+            "actual_starts_at": "2035-12-12T09:00:00Z",
+            "actual_ends_at": "2035-12-12T12:30:00Z",
+            "overtime_minutes": 0,
+            "note": "Producer confirmed the extended client review.",
+        },
+    )
+    assert corrected.status_code == 201, corrected.text
+    corrected_component = lab.client.get(f"/v1/billing/episodes/{episode_id}/booking-components").json()[
+        "booking_components"
+    ][0]
+    assert corrected_component["selection_status"] == "included"
+    assert corrected_component["actual_amount"] == 350.0
+
+    cancelled = lab.client.patch(f"/v1/bookings/{booking_id}", json={**booking_payload, "status": "cancelled"})
+    assert cancelled.status_code == 200, cancelled.text
+    assert lab.client.get(f"/v1/billing/episodes/{episode_id}/booking-components").json()["booking_components"] == []
+    stale_selection = lab.client.put(
+        f"/v1/billing/booking-components/{component['id']}/invoice-selection",
+        json={"include_in_invoice": True},
+    )
+    assert stale_selection.status_code == 409
+
+
+def test_dry_hire_and_flat_fee_candidates_keep_their_commercial_shape_on_the_invoice(
+    production_lab: ProductionApiLab,
+) -> None:
+    """Invoice preparation never invents an artist line or splits a fixed fee."""
+    lab = production_lab
+    lab.sign_in_as_manager()
+    episode_id = _episode_id(lab)
+    _ready_invoice_profile(lab, episode_id)
+    rate = lab.client.post(
+        "/v1/rate-cards/services",
+        json={
+            "name": "Dry-hire edit suite",
+            "category": "Edit suite",
+            "unit": "hour",
+            "rate": "120.00",
+        },
+    )
+    assert rate.status_code == 201, rate.text
+    dry_hire = lab.client.post(
+        "/v1/bookings",
+        json={
+            "title": "Client dry-hire edit bay",
+            "episode_id": episode_id,
+            "room_id": lab.data.room_id,
+            "starts_at": "2035-12-11T09:00:00Z",
+            "ends_at": "2035-12-11T12:00:00Z",
+            "booking_type": "edit",
+            "status": "confirmed",
+            "commercial_treatment": "dry_hire",
+        },
+    )
+    assert dry_hire.status_code == 201, dry_hire.text
+    submitted = lab.client.post(
+        f"/v1/bookings/{dry_hire.json()['id']}/time-submissions",
+        json={
+            "actual_starts_at": "2035-12-11T09:00:00Z",
+            "actual_ends_at": "2035-12-11T12:00:00Z",
+            "overtime_minutes": 0,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    flat_fee = lab.client.post(
+        "/v1/bookings",
+        json={
+            "title": "Network finishing package",
+            "episode_id": episode_id,
+            "starts_at": "2035-12-12T09:00:00Z",
+            "ends_at": "2035-12-12T18:00:00Z",
+            "booking_type": "edit",
+            "status": "confirmed",
+            "commercial_treatment": "flat_project_fee",
+            "client_quote_amount": "2500.00",
+        },
+    )
+    assert flat_fee.status_code == 201, flat_fee.text
+    work_order = lab.client.post(
+        "/v1/work-orders",
+        json={
+            "episode_id": episode_id,
+            "title": "Finish network-approved package",
+            "billing_scope": "included",
+        },
+    )
+    assert work_order.status_code == 201, work_order.text
+    lab.execute(
+        "UPDATE post_work_orders SET booking_id = $1 WHERE organization_id = $2 AND id = $3",
+        flat_fee.json()["id"],
+        lab.data.organization_id,
+        work_order.json()["id"],
+    )
+
+    candidates = lab.client.get(f"/v1/billing/episodes/{episode_id}/booking-components")
+    assert candidates.status_code == 200, candidates.text
+    items = candidates.json()["booking_components"]
+    assert {item["component_type"] for item in items} == {"room", "fixed_fee"}
+    dry_candidate = next(item for item in items if item["component_type"] == "room")
+    flat_candidate = next(item for item in items if item["component_type"] == "fixed_fee")
+    assert dry_candidate["commercial_treatment"] == "dry_hire"
+    assert flat_candidate["commercial_treatment"] == "flat_project_fee"
+    assert dry_candidate["actual_quantity"] == 3.0
+    assert dry_candidate["actual_amount"] == 360.0
+    assert dry_candidate["work_order_id"] is None
+    assert flat_candidate["actual_quantity"] == 1.0
+    assert flat_candidate["unit"] == "fixed"
+    assert flat_candidate["actual_amount"] == 2500.0
+    assert flat_candidate["work_order_id"] == work_order.json()["id"]
+    assert flat_candidate["work_order_title"] == "Finish network-approved package"
+    for candidate in items:
+        selected = lab.client.put(
+            f"/v1/billing/booking-components/{candidate['id']}/invoice-selection",
+            json={"include_in_invoice": True},
+        )
+        assert selected.status_code == 200, selected.text
+
+    issued = lab.client.post("/v1/billing/invoices", json={"episode_id": episode_id})
+    assert issued.status_code == 201, issued.text
+    exported = lab.client.get(f"/v1/billing/invoices/{issued.json()['id']}/export")
+    assert exported.status_code == 200, exported.text
+    invoice_items = exported.json()["items"]
+    assert [item["resource"] for item in invoice_items] == [
+        {"type": "room", "name": "Python Edit Bay"},
+        {"type": "fixed_fee", "name": "Agreed project fee"},
+    ]
+    assert [(item["quantity"], item["unit_amount"], item["amount"]) for item in invoice_items] == [
+        (3.0, 120.0, 360.0),
+        (1.0, 2500.0, 2500.0),
+    ]
+    assert invoice_items[1]["description"] == "Network finishing package · Flat project fee"
+    assert invoice_items[1]["source_booking_id"] == flat_fee.json()["id"]
+    assert invoice_items[1]["source_work_order_id"] == work_order.json()["id"]
+    assert invoice_items[1]["source_work_order_reference"] == "Finish network-approved package"
+    assert "Work order: Finish network-approved package" in invoice_items[1]["reference"]
+
+    duplicate = lab.client.post("/v1/billing/invoices", json={"episode_id": episode_id})
+    assert duplicate.status_code == 409

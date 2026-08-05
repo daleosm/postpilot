@@ -27,6 +27,7 @@ async def record_budget_actual(
     amount: Decimal | int | str,
     currency: str,
     booking_id: str | None = None,
+    booking_charge_component_id: str | None = None,
     work_order_id: str | None = None,
     vendor_invoice_id: str | None = None,
     manual_adjustment_reason: str | None = None,
@@ -39,13 +40,22 @@ async def record_budget_actual(
     source id and can therefore be safely upserted. Manual adjustments are
     separate ledger entries and need an explanatory reason.
     """
-    valid_sources = {"booking", "time_submission", "work_order", "vendor_invoice", "manual_adjustment"}
+    valid_sources = {
+        "booking",
+        "time_submission",
+        "booking_component",
+        "work_order",
+        "vendor_invoice",
+        "manual_adjustment",
+    }
     if source_type not in valid_sources:
         raise ValueError("Unsupported budget actual source.")
     if decimal_amount(amount) < 0:
         raise ValueError("Budget actual allocations cannot be negative.")
     if source_type in {"booking", "time_submission"} and not booking_id:
         raise ValueError("A booking source requires a booking.")
+    if source_type == "booking_component" and (not booking_id or not booking_charge_component_id):
+        raise ValueError("A booking-component source requires its booking and commercial component.")
     if source_type == "work_order" and not work_order_id:
         raise ValueError("A work-order source requires a work order.")
     if source_type == "vendor_invoice" and not vendor_invoice_id:
@@ -66,13 +76,15 @@ async def record_budget_actual(
     source_column = (
         budget_actual_allocations.c.booking_id
         if source_type in {"booking", "time_submission"}
+        else budget_actual_allocations.c.booking_charge_component_id
+        if source_type == "booking_component"
         else budget_actual_allocations.c.work_order_id
         if source_type == "work_order"
         else budget_actual_allocations.c.vendor_invoice_id
         if source_type == "vendor_invoice"
         else None
     )
-    source_id = booking_id or work_order_id or vendor_invoice_id
+    source_id = booking_charge_component_id or booking_id or work_order_id or vendor_invoice_id
     now = datetime.now(UTC)
     values = {
         "source_type": source_type,
@@ -147,6 +159,7 @@ async def record_budget_actual(
             organization_id=organization_id,
             budget_line_id=budget_line_id,
             booking_id=booking_id,
+            booking_charge_component_id=booking_charge_component_id,
             work_order_id=work_order_id,
             vendor_invoice_id=vendor_invoice_id,
             created_by_user_id=actor_user_id,

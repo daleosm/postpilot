@@ -1834,13 +1834,16 @@ def test_booking_api_uses_buffer_aware_conflict_detection_and_pencil_holds(produ
 
 def test_booking_api_rejects_foreign_tenant_resources(production_lab: ProductionApiLab) -> None:
     production_lab.sign_in_as_manager()
+    episode_id = production_lab.client.get("/v1/episodes").json()["episodes"][0]["id"]
     response = production_lab.client.post(
         "/v1/bookings",
         json={
             "title": "Foreign room attempt",
+            "episode_id": episode_id,
             "room_id": production_lab.data.foreign_room_id,
             "starts_at": "2035-05-02T10:00:00Z",
             "ends_at": "2035-05-02T11:00:00Z",
+            "commercial_treatment": "dry_hire",
         },
     )
 
@@ -1860,8 +1863,9 @@ def test_booking_client_attendee_is_added_to_the_episode_team(production_lab: Pr
             "episode_id": episode_id,
             "guest_person_id": production_lab.data.client_person_id,
             "starts_at": "2035-05-03T10:00:00Z",
-            "ends_at": "2035-05-03T11:00:00Z",
-            "booking_type": "client_review",
+                "ends_at": "2035-05-03T11:00:00Z",
+                "booking_type": "client_review",
+                "commercial_treatment": "dry_hire",
         },
     )
 
@@ -1880,13 +1884,16 @@ def test_booking_client_attendee_is_added_to_the_episode_team(production_lab: Pr
 
 def test_booking_conflict_preview_does_not_reveal_foreign_room_data(production_lab: ProductionApiLab) -> None:
     production_lab.sign_in_as_manager()
+    episode_id = production_lab.client.get("/v1/episodes").json()["episodes"][0]["id"]
     response = production_lab.client.post(
         "/v1/bookings/conflicts",
         json={
             "title": "Foreign room preview",
+            "episode_id": episode_id,
             "room_id": production_lab.data.foreign_room_id,
             "starts_at": "2035-05-02T10:00:00Z",
             "ends_at": "2035-05-02T11:00:00Z",
+            "commercial_treatment": "dry_hire",
         },
     )
 
@@ -1898,11 +1905,19 @@ def test_member_without_production_capability_cannot_create_or_preview_bookings(
     production_lab: ProductionApiLab,
 ) -> None:
     production_lab.sign_in_as_viewer()
+    episode_id = str(
+        production_lab.fetchval(
+            "SELECT id::text FROM episodes WHERE organization_id = $1 ORDER BY number LIMIT 1",
+            production_lab.data.organization_id,
+        )
+    )
     payload = {
-        "title": "Viewer booking attempt",
-        "room_id": production_lab.data.room_id,
+            "title": "Viewer booking attempt",
+            "episode_id": episode_id,
+            "room_id": production_lab.data.room_id,
         "starts_at": "2035-05-02T10:00:00Z",
-        "ends_at": "2035-05-02T11:00:00Z",
+            "ends_at": "2035-05-02T11:00:00Z",
+            "commercial_treatment": "dry_hire",
     }
 
     assert production_lab.client.post("/v1/bookings", json=payload).status_code == 403
@@ -1939,8 +1954,9 @@ def test_client_can_see_only_their_own_shared_review_booking(production_lab: Pro
             "episode_id": episode_id,
             "guest_person_id": production_lab.data.client_person_id,
             "starts_at": "2035-05-04T10:00:00Z",
-            "ends_at": "2035-05-04T11:00:00Z",
-            "booking_type": "client_review",
+                "ends_at": "2035-05-04T11:00:00Z",
+                "booking_type": "client_review",
+                "commercial_treatment": "dry_hire",
         },
     )
     internal = production_lab.client.post(

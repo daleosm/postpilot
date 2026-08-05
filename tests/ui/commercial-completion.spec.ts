@@ -135,6 +135,60 @@ test.describe("Commercial completion journeys", () => {
     await expect.poll(body).toMatchObject({ scope: "network", network: expect.any(String), show_id: null, episode_id: null, rate: 712 });
   });
 
+  test("shows inherited rooms and saves a network room-price exception", async ({ page }) => {
+    await page.route("**/v1/rate-cards/overrides?*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ overrides: {}, inherited: {} }) });
+    });
+    await page.route("**/v1/rate-cards/room-rates?*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          rooms: [{
+            id: "room-rate-ui-001",
+            name: "North Bay Grade",
+            type: "Colour suite",
+            own_rate: null,
+            inherited_rate: {
+              id: "master-room-rate-ui-001",
+              category: "Colour suite",
+              unit: "hour",
+              rate: 240,
+              internal_cost_rate: 115,
+              currency: "GBP",
+              source_scope: "master",
+            },
+          }],
+        }),
+      });
+    });
+    await page.goto("/budget");
+    await Promise.all([
+      page.waitForURL(/network=/),
+      page.locator('a[href^="/budget?network="]').first().click(),
+    ]);
+    await page.getByRole("button", { name: "Manage rate card" }).click();
+    const rooms = page.getByRole("heading", { name: "Room prices" }).locator("xpath=ancestor::section[1]");
+    await expect(rooms.getByText("North Bay Grade", { exact: true })).toBeVisible();
+    await rooms.getByRole("button", { name: "Override" }).click();
+    const dialog = page.getByRole("dialog", { name: "Override room price" });
+    await dialog.getByLabel("Client rate").fill("275");
+    await dialog.getByLabel(/Internal cost rate/).fill("125");
+    const body = await captureJsonWrite(page, "**/v1/rate-cards/overrides");
+
+    await dialog.getByRole("button", { name: "Save room override" }).click();
+
+    await expect.poll(body).toMatchObject({
+      scope: "network",
+      target_type: "room",
+      room_id: "room-rate-ui-001",
+      category: "Colour suite",
+      unit: "hour",
+      rate: 275,
+      internal_cost_rate: 125,
+    });
+  });
+
   test("searches for and saves one explicit named artist rate", async ({ page }) => {
     await page.route("**/v1/rate-cards/artist-rates?*", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ artist_rates: [] }) });

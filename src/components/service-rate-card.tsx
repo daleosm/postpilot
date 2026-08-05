@@ -10,11 +10,25 @@ import { z } from "zod";
 
 import { postpilotUiFetch } from "@/lib/postpilot-api-client";
 
+const billingUnits = [
+  ["hour", "Hour"],
+  ["half_day", "Half-day"],
+  ["day", "Day"],
+  ["week", "Week"],
+  ["fixed", "Fixed fee"],
+  ["unit", "Unit"],
+  // Existing rate cards may still be priced per episode. Keep that saved
+  // commercial structure editable rather than invalidating historic cards.
+  ["episode", "Per episode"],
+] as const;
+
+type BillingUnit = (typeof billingUnits)[number][0];
+
 const schema = z.object({
   name: z.string().trim().min(1, "Service name is required.").max(120),
   category: z.string().trim().min(1, "Category is required.").max(120),
   artistRole: z.string(),
-  unit: z.enum(["hour", "episode", "fixed"]),
+  unit: z.enum(["hour", "half_day", "day", "week", "fixed", "unit", "episode"]),
   rate: z.coerce.number().positive("Rate must be greater than zero."),
   notes: z.string().trim().max(2000).optional(),
   isActive: z.boolean(),
@@ -30,7 +44,7 @@ type MasterRoom = {
   rate: {
     id: string;
     category: string;
-    unit: "hour" | "episode" | "fixed";
+    unit: BillingUnit;
     rate: string | number;
     internal_cost_rate: string | number | null;
     currency: string;
@@ -88,7 +102,7 @@ export function ServiceRateCard({ rates, embedded = false }: { rates: ServiceRat
         <h2 className="text-sm font-semibold text-[#343b38]">Master rate card</h2>
         <p className="mt-1 text-xs text-[#858a87]">Your post house’s standard room, artist, and service rates. Network, show, and episode cards inherit these prices until overridden.</p>
       </div>
-      <div className="flex flex-wrap gap-2"><RoomRateDialog rooms={rooms} /><RateDialog /></div>
+      <div className="flex flex-wrap gap-2"><RoomRateDialog rooms={rooms} /><MasterServiceRateDialog /></div>
     </div>
     <div className="divide-y divide-[#efeeea]">
       {masterRates.map((rate) => <RateRow key={rate.id} rate={rate} />)}
@@ -113,9 +127,9 @@ function RateRow({ rate }: { rate: MasterServiceRate }) {
       <p className="mt-1.5 text-xs text-[#7d837f]">{rate.artistRole ? `Artist role · ${titleCase(rate.artistRole)}` : rate.category}{rate.notes ? " · " + rate.notes : ""}</p>
     </div>
     <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-      <p className="mr-1 text-sm font-semibold text-[#3d4642]">{formatMoney(displayedRate, rate.currency)} <span className="text-xs font-normal text-[#7d837f]">/ {rate.unit}</span></p>
-      <RateDialog rate={rate} />
-      <RemoveRateButton rate={rate} />
+      <p className="mr-1 text-sm font-semibold text-[#3d4642]">{formatMoney(displayedRate, rate.currency)} <span className="text-xs font-normal text-[#7d837f]">/ {formatBillingUnit(rate.unit)}</span></p>
+      <MasterServiceRateDialog rate={rate} />
+      <RemoveMasterServiceRateButton rate={rate} />
     </div>
   </div>;
 }
@@ -128,7 +142,7 @@ function RoomRateRow({ room, rooms }: { room: MasterRoom; rooms: MasterRoom[] })
       <p className="mt-1.5 text-xs text-[#7d837f]">{room.type} · selected from Settings → Rooms</p>
     </div>
     <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-      <p className="mr-1 text-sm font-semibold text-[#3d4642]">{formatMoney(room.rate.rate, room.rate.currency)} <span className="text-xs font-normal text-[#7d837f]">/ {room.rate.unit}</span></p>
+      <p className="mr-1 text-sm font-semibold text-[#3d4642]">{formatMoney(room.rate.rate, room.rate.currency)} <span className="text-xs font-normal text-[#7d837f]">/ {formatBillingUnit(room.rate.unit)}</span></p>
       <RoomRateDialog room={room} rooms={rooms} />
       <RemoveRoomRateButton room={room} />
     </div>
@@ -139,7 +153,7 @@ function RoomRateDialog({ room, rooms }: { room?: MasterRoom; rooms: MasterRoom[
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [roomId, setRoomId] = useState(room?.id ?? "");
-  const [unit, setUnit] = useState<"hour" | "episode" | "fixed">(room?.rate?.unit ?? "hour");
+  const [unit, setUnit] = useState<BillingUnit>(room?.rate?.unit ?? "hour");
   const [rate, setRate] = useState(room?.rate ? String(room.rate.rate) : "");
   const [internalCostRate, setInternalCostRate] = useState(room?.rate?.internal_cost_rate == null ? "" : String(room.rate.internal_cost_rate));
   const [error, setError] = useState("");
@@ -191,7 +205,7 @@ function RoomRateDialog({ room, rooms }: { room?: MasterRoom; rooms: MasterRoom[
         <div className="mt-5 space-y-4">
           <Field label="Room"><select value={roomId} disabled={Boolean(room)} onChange={(event) => setRoomId(event.target.value)}><option value="">Choose a configured room</option>{rooms.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.type}</option>)}</select></Field>
           {selectedRoom && <p className="rounded-md border border-[#dce7df] bg-[#f2f8f3] px-3 py-2 text-xs text-[#486454]">{selectedRoom.name} is managed in Settings → Rooms.</p>}
-          <div className="grid gap-3 sm:grid-cols-2"><Field label="Client rate"><input value={rate} onChange={(event) => setRate(event.target.value)} type="number" min="0.01" step="0.01" /></Field><Field label="Per"><select value={unit} onChange={(event) => setUnit(event.target.value as "hour" | "episode" | "fixed")}><option value="hour">Hour</option><option value="episode">Episode</option><option value="fixed">Fixed service</option></select></Field></div>
+          <div className="grid gap-3 sm:grid-cols-2"><Field label="Client rate"><input value={rate} onChange={(event) => setRate(event.target.value)} type="number" min="0.01" step="0.01" /></Field><Field label="Billing unit"><select value={unit} onChange={(event) => setUnit(event.target.value as BillingUnit)}>{billingUnits.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field></div>
           <Field label="Internal cost rate (optional)"><input value={internalCostRate} onChange={(event) => setInternalCostRate(event.target.value)} type="number" min="0" step="0.01" /></Field>
           {error && <p role="alert" className="text-xs text-[#a35e41]">{error}</p>}
         </div>
@@ -222,7 +236,7 @@ function RemoveRoomRateButton({ room }: { room: MasterRoom }) {
   return <div className="relative"><Button variant="tertiary" onPress={remove} isDisabled={removing} className="min-w-0 border border-[#eeded8] bg-[#fffdfb] text-[#a35e41]"><Trash2 size={14} /> {removing ? "Removing…" : "Remove"}</Button>{error && <p role="alert" className="absolute right-0 top-full z-10 mt-1 w-48 text-right text-[11px] text-[#a35e41]">{error}</p>}</div>;
 }
 
-function RateDialog({ rate }: { rate?: MasterServiceRate }) {
+export function MasterServiceRateDialog({ rate }: { rate?: MasterServiceRate }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
@@ -292,7 +306,7 @@ function RateDialog({ rate }: { rate?: MasterServiceRate }) {
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Master rate" error={form.formState.errors.rate?.message}><input type="number" min="0" step="0.01" {...form.register("rate")} /></Field>
             <Field label="Per" error={form.formState.errors.unit?.message}>
-              <select {...form.register("unit")}><option value="hour">Hour</option><option value="episode">Episode</option><option value="fixed">Fixed service</option></select>
+              <select {...form.register("unit")}>{billingUnits.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
             </Field>
           </div>
           <Field label="Notes" error={form.formState.errors.notes?.message}><textarea rows={2} {...form.register("notes")} placeholder="Overtime, equipment, or terms…" /></Field>
@@ -308,7 +322,7 @@ function RateDialog({ rate }: { rate?: MasterServiceRate }) {
   </>;
 }
 
-function RemoveRateButton({ rate }: { rate: ServiceRate }) {
+export function RemoveMasterServiceRateButton({ rate }: { rate: ServiceRate }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
@@ -372,6 +386,10 @@ function defaults(rate?: MasterServiceRate): Input {
 
 function titleCase(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatBillingUnit(value: string) {
+  return billingUnits.find(([unit]) => unit === value)?.[1] ?? titleCase(value);
 }
 
 function formatMoney(value: string | number, currency: string) {

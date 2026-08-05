@@ -87,9 +87,10 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
   if (!selectedEpisodeId) return <BudgetEpisodePicker network={selectedNetwork} show={activeShow} episodes={data.episodes.filter((episode) => episode.showTitle === activeShow)} lines={data.lines.filter((line) => line.showTitle === activeShow)} rates={serviceRates} showId={showRows.find((show) => show.title === activeShow)?.id} purchaseOrders={data.purchaseOrders} />;
   const selectedEpisode = data.episodes.find((episode) => episode.id === selectedEpisodeId && episode.showTitle === activeShow);
   if (!selectedEpisode) redirect(`/budget?network=${encodeURIComponent(selectedNetwork)}&show=${encodeURIComponent(activeShow)}`);
+  const [canApproveBillableCharges, canIssueInvoices] = await Promise.all([can("approve_booking_charges_for_billing"), can("issue_invoices")]);
   const [bookingCosts, invoiceReadiness, estimateOverview, operationalLedger] = await Promise.all([
     loadBookingCosts(selectedEpisodeId),
-    loadInvoiceReadiness(selectedEpisodeId),
+    canApproveBillableCharges ? loadInvoiceReadiness(selectedEpisodeId) : Promise.resolve(null),
     loadEstimateOverview(selectedEpisodeId),
     loadOperationalLedger(selectedEpisodeId),
   ]);
@@ -107,7 +108,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
     <EstimateRevisionPanel episodeId={selectedEpisodeId} estimate={estimateOverview} />
     <EpisodeBudgetOperations estimate={estimateOverview} lines={lines} ledger={operationalLedger} episodes={episodes} resources={data.resources} purchaseOrders={episodePurchaseOrders} />
     <ClientPoBudgetSafeguards orders={episodeClientPurchaseOrders} />
-    <EpisodeInvoicePanel episodeId={selectedEpisodeId} readiness={invoiceReadiness} />
+    <EpisodeInvoicePanel episodeId={selectedEpisodeId} readiness={invoiceReadiness} canApproveBillableCharges={canApproveBillableCharges} canIssueInvoices={canIssueInvoices} />
     <BookingCostBasis entries={bookingCosts} fallbackCurrency={currency} />
     <WorkOrderChargeQueue charges={activeShow ? data.workOrderCharges.filter((charge) => charge.showTitle === activeShow) : data.workOrderCharges} />
     <PurchaseOrderBudgetSummary title="Episode purchase orders" orders={episodePurchaseOrders} currency={currency} />

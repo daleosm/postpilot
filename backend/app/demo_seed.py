@@ -1791,6 +1791,7 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                     "is_negotiated_override": False,
                     "estimated_quantity": quantity,
                     "estimated_amount": client_rate * quantity,
+                    "commercial_treatment": "wet_hire",
                     "actual_overtime_quantity": Decimal("0"),
                     "overtime_multiplier": Decimal("1.5"),
                     "created_at": now_at(0),

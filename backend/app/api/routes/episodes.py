@@ -899,6 +899,7 @@ async def get_episode_workspace(episode_id: str, actor: CurrentActor, session: D
                 "status": item.status,
                 "billing_scope": item.billing_scope,
                 "billing_status": item.billing_status,
+                "commercial_treatment": item.commercial_treatment,
                 "planned_duration_quantity": str(item.planned_duration_quantity)
                 if item.planned_duration_quantity is not None
                 else None,
@@ -1500,6 +1501,11 @@ async def _create_stage_work_orders(session: DbSession, actor: CurrentActor, epi
                     status="open",
                     billing_scope="included",
                     billing_status="not_billable",
+                    # A generated operational work order starts from the
+                    # ordinary room-and-operator commercial structure. The
+                    # later booking or a commercial manager may set a
+                    # different treatment before it is approved.
+                    commercial_treatment="wet_hire",
                     currency=actor.active_organization.currency,
                     created_by_user_id=actor.user_id,
                 )

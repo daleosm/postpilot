@@ -238,11 +238,17 @@ def test_seeded_budget_demo_has_rate_snapshots_real_actual_sources_and_separate_
 
     rate = client.get(
         "/v1/rate-cards/effective",
-        params={"episode_id": colour_episode_id, "category": "Colour", "unit": "hour"},
+        params={
+            "episode_id": colour_episode_id,
+            "category": "Colour suite",
+            "unit": "hour",
+            "target_type": "room",
+            "target_id": uid(1, "28", 3),
+        },
     )
     assert rate.status_code == 200, rate.text
-    assert rate.json()["effective_rate"]["source"] == "episode_rate_card"
-    assert rate.json()["effective_rate"]["rate"] == 113.33
+    assert rate.json()["effective_rate"]["source"] == "master_rate_card"
+    assert rate.json()["effective_rate"]["rate"] == 190
 
     estimate = client.get(f"/v1/budget/episodes/{external_episode_id}/estimate-overview")
     summary = client.get(f"/v1/budget/episodes/{external_episode_id}/summary")

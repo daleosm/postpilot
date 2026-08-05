@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, case, delete, func, insert, or_, select, update
+from sqlalchemy import and_, case, delete, exists, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.dependencies import CurrentActor, DbSession
@@ -36,6 +36,7 @@ from app.budget_actuals import record_budget_actual
 from app.budget_logic import json_safe
 from app.db.tables import (
     activity_log,
+    budget_actual_allocations,
     booking_charge_components,
     bookings,
     budget_lines,
@@ -85,6 +86,12 @@ def _booking_values(row: object, *, include_commercial_context: bool = False) ->
         "approved_overtime_minutes": row.approved_overtime_minutes,
         "commercial_review_required": bool(getattr(row, "commercial_review_required", False)),
         "commercial_review_reason": getattr(row, "commercial_review_reason", None),
+        "commercial_treatment": getattr(row, "commercial_treatment", "wet_hire"),
+        "client_quote_amount": _money(_decimal(getattr(row, "client_quote_amount", None)))
+        if getattr(row, "client_quote_amount", None) is not None
+        else None,
+        "client_quote_currency": getattr(row, "client_quote_currency", None),
+        "commercial_treatment_snapshot_at": getattr(row, "commercial_treatment_snapshot_at", None),
         "is_option": row.is_option,
         "option_rank": row.option_rank,
         "status": row.status,
@@ -157,6 +164,8 @@ def _payload_from_booking(row: object) -> BookingCreateRequest:
         setup_minutes=row.setup_minutes,
         handover_minutes=row.handover_minutes,
         status=row.status,
+        commercial_treatment=getattr(row, "commercial_treatment", "wet_hire"),
+        client_quote_amount=getattr(row, "client_quote_amount", None),
         booking_type=row.booking_type,
         is_option=row.is_option,
         notes=row.notes,
@@ -300,12 +309,14 @@ async def _actual_cost(
     actual_starts_at: datetime,
     actual_ends_at: datetime,
     overtime_minutes: int,
+    client_overtime_billing_enabled: bool,
 ) -> dict[str, object]:
     """Apply approved time to the booking's immutable charge snapshots.
 
-    The browser supplies dates and approved overtime only.  Both the client
-    charge and internal cost are calculated from rates stored at confirmation,
-    so changes to a rate card or person profile cannot rewrite actual history.
+    The browser supplies dates and approved overtime only. Internal cost always
+    follows the saved room/person rate snapshots. Client overtime is separate:
+    it is added only when the linked wet/dry-hire work order was explicitly
+    authorised for overtime billing. A flat fee remains its agreed fee.
     """
     components = (
         await session.execute(
@@ -348,10 +359,15 @@ async def _actual_cost(
         )
         client_rate = _decimal(component.client_rate) or Decimal(0)
         internal_rate = _decimal(component.internal_cost_rate)
-        client_amount = cost_for_hours(client_rate, unit, base_hours)
+        client_amount = (
+            cost_for_hours(client_rate, unit, base_hours)
+            if component.billing_treatment == "billable"
+            else Decimal(0)
+        )
         internal_amount = cost_for_hours(internal_rate, unit, base_hours) if internal_rate is not None else None
         if overtime_hours and supports_overtime(unit):
-            client_amount += cost_for_hours(client_rate * overtime_multiplier, unit, overtime_hours)
+            if component.billing_treatment == "billable" and client_overtime_billing_enabled:
+                client_amount += cost_for_hours(client_rate * overtime_multiplier, unit, overtime_hours)
             if internal_rate is not None:
                 internal_amount = (internal_amount or Decimal(0)) + cost_for_hours(
                     internal_rate * overtime_multiplier, unit, overtime_hours
@@ -382,12 +398,15 @@ async def _actual_cost(
         component_result = {
             "id": str(component.id),
             "component_type": component.component_type,
+            "category": component.category,
             "resource": component.resource_name,
-            "resource_id": str(component.room_id or component.person_id),
+            "resource_id": str(component.room_id or component.person_id) if component.room_id or component.person_id else None,
             "unit": unit,
             "currency": component.currency,
             "source": component.rate_source,
             "rate_card_scope": component.rate_card_scope,
+            "billing_treatment": component.billing_treatment,
+            "tax_treatment": component.tax_treatment,
             "client_rate": _money(client_rate),
             "internal_cost_rate": _money(internal_rate) if internal_rate is not None else None,
             "actual_quantity": _money(base_quantity),
@@ -397,23 +416,25 @@ async def _actual_cost(
             "actual_internal_cost": _money(internal_amount) if internal_amount is not None else None,
         }
         result_components.append(component_result)
-        legacy_key = "room" if component.component_type == "room" else "artist"
-        legacy[legacy_key] = {
-            "category": component.category,
-            "rate": _money(internal_rate if internal_rate is not None else client_rate),
-            "unit": unit,
-            "source": component.rate_source,
-            "cost": _money(internal_amount) if internal_amount is not None else 0.0,
-            **(
-                {"person_id": str(component.person_id), "name": component.resource_name}
-                if component.component_type == "person"
-                else {}
-            ),
-        }
+        if component.component_type in {"room", "person"}:
+            legacy_key = "room" if component.component_type == "room" else "artist"
+            legacy[legacy_key] = {
+                "category": component.category,
+                "rate": _money(internal_rate if internal_rate is not None else client_rate),
+                "unit": unit,
+                "source": component.rate_source,
+                "cost": _money(internal_amount) if internal_amount is not None else 0.0,
+                **(
+                    {"person_id": str(component.person_id), "name": component.resource_name}
+                    if component.component_type == "person"
+                    else {}
+                ),
+            }
 
     return {
         "actual_hours": _money(actual_hours),
         "overtime_minutes": overtime_minutes,
+        "client_overtime_billing_enabled": client_overtime_billing_enabled,
         "currency": components[0].currency,
         "components": result_components,
         "room": legacy["room"],
@@ -429,7 +450,7 @@ def _commercial_component_response(component: object) -> dict[str, object]:
         "id": str(component.id),
         "component_type": component.component_type,
         "resource": component.resource_name,
-        "resource_id": str(component.room_id or component.person_id),
+        "resource_id": str(component.room_id or component.person_id) if component.room_id or component.person_id else None,
         "category": component.category,
         "rate": _money(_decimal(component.client_rate) or Decimal(0)),
         "internal_cost_rate": (
@@ -443,6 +464,9 @@ def _commercial_component_response(component: object) -> dict[str, object]:
         "rate_card_scope": component.rate_card_scope,
         "source_card_id": str(component.rate_card_id) if component.rate_card_id else None,
         "source_card_item_id": str(component.rate_card_item_id) if component.rate_card_item_id else None,
+        "commercial_treatment": component.commercial_treatment,
+        "billing_treatment": component.billing_treatment,
+        "tax_treatment": component.tax_treatment,
         "is_negotiated_override": component.is_negotiated_override,
         "override_reason": component.override_reason,
         "estimated_quantity": _money(_decimal(component.estimated_quantity) or Decimal(0)),
@@ -483,6 +507,37 @@ async def _resolve_booking_commercial_components(
     category, unit = definition
     quantity = confirmed_hours(payload.starts_at, payload.ends_at, 0)
     targets: list[tuple[str, str, object]] = []
+    components: list[dict[str, object]] = []
+    overrides = {override.component_type: override for override in payload.commercial_overrides}
+    if payload.commercial_treatment == "flat_project_fee":
+        # The agreed fee is the client-billable component. Optional scheduled
+        # room/person rows below remain included cost/forecast components,
+        # which prevents a flat fee being billed again as hourly time.
+        fixed_fee_override = overrides.get("fixed_fee")
+        fee = _decimal(fixed_fee_override.rate) if fixed_fee_override else _decimal(payload.client_quote_amount) or Decimal(0)
+        components.append(
+            {
+                "component_type": "fixed_fee",
+                "resource": "Agreed project fee",
+                "resource_id": None,
+                "category": "Project fee",
+                "rate": _money(fee),
+                "internal_cost_rate": 0.0,
+                "unit": "fixed",
+                "currency": actor.active_organization.currency,
+                "source": "negotiated_booking_override" if fixed_fee_override else "agreed_project_fee",
+                "source_card_id": None,
+                "source_card_item_id": None,
+                "rate_card_scope": "booking_override" if fixed_fee_override else "booking_agreement",
+                "estimated_quantity": 1.0,
+                "estimated_charge": _money(fee),
+                "pricing_status": "resolved",
+                "is_negotiated_override": bool(fixed_fee_override),
+                "override_reason": fixed_fee_override.reason.strip() if fixed_fee_override else None,
+                "billing_treatment": "billable",
+                "tax_treatment": "standard",
+            }
+        )
     if payload.room_id:
         room = (
             await session.execute(
@@ -493,7 +548,7 @@ async def _resolve_booking_commercial_components(
         ).first()
         if room:
             targets.append(("room", str(room.id), room))
-    if payload.person_id:
+    if payload.person_id and payload.commercial_treatment != "dry_hire":
         person = (
             await session.execute(
                 select(people.c.id, people.c.name, people.c.role, people.c.hourly_rate, people.c.day_rate).where(
@@ -504,8 +559,6 @@ async def _resolve_booking_commercial_components(
         if person:
             targets.append(("person", str(person.id), person))
 
-    overrides = {override.component_type: override for override in payload.commercial_overrides}
-    components: list[dict[str, object]] = []
     for component_type, target_id, resource in targets:
         effective = await resolve_effective_rate(
             session,
@@ -544,6 +597,10 @@ async def _resolve_booking_commercial_components(
                     "pricing_status": "rate_missing",
                     "is_negotiated_override": False,
                     "override_reason": None,
+                    "billing_treatment": "included"
+                    if payload.commercial_treatment == "flat_project_fee"
+                    else "billable",
+                    "tax_treatment": "standard",
                 }
             )
             continue
@@ -590,6 +647,8 @@ async def _resolve_booking_commercial_components(
                 "pricing_status": "resolved",
                 "is_negotiated_override": bool(override),
                 "override_reason": override.reason.strip() if override else None,
+                "billing_treatment": "included" if payload.commercial_treatment == "flat_project_fee" else "billable",
+                "tax_treatment": "standard",
             }
         )
     return components
@@ -666,12 +725,27 @@ async def _sync_booking_commercial_components(
             "rate_card_scope": component["rate_card_scope"],
             "rate_card_id": component["source_card_id"],
             "rate_card_item_id": component["source_card_item_id"],
+            "commercial_treatment": payload.commercial_treatment,
+            "billing_treatment": component["billing_treatment"],
+            "tax_treatment": component["tax_treatment"],
             "is_negotiated_override": component["is_negotiated_override"],
             "override_reason": component["override_reason"],
             "overridden_by_user_id": actor.user_id if component["is_negotiated_override"] else None,
             "overridden_at": now if component["is_negotiated_override"] else None,
             "estimated_quantity": _decimal(component["estimated_quantity"]),
             "estimated_amount": _decimal(component["estimated_charge"]),
+            # A flat fee is an agreed discrete client charge at confirmation.
+            # It therefore becomes invoice-selectable without a fabricated
+            # time submission. Scheduled included rows still only record
+            # their internal actual once work is actually performed.
+            "actual_quantity": Decimal(1) if component["component_type"] == "fixed_fee" else None,
+            "actual_client_amount": (
+                _decimal(component["estimated_charge"])
+                if component["component_type"] == "fixed_fee" and component["billing_treatment"] == "billable"
+                else None
+            ),
+            "actual_internal_amount": Decimal(0) if component["component_type"] == "fixed_fee" else None,
+            "actual_submitted_at": now if component["component_type"] == "fixed_fee" else None,
             "actual_overtime_quantity": Decimal(0),
             "overtime_multiplier": overtime_multiplier,
             "created_at": now,
@@ -708,8 +782,11 @@ async def _audit_booking_charge_snapshot(
             "resource": component["resource"],
             "unit": component["unit"],
             "rate": component["rate"],
+            "internalRate": component["internal_cost_rate"],
             "rateSource": component["source"],
             "rateCardScope": component["rate_card_scope"],
+            "commercialTreatment": booking.commercial_treatment,
+            "billingTreatment": component["billing_treatment"],
             "estimatedQuantity": component["estimated_quantity"],
             "estimatedCharge": component["estimated_charge"],
         }
@@ -887,34 +964,153 @@ async def _booking_budget_item(session: DbSession, actor: CurrentActor, booking:
     return item
 
 
-async def _booking_actual_allocation(
+async def _matching_budget_item_for_component(
     session: DbSession,
     actor: CurrentActor,
     *,
     booking: object,
-    actual_hours: Decimal,
+    component: dict[str, object],
+) -> object | None:
+    """Resolve an optional internal estimate item for one saved component.
+
+    A scheduler may explicitly choose one booking-level estimate item. Without
+    that, matching is deliberately conservative: exact room/person identity,
+    then one unambiguous same-category internal item.  No estimate is ever
+    invented merely to make an actual disappear from the attention queue.
+    """
+    component_id = str(component["id"])
+    existing = (
+        await session.execute(
+            select(budget_lines.c.id, budget_lines.c.category, budget_lines.c.description, budget_lines.c.currency)
+            .select_from(budget_actual_allocations)
+            .join(
+                budget_lines,
+                and_(
+                    budget_lines.c.id == budget_actual_allocations.c.budget_line_id,
+                    budget_lines.c.organization_id == actor.organization_id,
+                ),
+            )
+            .where(
+                and_(
+                    budget_actual_allocations.c.organization_id == actor.organization_id,
+                    budget_actual_allocations.c.booking_charge_component_id == component_id,
+                )
+            )
+            .limit(1)
+        )
+    ).first()
+    if existing:
+        return existing
+
+    selected = await _booking_budget_item(session, actor, booking)
+    if selected:
+        return selected
+    if not booking.episode_id:
+        return None
+    resource_id = component.get("resource_id")
+    component_type = str(component["component_type"])
+    if resource_id and component_type in {"room", "person"}:
+        exact = (
+            await session.execute(
+                select(budget_lines.c.id, budget_lines.c.category, budget_lines.c.description, budget_lines.c.currency)
+                .where(
+                    and_(
+                        budget_lines.c.organization_id == actor.organization_id,
+                        budget_lines.c.episode_id == booking.episode_id,
+                        budget_lines.c.external_cost.is_(False),
+                        budget_lines.c.resource_reference.like(f"{component_type}:{resource_id} · %"),
+                    )
+                )
+                .order_by(budget_lines.c.created_at, budget_lines.c.id)
+                .limit(1)
+            )
+        ).first()
+        if exact:
+            return exact
+    same_category = (
+        await session.execute(
+            select(budget_lines.c.id, budget_lines.c.category, budget_lines.c.description, budget_lines.c.currency)
+            .where(
+                and_(
+                    budget_lines.c.organization_id == actor.organization_id,
+                    budget_lines.c.episode_id == booking.episode_id,
+                    budget_lines.c.external_cost.is_(False),
+                    budget_lines.c.category == component["category"],
+                )
+            )
+            .order_by(budget_lines.c.created_at, budget_lines.c.id)
+            .limit(2)
+        )
+    ).all()
+    return same_category[0] if len(same_category) == 1 else None
+
+
+async def _booking_component_actual_allocations(
+    session: DbSession,
+    actor: CurrentActor,
+    *,
+    booking: object,
+    actual_cost: dict[str, object],
+    allocation_date: date | None,
 ) -> dict[str, object]:
-    """Calculate the budget actual exclusively from the saved estimate rate."""
-    item = await _booking_budget_item(session, actor, booking)
-    if not item:
-        return {"status": "unallocated", "reason": "No episode budget item was selected for this booking."}
-    if item.rate_snapshot is None or not item.planned_unit:
-        return {
-            "status": "unallocated",
-            "reason": "The selected budget item has no saved rate snapshot.",
-            "budget_line_id": str(item.id),
-            "budget_item_label": item.description or item.category,
-        }
-    amount = cost_for_hours(_decimal(item.rate_snapshot), item.planned_unit, actual_hours)
+    """Post each internal component cost to an optional matching estimate.
+
+    Booking confirmations remain valid without an estimate.  Components that
+    cannot be matched retain their saved commercial actual and appear in the
+    episode's unallocated attention queue instead of being silently omitted.
+    """
+    allocated: list[dict[str, object]] = []
+    unallocated: list[dict[str, object]] = []
+    for component in actual_cost["components"]:
+        internal_amount = _decimal(component.get("actual_internal_cost")) or Decimal(0)
+        if internal_amount <= 0:
+            continue
+        item = await _matching_budget_item_for_component(
+            session,
+            actor,
+            booking=booking,
+            component=component,
+        )
+        if not item:
+            unallocated.append(
+                {
+                    "component_id": component["id"],
+                    "resource": component["resource"],
+                    "component_type": component["component_type"],
+                    "amount": _money(internal_amount),
+                    "currency": component["currency"],
+                    "reason": "No matching internal estimate item was found.",
+                }
+            )
+            continue
+        await record_budget_actual(
+            session,
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            budget_line_id=str(item.id),
+            source_type="booking_component",
+            booking_id=str(booking.id),
+            booking_charge_component_id=str(component["id"]),
+            amount=internal_amount,
+            currency=str(item.currency or component["currency"]),
+            source_reference=f"booking-component-actual:{component['id']}",
+            allocation_date=allocation_date,
+        )
+        allocated.append(
+            {
+                "component_id": component["id"],
+                "resource": component["resource"],
+                "component_type": component["component_type"],
+                "budget_line_id": str(item.id),
+                "budget_item_label": item.description or item.category,
+                "amount": _money(internal_amount),
+                "currency": str(item.currency or component["currency"]),
+            }
+        )
     return {
-        "status": "allocated",
-        "budget_line_id": str(item.id),
-        "budget_item_label": item.description or item.category,
-        "rate": _money(_decimal(item.rate_snapshot) or Decimal(0)),
-        "unit": item.planned_unit,
-        "amount": _money(amount),
-        "amount_decimal": amount,
-        "currency": item.currency,
+        "status": "unallocated" if unallocated else "allocated",
+        "allocated_components": allocated,
+        "unallocated_components": unallocated,
     }
 
 
@@ -1071,7 +1267,27 @@ async def list_bookings(
                     and_(
                         bookings.c.actual_starts_at.is_not(None),
                         bookings.c.actual_ends_at.is_not(None),
-                        or_(bookings.c.budget_line_id.is_(None), budget_lines.c.rate_snapshot.is_(None)),
+                        exists(
+                            select(1)
+                            .select_from(booking_charge_components)
+                            .outerjoin(
+                                budget_actual_allocations,
+                                and_(
+                                    budget_actual_allocations.c.booking_charge_component_id
+                                    == booking_charge_components.c.id,
+                                    budget_actual_allocations.c.organization_id == actor.organization_id,
+                                ),
+                            )
+                            .where(
+                                and_(
+                                    booking_charge_components.c.organization_id == actor.organization_id,
+                                    booking_charge_components.c.booking_id == bookings.c.id,
+                                    booking_charge_components.c.actual_internal_amount.is_not(None),
+                                    booking_charge_components.c.actual_internal_amount > 0,
+                                    budget_actual_allocations.c.id.is_(None),
+                                )
+                            )
+                        ),
                     ),
                     "unallocated",
                 ),
@@ -1149,6 +1365,7 @@ async def booking_resources(actor: CurrentActor, session: DbSession) -> dict[str
     if not may_access_board:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot access the bookings board.")
     can_manage_commercial = await has_permission(session, actor, "manage_commercial")
+    can_approve_commercial_overrides = await has_permission(session, actor, "approve_booking_price_overrides")
     may_view_all = await may_view_all_episodes(session, actor)
     room_rows = await session.execute(
         select(rooms.c.id, rooms.c.name, rooms.c.type)
@@ -1252,6 +1469,7 @@ async def booking_resources(actor: CurrentActor, session: DbSession) -> dict[str
         ).all()
     return {
         "can_manage_commercial": can_manage_commercial,
+        "can_approve_commercial_overrides": can_approve_commercial_overrides,
         "rooms": [{"id": str(row.id), "name": row.name, "type": row.type} for row in room_rows.all()],
         "people": [
             {
@@ -1436,12 +1654,11 @@ async def submit_booking_actuals(
         actual_starts_at=payload.actual_starts_at,
         actual_ends_at=payload.actual_ends_at,
         overtime_minutes=payload.overtime_minutes,
-    )
-    budget_actual = await _booking_actual_allocation(
-        session,
-        actor,
-        booking=booking,
-        actual_hours=Decimal(str(actual_cost["actual_hours"])),
+        client_overtime_billing_enabled=bool(
+            work_order
+            and work_order.allow_overtime_billing
+            and booking.commercial_treatment in {"wet_hire", "dry_hire"}
+        ),
     )
     now = datetime.now(UTC)
     await session.execute(
@@ -1454,24 +1671,15 @@ async def submit_booking_actuals(
             updated_at=now,
         )
     )
-    if budget_actual["status"] == "allocated":
-        await record_budget_actual(
-            session,
-            organization_id=actor.organization_id,
-            actor_user_id=actor.user_id,
-            budget_line_id=str(budget_actual["budget_line_id"]),
-            source_type="booking",
-            booking_id=booking_id,
-            amount=budget_actual["amount_decimal"],
-            currency=str(budget_actual["currency"]),
-            source_reference=f"booking-actual:{booking_id}",
-        )
+    budget_actual = await _booking_component_actual_allocations(
+        session,
+        actor,
+        booking=booking,
+        actual_cost=actual_cost,
+        allocation_date=payload.actual_starts_at.date(),
+    )
     if work_order and work_order.work_type == "internal":
-        work_order_actual = (
-            _decimal(budget_actual["amount"])
-            if budget_actual["status"] == "allocated"
-            else _decimal(actual_cost["total_internal_cost"])
-        )
+        work_order_actual = _decimal(actual_cost["total_internal_cost"])
         await session.execute(
             update(post_work_orders)
             .where(
@@ -1493,7 +1701,7 @@ async def submit_booking_actuals(
         "overtimeMinutes": payload.overtime_minutes,
         "note": payload.note.strip() if payload.note else None,
         "actualCost": actual_cost,
-        "budgetActual": {key: value for key, value in budget_actual.items() if key != "amount_decimal"},
+        "budgetActual": budget_actual,
         "workOrderId": str(work_order.id) if work_order else None,
         "previousActual": (
             {
@@ -1540,6 +1748,7 @@ async def submit_booking_actuals(
         "actual_internal_cost": actual_cost["total_internal_cost"],
         "currency": actual_cost["currency"],
         "cost": actual_cost,
+        "budget_actual": budget_actual,
         "work_order_id": str(work_order.id) if work_order else None,
     }
 
@@ -1603,6 +1812,14 @@ async def create_booking(payload: BookingCreateRequest, actor: CurrentActor, ses
             ends_at=values.ends_at,
             setup_minutes=values.setup_minutes,
             handover_minutes=values.handover_minutes,
+            commercial_treatment=values.commercial_treatment,
+            client_quote_amount=values.client_quote_amount,
+            client_quote_currency=(
+                actor.active_organization.currency if values.client_quote_amount is not None else None
+            ),
+            commercial_treatment_snapshot_at=(
+                datetime.now(UTC) if values.status == "confirmed" and not values.is_option else None
+            ),
             is_option=values.is_option,
             option_rank=1 if is_active_option(_window(values)) else None,
             status=values.status,
@@ -1629,7 +1846,12 @@ async def create_booking(payload: BookingCreateRequest, actor: CurrentActor, ses
             action="booking.created",
             entity_type="booking",
             entity_id=str(row.id),
-            metadata={"episodeId": values.episode_id, "roomId": values.room_id, "personId": values.person_id},
+            metadata={
+                "episodeId": values.episode_id,
+                "roomId": values.room_id,
+                "personId": values.person_id,
+                "commercialTreatment": values.commercial_treatment,
+            },
         )
     )
     await session.commit()
@@ -1652,6 +1874,11 @@ async def update_booking(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
     previous = _payload_from_booking(existing)
     await _validate_references(session, actor, payload)
+    if existing.status == "confirmed" and existing.commercial_treatment != payload.commercial_treatment:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A confirmed booking's commercial treatment is already an agreed snapshot.",
+        )
     if (existing.actual_starts_at is not None or existing.actual_ends_at is not None) and str(
         existing.budget_line_id or ""
     ) != str(payload.budget_line_id or ""):
@@ -1690,6 +1917,15 @@ async def update_booking(
             ends_at=values.ends_at,
             setup_minutes=values.setup_minutes,
             handover_minutes=values.handover_minutes,
+            commercial_treatment=values.commercial_treatment,
+            client_quote_amount=values.client_quote_amount,
+            client_quote_currency=(
+                actor.active_organization.currency if values.client_quote_amount is not None else None
+            ),
+            commercial_treatment_snapshot_at=(
+                existing.commercial_treatment_snapshot_at
+                or (datetime.now(UTC) if values.status == "confirmed" and not values.is_option else None)
+            ),
             is_option=values.is_option,
             option_rank=1 if is_active_option(_window(values)) else None,
             status=values.status,
@@ -1727,6 +1963,7 @@ async def update_booking(
                 "from": {"roomId": existing.room_id, "personId": existing.person_id},
                 "episodeId": values.episode_id,
                 "budgetLineId": values.budget_line_id,
+                "commercialTreatment": values.commercial_treatment,
             },
         )
     )
@@ -1912,6 +2149,8 @@ async def copy_episode_bookings(
             setup_minutes=booking.setup_minutes,
             handover_minutes=booking.handover_minutes,
             status="tentative",
+            commercial_treatment=booking.commercial_treatment,
+            client_quote_amount=booking.client_quote_amount,
             booking_type=booking.booking_type,
             notes=booking.notes,
         )
@@ -1938,6 +2177,12 @@ async def copy_episode_bookings(
                 "ends_at": item.ends_at,
                 "setup_minutes": item.setup_minutes,
                 "handover_minutes": item.handover_minutes,
+                "commercial_treatment": item.commercial_treatment,
+                "client_quote_amount": item.client_quote_amount,
+                "client_quote_currency": actor.active_organization.currency
+                if item.client_quote_amount is not None
+                else None,
+                "commercial_treatment_snapshot_at": None,
                 "status": "tentative",
                 "booking_type": item.booking_type,
                 "is_option": False,

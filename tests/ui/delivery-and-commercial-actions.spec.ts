@@ -137,4 +137,14 @@ test.describe("Commercial register actions", () => {
 
     await expect.poll(requestBody).toMatchObject({ scope: "master", rate: 999 });
   });
+
+  test("uses the same service, room, and artist panels on the master card", async ({ page }) => {
+    await page.goto("/budget");
+    await page.getByRole("button", { name: "Manage rate card" }).click();
+
+    await expect(page.getByRole("heading", { name: "Service prices" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Room prices" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Named artist rates" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add service rate" })).toBeVisible();
+  });
 });

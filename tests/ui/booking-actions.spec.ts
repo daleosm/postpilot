@@ -70,7 +70,7 @@ test.describe("Booking creation and conflict UX", () => {
     await fillBookingBasics(page, "UI commercial preview");
 
     const dialog = page.getByRole("dialog", { name: "New booking" });
-    await expect(dialog.getByText("Commercial preview", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Server-resolved price preview", { exact: true })).toBeVisible();
     await expect(dialog.getByText("Copper Cut 1", { exact: true })).toBeVisible();
     await expect(dialog.getByText("Mark Dyer", { exact: true })).toBeVisible();
     await expect(dialog.getByText("£300.00 est.", { exact: true })).toBeVisible();
@@ -85,6 +85,57 @@ test.describe("Booking creation and conflict UX", () => {
 
     await expect.poll(bookingBody).toMatchObject({
       commercial_overrides: [{ component_type: "room", rate: 123.45, reason: "Client agreed a late suite rate." }],
+    });
+  });
+
+  test("shows only the capacity inputs required by the selected commercial treatment", async ({ page }) => {
+    await openBookingDialog(page);
+    const dialog = page.getByRole("dialog", { name: "New booking" });
+
+    await dialog.getByText("Dry hire", { exact: true }).click();
+    await expect(dialog.locator('select[name="roomId"]')).toBeVisible();
+    await expect(dialog.locator('select[name="personId"]')).toHaveCount(0);
+
+    await dialog.getByText("Flat project fee", { exact: true }).click();
+    await expect(dialog.locator('select[name="roomId"]')).toBeVisible();
+    await expect(dialog.locator('select[name="personId"]')).toBeVisible();
+    await expect(dialog.getByLabel("Agreed fixed fee", { exact: true })).toBeVisible();
+  });
+
+  test("allows commercial management to snapshot a reasoned fixed-fee override", async ({ page }) => {
+    await page.route("**/v1/bookings/commercial-preview", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          components: [{
+            component_type: "fixed_fee", resource: "Agreed project fee", category: "Project fee", rate: 2500,
+            unit: "fixed", currency: "GBP", source: "agreed_project_fee", estimated_quantity: 1,
+            estimated_charge: 2500, pricing_status: "resolved", is_negotiated_override: false,
+          }],
+        }),
+      });
+    });
+    await openBookingDialog(page);
+    const dialog = page.getByRole("dialog", { name: "New booking" });
+    await dialog.getByText("Flat project fee", { exact: true }).click();
+    await page.getByLabel("Booking title").fill("UI negotiated finishing package");
+    await page.locator('select[name="episodeId"]').selectOption({ index: 1 });
+    await page.getByLabel("Client booking starts").fill("2034-08-16T09:00");
+    await page.getByLabel("Client booking ends").fill("2034-08-16T18:00");
+    await page.getByLabel("Agreed fixed fee", { exact: true }).fill("2500");
+    await expect(dialog.getByText("Agreed project fee", { exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "Set negotiated price" }).click();
+    await dialog.getByLabel("Negotiated fixed_fee rate").fill("2300");
+    await dialog.getByLabel("Negotiated fixed_fee reason").fill("Client approved a reduced package fee.");
+    const bookingBody = await captureJsonWrite(page, "**/v1/bookings", { id: "a5000000-0000-4000-8000-000000000007" }, 201);
+
+    await dialog.getByRole("button", { name: "Save booking" }).click();
+
+    await expect.poll(bookingBody).toMatchObject({
+      commercial_treatment: "flat_project_fee",
+      client_quote_amount: 2500,
+      commercial_overrides: [{ component_type: "fixed_fee", rate: 2300, reason: "Client approved a reduced package fee." }],
     });
   });
 

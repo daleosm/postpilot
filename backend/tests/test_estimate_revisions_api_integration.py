@@ -147,22 +147,35 @@ def test_operational_ledger_traces_actual_sources_and_flags_unallocated_time(
     )
     assert adjusted.status_code == 201, adjusted.text
 
-    unallocated_booking_id = str(uuid4())
-    now = datetime.now(UTC)
-    production_lab.execute(
-        """
-        INSERT INTO bookings (
-          id, organization_id, episode_id, title, starts_at, ends_at,
-          actual_starts_at, actual_ends_at, setup_minutes, handover_minutes,
-          approved_overtime_minutes, is_option, status, booking_type
-        ) VALUES ($1, $2, $3, 'Python unallocated edit actual', $4, $5, $4, $5, 0, 0, 0, false, 'confirmed', 'edit')
-        """,
-        unallocated_booking_id,
-        production_lab.data.organization_id,
-        episode_id,
-        now,
-        now + timedelta(hours=1),
+    rate = production_lab.client.post(
+        "/v1/rate-cards/services",
+        json={"name": "Unallocated editorial room", "category": "Edit suite", "unit": "hour", "rate": 100},
     )
+    assert rate.status_code == 201, rate.text
+    booking = production_lab.client.post(
+        "/v1/bookings",
+        json={
+            "title": "Python unallocated edit actual",
+            "episode_id": episode_id,
+            "room_id": production_lab.data.room_id,
+            "starts_at": "2035-12-14T09:00:00Z",
+            "ends_at": "2035-12-14T10:00:00Z",
+            "booking_type": "edit",
+            "status": "confirmed",
+            "commercial_treatment": "dry_hire",
+        },
+    )
+    assert booking.status_code == 201, booking.text
+    unallocated_booking_id = booking.json()["id"]
+    submitted = production_lab.client.post(
+        f"/v1/bookings/{unallocated_booking_id}/time-submissions",
+        json={
+            "actual_starts_at": "2035-12-14T09:00:00Z",
+            "actual_ends_at": "2035-12-14T10:00:00Z",
+            "overtime_minutes": 0,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
     ledger = production_lab.client.get(f"/v1/budget/episodes/{episode_id}/operational-ledger")
     assert ledger.status_code == 200, ledger.text
     payload = ledger.json()["ledger"]
@@ -171,7 +184,7 @@ def test_operational_ledger_traces_actual_sources_and_flags_unallocated_time(
     assert actual["source_type"] == "manual_adjustment"
     assert actual["reference"] == "MIX-TEST-01"
     attention = next(item for item in payload["unallocated_actuals"] if item["booking_id"] == unallocated_booking_id)
-    assert attention["reason"] == "The booking has no selected budget item."
+    assert attention["reason"] == "No matching internal estimate item was found for this commercial component."
 
     foreign = production_lab.client.get(
         f"/v1/budget/episodes/{production_lab.data.foreign_episode_id}/operational-ledger"

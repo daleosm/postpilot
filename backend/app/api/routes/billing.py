@@ -140,11 +140,21 @@ def _component_invoice_item_values(
 ) -> list[dict[str, object]]:
     """Build immutable, separately itemised room/artist invoice lines."""
     base_amount, overtime_amount = _component_line_amounts(component)
-    reference = f"{component.booking_date or 'Booking'} · {component.resource_name}"
-    description = f"{component.booking_title} · {component.resource_name}"
+    work_order_reference = getattr(component, "work_order_title", None)
+    reference_parts = [str(component.booking_date or "Booking"), f"Booking: {component.booking_title}"]
+    if work_order_reference:
+        reference_parts.append(f"Work order: {work_order_reference}")
+    reference = " · ".join(reference_parts)
+    description = (
+        f"{component.booking_title} · Flat project fee"
+        if component.component_type == "fixed_fee"
+        else f"{component.booking_title} · {component.resource_name}"
+    )
     episode_code = episode.production_code or f"E{int(episode.number):02d}"
     snapshots = {
         "source_booking_id": component.booking_id,
+        "source_work_order_id": getattr(component, "work_order_id", None),
+        "source_work_order_reference": work_order_reference,
         "booking_date": component.booking_date.date() if component.booking_date else None,
         "episode_code": episode_code,
         "episode_title": episode.title,
@@ -209,6 +219,32 @@ async def _episode_booking_component_invoice_candidates(
                 booking_charge_components,
                 bookings.c.title.label("booking_title"),
                 bookings.c.starts_at.label("booking_starts_at"),
+                (
+                    select(post_work_orders.c.id)
+                    .where(
+                        and_(
+                            post_work_orders.c.organization_id == actor.organization_id,
+                            post_work_orders.c.booking_id == bookings.c.id,
+                        )
+                    )
+                    .order_by(post_work_orders.c.created_at, post_work_orders.c.id)
+                    .limit(1)
+                    .scalar_subquery()
+                    .label("work_order_id")
+                ),
+                (
+                    select(post_work_orders.c.title)
+                    .where(
+                        and_(
+                            post_work_orders.c.organization_id == actor.organization_id,
+                            post_work_orders.c.booking_id == bookings.c.id,
+                        )
+                    )
+                    .order_by(post_work_orders.c.created_at, post_work_orders.c.id)
+                    .limit(1)
+                    .scalar_subquery()
+                    .label("work_order_title")
+                ),
                 booking_component_invoice_selections.c.include_in_invoice,
                 booking_component_invoice_selections.c.reason.label("selection_reason"),
                 booking_component_invoice_selections.c.selected_at,
@@ -233,6 +269,11 @@ async def _episode_booking_component_invoice_candidates(
                 and_(
                     booking_charge_components.c.organization_id == actor.organization_id,
                     bookings.c.episode_id == episode_id,
+                    # A cancelled reservation has no billable operational
+                    # outcome. Keep issued documents immutable, but do not
+                    # offer an unissued component from a cancelled booking.
+                    bookings.c.status != "cancelled",
+                    booking_charge_components.c.billing_treatment == "billable",
                     booking_charge_components.c.actual_client_amount.is_not(None),
                     booking_charge_components.c.actual_client_amount > 0,
                 )
@@ -271,8 +312,11 @@ async def _episode_booking_component_invoice_candidates(
                 "id": component_id,
                 "booking_id": str(row.booking_id),
                 "booking_title": row.booking_title,
+                "work_order_id": str(row.work_order_id) if row.work_order_id else None,
+                "work_order_title": row.work_order_title,
                 "booking_date": row.booking_starts_at.date().isoformat() if row.booking_starts_at else None,
                 "component_type": row.component_type,
+                "commercial_treatment": row.commercial_treatment,
                 "resource": row.resource_name,
                 "category": row.category,
                 "unit": row.billing_unit,
@@ -310,6 +354,32 @@ async def _selected_booking_component_invoice_rows(
                 booking_charge_components,
                 bookings.c.title.label("booking_title"),
                 bookings.c.starts_at.label("booking_date"),
+                (
+                    select(post_work_orders.c.id)
+                    .where(
+                        and_(
+                            post_work_orders.c.organization_id == actor.organization_id,
+                            post_work_orders.c.booking_id == bookings.c.id,
+                        )
+                    )
+                    .order_by(post_work_orders.c.created_at, post_work_orders.c.id)
+                    .limit(1)
+                    .scalar_subquery()
+                    .label("work_order_id")
+                ),
+                (
+                    select(post_work_orders.c.title)
+                    .where(
+                        and_(
+                            post_work_orders.c.organization_id == actor.organization_id,
+                            post_work_orders.c.booking_id == bookings.c.id,
+                        )
+                    )
+                    .order_by(post_work_orders.c.created_at, post_work_orders.c.id)
+                    .limit(1)
+                    .scalar_subquery()
+                    .label("work_order_title")
+                ),
             )
             .select_from(booking_charge_components)
             .join(
@@ -332,6 +402,7 @@ async def _selected_booking_component_invoice_rows(
                 and_(
                     booking_charge_components.c.organization_id == actor.organization_id,
                     bookings.c.episode_id == episode_id,
+                    booking_charge_components.c.billing_treatment == "billable",
                     booking_charge_components.c.actual_client_amount.is_not(None),
                     booking_charge_components.c.actual_client_amount > 0,
                 )
@@ -363,6 +434,10 @@ async def _selected_booking_component_invoice_rows(
 
 async def _work_order_overtime_charge(session: DbSession, actor: CurrentActor, work_order: object) -> Decimal:
     """Return the billable OT from confirmed time, never a browser total."""
+    if work_order.commercial_treatment == "flat_project_fee":
+        # The agreed fixed fee is the complete client charge. Any additional
+        # client overtime must be raised and approved as a separate change.
+        return Decimal("0.00")
     if not work_order.allow_overtime_billing:
         return Decimal("0.00")
     if not work_order.booking_id:
@@ -806,6 +881,21 @@ async def set_booking_component_invoice_selection(
     ).first()
     if not component:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking charge component not found.")
+    booking_status = await session.scalar(
+        select(bookings.c.status)
+        .where(
+            and_(
+                bookings.c.id == component.booking_id,
+                bookings.c.organization_id == actor.organization_id,
+            )
+        )
+        .limit(1)
+    )
+    if booking_status == "cancelled":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A cancelled booking charge cannot be selected for invoicing.",
+        )
     if component.actual_client_amount is None or decimal_amount(component.actual_client_amount) <= 0:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -924,6 +1014,12 @@ async def list_work_order_charges(actor: CurrentActor, session: DbSession) -> di
                     post_work_orders.c.organization_id == actor.organization_id,
                     post_work_orders.c.work_type == "internal",
                     post_work_orders.c.billing_scope == "billable_change",
+                    # A room reservation is the one commercial source for
+                    # wet/dry/flat work that has moved onto the calendar.
+                    # Its booking components enter invoice readiness; showing
+                    # this same work order here would create a duplicate
+                    # client charge.
+                    post_work_orders.c.booking_id.is_(None),
                 )
             )
             .order_by(post_work_orders.c.created_at, post_work_orders.c.id)
@@ -982,6 +1078,11 @@ async def create_billable_from_work_order(
     if work_order.work_type != "internal" or work_order.billing_scope != "billable_change":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Only internal client-billable work can be posted."
+        )
+    if work_order.booking_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This work order is billed from its linked booking components; do not post a second work-order billable.",
         )
     if work_order.status != "complete" or not work_order.approved_at:
         raise HTTPException(
@@ -1756,6 +1857,8 @@ async def _invoice_export_readiness(session: DbSession, actor: CurrentActor, inv
                 )
             )
             .order_by(
+                case((client_invoice_items.c.booking_date.is_(None), 1), else_=0),
+                client_invoice_items.c.booking_date,
                 client_invoice_items.c.created_at,
                 case(
                     (client_invoice_items.c.booking_component_charge_kind == "base", 0),
@@ -1801,7 +1904,7 @@ async def _invoice_export_readiness(session: DbSession, actor: CurrentActor, inv
         and item.booking_date
         and item.episode_code
         and item.episode_title
-        and item.resource_type in {"room", "person"}
+        and item.resource_type in {"room", "person", "fixed_fee"}
         and item.resource_name
         and item.saved_rate is not None
         and item.booking_component_charge_kind in {"base", "overtime"}
@@ -1922,6 +2025,8 @@ async def exportable_invoice(invoice_id: str, actor: CurrentActor, session: DbSe
                 )
             )
             .order_by(
+                case((client_invoice_items.c.booking_date.is_(None), 1), else_=0),
+                client_invoice_items.c.booking_date,
                 client_invoice_items.c.created_at,
                 case(
                     (client_invoice_items.c.booking_component_charge_kind == "base", 0),
@@ -1984,6 +2089,8 @@ async def exportable_invoice(invoice_id: str, actor: CurrentActor, session: DbSe
                     else None
                 ),
                 "source_booking_id": str(item.source_booking_id) if item.source_booking_id else None,
+                "source_work_order_id": str(item.source_work_order_id) if item.source_work_order_id else None,
+                "source_work_order_reference": item.source_work_order_reference,
             }
             for item in items
         ],

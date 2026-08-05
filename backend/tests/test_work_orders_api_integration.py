@@ -107,6 +107,28 @@ def _grant_viewer_commercial_management(lab: ProductionApiLab) -> None:
     )
 
 
+def _add_edit_suite_rate(lab: ProductionApiLab) -> None:
+    """Make the edit-room rate resolvable for commercial reservation tests."""
+    lab.execute(
+        """
+        INSERT INTO service_rates (id, organization_id, name, category, unit, rate, currency, is_active)
+        VALUES ($1, $2, 'Work-order edit suite', 'Edit suite', 'hour', 125, 'GBP', true)
+        """,
+        str(uuid4()),
+        lab.data.organization_id,
+    )
+
+
+def _start_work_order(lab: ProductionApiLab, work_order_id: str) -> None:
+    submitted = lab.client.patch(f"/v1/work-orders/{work_order_id}", json={"status": "awaiting_approval"})
+    assert submitted.status_code == 200, submitted.text
+    approved = lab.client.patch(
+        f"/v1/work-orders/{work_order_id}",
+        json={"status": "in_progress", "approval_note": "Approved for facility scheduling."},
+    )
+    assert approved.status_code == 200, approved.text
+
+
 def _submit_external_work_order(lab: ProductionApiLab, *, vendor_id: str, po_id: str, estimate: float) -> str:
     created = lab.client.post(
         "/v1/work-orders",
@@ -952,3 +974,84 @@ def test_assigned_artist_can_reserve_an_active_internal_work_order_without_bypas
         booking_id,
     )
     assert actions == 2
+
+
+def test_work_order_room_reservations_preserve_treatment_snapshots_and_prevent_duplicate_billing(
+    production_lab: ProductionApiLab,
+) -> None:
+    """A work order becomes one commercial booking, never a second charge."""
+    production_lab.sign_in_as_manager()
+    _add_edit_suite_rate(production_lab)
+
+    work_orders: dict[str, str] = {}
+    for treatment, title, start, quote, assignee_person_id in (
+        ("wet_hire", "Wet-hire picture fix", "2035-09-10T09:00:00Z", None, production_lab.data.editor_person_id),
+        ("dry_hire", "Dry-hire suite reservation", "2035-09-10T12:00:00Z", None, None),
+        ("flat_project_fee", "Flat-fee client change", "2035-09-10T15:00:00Z", 900, production_lab.data.editor_person_id),
+    ):
+        created = production_lab.client.post(
+            "/v1/work-orders",
+            json=_payload(
+                production_lab,
+                title=title,
+                commercial_treatment=treatment,
+                billing_scope="billable_change" if treatment == "flat_project_fee" else "included",
+                client_quote_amount=quote,
+                assignee_person_id=assignee_person_id,
+            ),
+        )
+        assert created.status_code == 201, created.text
+        work_order_id = created.json()["id"]
+        _start_work_order(production_lab, work_order_id)
+        reserved = production_lab.client.post(
+            f"/v1/work-orders/{work_order_id}/booking",
+            json={
+                "room_id": production_lab.data.room_id,
+                "starts_at": start,
+                "ends_at": start.replace("T09:", "T11:").replace("T12:", "T14:").replace("T15:", "T17:"),
+            },
+        )
+        assert reserved.status_code == 201, reserved.text
+        work_orders[treatment] = reserved.json()["id"]
+
+    wet_booking = production_lab.fetchrow(
+        "SELECT person_id::text, commercial_treatment FROM bookings WHERE id = $1", work_orders["wet_hire"]
+    )
+    dry_booking = production_lab.fetchrow(
+        "SELECT person_id::text, commercial_treatment FROM bookings WHERE id = $1", work_orders["dry_hire"]
+    )
+    assert wet_booking and dict(wet_booking) == {
+        "person_id": production_lab.data.editor_person_id,
+        "commercial_treatment": "wet_hire",
+    }
+    assert dry_booking and dict(dry_booking) == {"person_id": None, "commercial_treatment": "dry_hire"}
+
+    def component_rows(booking_id: str) -> list[dict[str, object]]:
+        response = production_lab.client.get(f"/v1/bookings/{booking_id}/commercial-components")
+        assert response.status_code == 200, response.text
+        return response.json()["components"]
+
+    wet_components = component_rows(work_orders["wet_hire"])
+    dry_components = component_rows(work_orders["dry_hire"])
+    flat_components = component_rows(work_orders["flat_project_fee"])
+    assert {row["component_type"] for row in wet_components} == {"room", "person"}
+    assert {row["component_type"] for row in dry_components} == {"room"}
+    assert all(row["commercial_treatment"] == "wet_hire" for row in wet_components)
+    assert all(row["commercial_treatment"] == "dry_hire" for row in dry_components)
+    assert {row["component_type"] for row in flat_components} == {"fixed_fee", "room", "person"}
+    fixed_fee = next(row for row in flat_components if row["component_type"] == "fixed_fee")
+    assert fixed_fee["billing_treatment"] == "billable"
+    assert fixed_fee["estimated_charge"] == 900.0
+    assert all(
+        row["billing_treatment"] == "included" for row in flat_components if row["component_type"] != "fixed_fee"
+    )
+
+    flat_work_order_id = production_lab.fetchval(
+        "SELECT id::text FROM post_work_orders WHERE booking_id = $1", work_orders["flat_project_fee"]
+    )
+    charges = production_lab.client.get("/v1/billing/work-order-charges")
+    assert charges.status_code == 200, charges.text
+    assert flat_work_order_id not in {row["id"] for row in charges.json()["work_order_charges"]}
+    duplicate_billable = production_lab.client.post(f"/v1/billing/work-orders/{flat_work_order_id}/billables", json={})
+    assert duplicate_billable.status_code == 409
+    assert "linked booking components" in duplicate_billable.json()["detail"]

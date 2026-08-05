@@ -136,13 +136,14 @@ def create_confirmed_booking(lab: ProductionApiLab, current_episode_id: str, bud
     return created.json()["id"]
 
 
-def approve_client_change(lab: ProductionApiLab, current_episode_id: str, booking_id: str, client_po_id: str) -> str:
+def approve_client_change(
+    lab: ProductionApiLab, current_episode_id: str, client_po_id: str, booking_id: str | None = None
+) -> str:
     created = lab.client.post(
         "/v1/work-orders",
         json={
             "episode_id": current_episode_id,
             "workflow_stage_id": lab.data.workflow_stage_id,
-            "booking_id": booking_id,
             "title": "Client editorial change",
             "work_type": "internal",
             "billing_scope": "billable_change",
@@ -198,14 +199,19 @@ def test_full_invoice_lifecycle_reconciles_every_live_ledger_to_the_penny(produc
     )
     assert actual.status_code == 201, actual.text
     assert money(actual.json()["cost"]["actual_hours"]) == Decimal("2.75")
-    assert (
-        production_lab.fetchval(
-            "SELECT amount::text FROM budget_actual_allocations WHERE organization_id = $1 AND booking_id = $2",
-            production_lab.data.organization_id,
-            booking_id,
-        )
-        == "350.27"
+    initial_booking_actuals = production_lab.fetchrow(
+        """
+        SELECT count(*)::int AS count, sum(amount)::text AS total
+        FROM budget_actual_allocations
+        WHERE organization_id = $1 AND booking_id = $2
+        """,
+        production_lab.data.organization_id,
+        booking_id,
     )
+    # Wet hire produces independently auditable room and artist actuals.
+    # Both may allocate to the same estimate item, so the invariant is the
+    # component count and total—not an obsolete one-row booking ledger.
+    assert initial_booking_actuals and dict(initial_booking_actuals) == {"count": 2, "total": "625.00"}
 
     # Moving the planned window afterwards cannot duplicate or alter confirmed actuals.
     moved_booking = production_lab.client.patch(
@@ -232,7 +238,7 @@ def test_full_invoice_lifecycle_reconciles_every_live_ledger_to_the_penny(produc
         production_lab.data.organization_id,
         booking_id,
     )
-    assert booking_actuals and dict(booking_actuals) == {"count": 1, "total": "350.27"}
+    assert booking_actuals and dict(booking_actuals) == dict(initial_booking_actuals)
 
     vendor_id = make_vendor(production_lab)
     vendor_po = production_lab.client.post(
@@ -284,7 +290,7 @@ def test_full_invoice_lifecycle_reconciles_every_live_ledger_to_the_penny(produc
     assert len([item for item in po_detail.json()["allocations"] if item["allocation_type"] == "vendor_invoice"]) == 2
 
     client_po_id = active_client_po(production_lab, current_episode_id, Decimal("19.99"))
-    work_order_id = approve_client_change(production_lab, current_episode_id, booking_id, client_po_id)
+    work_order_id = approve_client_change(production_lab, current_episode_id, client_po_id)
     billable = production_lab.client.post(
         f"/v1/billing/work-orders/{work_order_id}/billables", json={"reference": "LIFECYCLE-CHANGE"}
     )
@@ -406,7 +412,7 @@ def test_vendor_invoice_correction_and_billable_void_reconcile_without_duplicate
         },
     )
     assert confirmed_time.status_code == 201, confirmed_time.text
-    work_order_id = approve_client_change(production_lab, current_episode_id, booking_id, client_po_id)
+    work_order_id = approve_client_change(production_lab, current_episode_id, client_po_id)
     posted = production_lab.client.post(f"/v1/billing/work-orders/{work_order_id}/billables", json={})
     assert posted.status_code == 201, posted.text
     voided = production_lab.client.post(
@@ -444,7 +450,7 @@ def test_export_reconciliation_blocks_tampered_source_and_cross_tenant_ids(produ
         },
     )
     assert confirmed_time.status_code == 201, confirmed_time.text
-    work_order_id = approve_client_change(production_lab, current_episode_id, booking_id, client_po_id)
+    work_order_id = approve_client_change(production_lab, current_episode_id, client_po_id)
     posted = production_lab.client.post(f"/v1/billing/work-orders/{work_order_id}/billables", json={})
     assert posted.status_code == 201
     configure_invoice_profile(production_lab, current_episode_id)

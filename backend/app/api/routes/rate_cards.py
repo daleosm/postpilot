@@ -32,6 +32,11 @@ from app.db.tables import (
 
 router = APIRouter(prefix="/rate-cards", tags=["rate-cards"])
 
+# These values are deliberately a commercial vocabulary rather than a list of
+# facility services or job roles. Services, rooms, and named artists stay
+# tenant-configured records.
+SUPPORTED_BILLING_UNITS = frozenset({"hour", "half_day", "day", "week", "episode", "fixed", "unit"})
+
 
 def _scope_name(card: object) -> str:
     if card.episode_id:
@@ -420,6 +425,11 @@ async def resolve_effective_rate(
     services, then master target/service. Network remains ahead of client when
     both define an equally-specific row, preserving the existing card policy.
     """
+    if unit not in SUPPORTED_BILLING_UNITS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Choose a supported billing unit.",
+        )
     if target_type not in {None, "room", "person"}:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Choose a valid rate target.")
     if bool(target_type) != bool(target_id):
@@ -600,7 +610,7 @@ async def resolve_effective_rate(
 
 @router.get("/services")
 async def list_service_rates(actor: CurrentActor, session: DbSession) -> dict[str, object]:
-    await require_permission(session, actor, "manage_commercial")
+    await require_permission(session, actor, "manage_rate_cards")
     services = (
         await session.execute(
             select(service_rates)
@@ -614,7 +624,7 @@ async def list_service_rates(actor: CurrentActor, session: DbSession) -> dict[st
 @router.get("/artist-roles")
 async def list_artist_rate_roles(actor: CurrentActor, session: DbSession) -> dict[str, object]:
     """Expose the tenant's editable role policy as selectable rate targets."""
-    await require_permission(session, actor, "manage_commercial")
+    await require_permission(session, actor, "manage_rate_cards")
     rows = (
         await session.execute(
             select(organization_role_policies.c.role, organization_role_policies.c.label)
@@ -693,6 +703,139 @@ async def list_master_room_rates(actor: CurrentActor, session: DbSession) -> dic
                 ),
             }
             for row in rows
+        ]
+    }
+
+
+@router.get("/room-rates")
+async def list_scoped_room_rates(
+    actor: CurrentActor,
+    session: DbSession,
+    scope: str,
+    network: str | None = None,
+    show_id: str | None = None,
+    episode_id: str | None = None,
+) -> dict[str, object]:
+    """Return each Settings room with its own and inherited scoped price.
+
+    Room rows use the same inheritance chain as booking price resolution.  A
+    scoped card deliberately contains only exceptions; all other rooms remain
+    visible here with the effective inherited rate so commercial users can see
+    what a booking would use before creating an override.
+    """
+    await require_permission(session, actor, "manage_rate_cards")
+    target = await _scope_target_from_query(
+        session,
+        actor,
+        scope=scope,
+        network=network,
+        client_company_id=None,
+        show_id=show_id,
+        episode_id=episode_id,
+    )
+
+    show = None
+    episode = None
+    if scope == "show":
+        show = (
+            await session.execute(
+                select(shows.c.id, shows.c.network, shows.c.client_company_id).where(
+                    and_(shows.c.id == target["show_id"], shows.c.organization_id == actor.organization_id)
+                )
+            )
+        ).first()
+    elif scope == "episode":
+        episode = await _episode_context(session, actor, str(target["episode_id"]))
+
+    cards = [card for card in await _all_cards(session, actor) if card.is_active]
+    items = await _items_for_cards(session, actor, [card.id for card in cards])
+
+    def master(card: object) -> bool:
+        return not card.client_company_id and not card.network and not card.show_id and not card.episode_id
+
+    def network_card(card: object, value: str | None) -> bool:
+        return bool(card.network == value and not card.client_company_id and not card.show_id and not card.episode_id)
+
+    def show_card(card: object, value: object) -> bool:
+        return bool(str(card.show_id or "") == str(value) and not card.episode_id)
+
+    def client_card(card: object, value: object) -> bool:
+        return bool(
+            str(card.client_company_id or "") == str(value or "")
+            and not card.network
+            and not card.show_id
+            and not card.episode_id
+        )
+
+    if scope == "master":
+        own = [card for card in cards if master(card)]
+        inherited_cards: list[object] = []
+    elif scope == "network":
+        own = [card for card in cards if network_card(card, str(target["network"]))]
+        inherited_cards = [card for card in cards if master(card)]
+    elif scope == "show":
+        own = [card for card in cards if show_card(card, show.id)]
+        inherited_cards = (
+            [card for card in cards if network_card(card, show.network)]
+            + [card for card in cards if client_card(card, show.client_company_id)]
+            + [card for card in cards if master(card)]
+        )
+    else:
+        own = [card for card in cards if str(card.episode_id or "") == str(episode.id)]
+        inherited_cards = (
+            [card for card in cards if show_card(card, episode.show_id)]
+            + [card for card in cards if network_card(card, episode.network)]
+            + [card for card in cards if client_card(card, episode.client_company_id)]
+            + [card for card in cards if master(card)]
+        )
+
+    def room_item(card_list: list[object], room_id: object) -> tuple[object, object] | None:
+        for card in card_list:
+            match = next(
+                (
+                    item
+                    for item in items.get(str(card.id), [])
+                    if item.target_type == "room" and str(item.room_id) == str(room_id)
+                ),
+                None,
+            )
+            if match:
+                return card, match
+        return None
+
+    def response_rate(result: tuple[object, object] | None) -> dict[str, object] | None:
+        if not result:
+            return None
+        card, item = result
+        return {
+            "id": str(item.id),
+            "category": item.category,
+            "unit": item.unit,
+            "rate": monetary(decimal_amount(item.rate)),
+            "internal_cost_rate": (
+                monetary(decimal_amount(item.internal_cost_rate)) if item.internal_cost_rate is not None else None
+            ),
+            "currency": card.currency,
+            "source_scope": _scope_name(card),
+        }
+
+    room_rows = (
+        await session.execute(
+            select(rooms.c.id, rooms.c.name, rooms.c.type)
+            .where(rooms.c.organization_id == actor.organization_id)
+            .order_by(rooms.c.name, rooms.c.id)
+        )
+    ).all()
+    return {
+        "rooms": [
+            {
+                "id": str(room.id),
+                "name": room.name,
+                "type": room.type,
+                "own_rate": response_rate(room_item(own, room.id)),
+                "inherited_rate": response_rate(room_item(inherited_cards, room.id)),
+            }
+            for room in room_rows
         ]
     }
 
@@ -882,7 +1025,7 @@ async def remove_service_rate(service_rate_id: str, actor: CurrentActor, session
 
 @router.get("")
 async def list_rate_cards(actor: CurrentActor, session: DbSession) -> dict[str, object]:
-    await require_permission(session, actor, "manage_commercial")
+    await require_permission(session, actor, "manage_rate_cards")
     cards = await _all_cards(session, actor)
     items = await _items_for_cards(session, actor, [card.id for card in cards])
     return {"rate_cards": [_card_response(card, items.get(str(card.id), [])) for card in cards]}
@@ -895,7 +1038,7 @@ async def search_rate_card_artists(
     query: str = "",
 ) -> dict[str, object]:
     """Search active people in this post house for an explicit artist rate."""
-    await require_permission(session, actor, "manage_commercial")
+    await require_permission(session, actor, "manage_rate_cards")
     term = query.strip()
     if not term:
         return {"people": []}
@@ -930,7 +1073,7 @@ async def list_artist_rates(
     episode_id: str | None = None,
 ) -> dict[str, object]:
     """Return explicit named-artist prices for one existing scoped card."""
-    await require_permission(session, actor, "manage_commercial")
+    await require_permission(session, actor, "manage_rate_cards")
     target = await _scope_target_from_query(
         session,
         actor,
@@ -1108,7 +1251,7 @@ async def get_rate_card_overrides(
     episode_id: str | None = None,
 ) -> dict[str, object]:
     """Return own and inherited rates for a rate-card scope."""
-    await require_permission(session, actor, "manage_commercial")
+    await require_permission(session, actor, "manage_rate_cards")
     if scope not in {"master", "network", "show", "episode"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid rate-card scope.")
     if scope == "network" and not network:

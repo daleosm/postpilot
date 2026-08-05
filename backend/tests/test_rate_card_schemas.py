@@ -1,7 +1,50 @@
 import pytest
 from pydantic import ValidationError
 
-from app.api.schemas import RateCardOverrideRequest
+from app.api.schemas import RateCardOverrideRequest, ServiceRateCreateRequest, ServiceRateUpdateRequest
+
+
+@pytest.mark.parametrize("unit", ["hour", "half_day", "day", "week", "fixed", "unit", "episode"])
+def test_rate_card_billing_units_are_supported_consistently(unit: str) -> None:
+    service = ServiceRateCreateRequest(
+        name="Colour service",
+        category="Colour",
+        unit=unit,
+        rate=100,
+    )
+    update = ServiceRateUpdateRequest(unit=unit)
+    room = RateCardOverrideRequest(
+        scope="master",
+        target_type="room",
+        room_id="room-1",
+        category="Colour suite",
+        unit=unit,
+        rate=200,
+    )
+    person = RateCardOverrideRequest(
+        scope="master",
+        target_type="person",
+        person_id="person-1",
+        category="Colourist",
+        unit=unit,
+        rate=175,
+    )
+
+    assert service.unit == update.unit == room.unit == person.unit == unit
+
+
+def test_rate_cards_reject_unsupported_billing_units() -> None:
+    with pytest.raises(ValidationError):
+        ServiceRateCreateRequest(name="Monthly retainer", category="Commercial", unit="month", rate=100)
+    with pytest.raises(ValidationError):
+        RateCardOverrideRequest(
+            scope="master",
+            target_type="person",
+            person_id="person-1",
+            category="Colourist",
+            unit="month",
+            rate=175,
+        )
 
 
 def test_rate_card_override_schema_requires_one_valid_scope_target() -> None:

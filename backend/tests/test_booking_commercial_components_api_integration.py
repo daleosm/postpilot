@@ -99,6 +99,8 @@ def test_booking_preview_and_confirmation_snapshot_room_and_named_artist_rates(
         "pricing_status": "resolved",
         "is_negotiated_override": False,
         "override_reason": None,
+        "billing_treatment": "billable",
+        "tax_treatment": "standard",
     }
     assert components["person"]["rate"] == 175.0
     assert components["person"]["internal_cost_rate"] == 90.0
@@ -115,9 +117,15 @@ def test_booking_preview_and_confirmation_snapshot_room_and_named_artist_rates(
     assert saved.status_code == 200, saved.text
     saved_components = {item["component_type"]: item for item in saved.json()["components"]}
     assert saved_components["room"]["rate"] == 100.0
+    assert saved_components["room"]["commercial_treatment"] == "wet_hire"
+    assert saved_components["room"]["billing_treatment"] == "billable"
     assert saved_components["room"]["estimated_charge"] == 300.0
     assert saved_components["person"]["rate"] == 175.0
+    assert saved_components["person"]["internal_cost_rate"] == 90.0
+    assert saved_components["person"]["commercial_treatment"] == "wet_hire"
+    assert saved_components["person"]["billing_treatment"] == "billable"
     assert saved_components["person"]["estimated_charge"] == 525.0
+    assert saved_components["person"]["source"] == "master_rate_card"
     assert production_lab.fetchval(
         "SELECT count(*) FROM booking_charge_components WHERE organization_id = $1 AND booking_id = $2",
         production_lab.data.organization_id,
@@ -184,6 +192,7 @@ def test_confirmed_qc_booking_snapshots_an_hourly_commercial_component(
             "ends_at": "2035-10-02T11:00:00Z",
             "booking_type": "qc",
             "status": "confirmed",
+            "commercial_treatment": "dry_hire",
         },
     )
     assert created.status_code == 201, created.text
@@ -192,6 +201,264 @@ def test_confirmed_qc_booking_snapshots_an_hourly_commercial_component(
     assert components[0]["component_type"] == "room"
     assert components[0]["unit"] == "hour"
     assert components[0]["estimated_charge"] == 200.0
+
+
+def test_booking_commercial_treatments_keep_dry_hire_room_only_and_flat_fee_as_one_client_component(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    _configure_edit_rates(production_lab)
+    episode_id = _episode_id(production_lab)
+
+    dry = production_lab.client.post(
+        "/v1/bookings",
+        json={
+            "title": "Client dry-hire suite",
+            "episode_id": episode_id,
+            "room_id": production_lab.data.room_id,
+            "starts_at": "2035-10-04T09:00:00Z",
+            "ends_at": "2035-10-04T12:00:00Z",
+            "booking_type": "edit",
+            "commercial_treatment": "dry_hire",
+        },
+    )
+    assert dry.status_code == 201, dry.text
+    assert dry.json()["commercial_treatment"] == "dry_hire"
+    assert [item["component_type"] for item in dry.json()["commercial_preview"]] == ["room"]
+
+    flat = production_lab.client.post(
+        "/v1/bookings",
+        json={
+            "title": "Agreed finishing package",
+            "episode_id": episode_id,
+            "starts_at": "2035-10-05T09:00:00Z",
+            "ends_at": "2035-10-05T18:00:00Z",
+            "booking_type": "edit",
+            "commercial_treatment": "flat_project_fee",
+            "client_quote_amount": "2500.00",
+        },
+    )
+    assert flat.status_code == 201, flat.text
+    assert flat.json()["commercial_treatment"] == "flat_project_fee"
+    assert flat.json()["client_quote_amount"] == 2500.0
+    assert flat.json()["commercial_preview"] == [
+        {
+            "component_type": "fixed_fee",
+            "resource": "Agreed project fee",
+            "resource_id": None,
+            "category": "Project fee",
+            "rate": 2500.0,
+            "internal_cost_rate": 0.0,
+            "unit": "fixed",
+            "currency": "GBP",
+            "source": "agreed_project_fee",
+            "source_card_id": None,
+            "source_card_item_id": None,
+            "rate_card_scope": "booking_agreement",
+            "estimated_quantity": 1.0,
+            "estimated_charge": 2500.0,
+            "pricing_status": "resolved",
+            "is_negotiated_override": False,
+            "override_reason": None,
+            "billing_treatment": "billable",
+            "tax_treatment": "standard",
+        }
+    ]
+    saved = production_lab.client.get(f"/v1/bookings/{flat.json()['id']}/commercial-components")
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["components"][0]["actual_client_charge"] == 2500.0
+    assert saved.json()["components"][0]["billing_treatment"] == "billable"
+    assert saved.json()["components"][0]["commercial_treatment"] == "flat_project_fee"
+
+
+def test_flat_fee_booking_keeps_optional_room_and_artist_costs_included(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    _configure_edit_rates(production_lab)
+    booking = production_lab.client.post(
+        "/v1/bookings",
+        json={
+            **_booking_payload(production_lab),
+            "title": "Included suite and artist for fixed finishing fee",
+            "commercial_treatment": "flat_project_fee",
+            "client_quote_amount": "2000.00",
+        },
+    )
+    assert booking.status_code == 201, booking.text
+    components = {item["component_type"]: item for item in booking.json()["commercial_preview"]}
+    assert components["fixed_fee"]["billing_treatment"] == "billable"
+    assert components["room"]["billing_treatment"] == "included"
+    assert components["person"]["billing_treatment"] == "included"
+
+    actual = production_lab.client.post(
+        f"/v1/bookings/{booking.json()['id']}/time-submissions",
+        json={
+            "actual_starts_at": "2035-10-01T09:00:00Z",
+            "actual_ends_at": "2035-10-01T12:00:00Z",
+            "overtime_minutes": 30,
+            "note": "Finishing ran through the agreed handover.",
+        },
+    )
+    assert actual.status_code == 201, actual.text
+    cost = actual.json()["cost"]
+    actual_components = {item["component_type"]: item for item in cost["components"]}
+    # The client receives the agreed package fee only. The late room and
+    # artist time remains visible as internal operational cost and variance.
+    assert cost["client_overtime_billing_enabled"] is False
+    assert cost["total_client_charge"] == 2000.0
+    assert actual_components["fixed_fee"]["actual_client_charge"] == 2000.0
+    assert actual_components["room"]["actual_client_charge"] == 0.0
+    assert actual_components["person"]["actual_client_charge"] == 0.0
+    assert actual_components["room"]["actual_internal_cost"] == 375.0
+    assert actual_components["person"]["actual_internal_cost"] == 337.5
+    assert cost["total_internal_cost"] == 712.5
+
+
+def test_flat_fee_budget_forecast_surfaces_operational_margin_risk_without_an_estimate(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    _configure_edit_rates(production_lab)
+    booking = production_lab.client.post(
+        "/v1/bookings",
+        json={
+            **_booking_payload(production_lab),
+            "title": "Underquoted finishing package",
+            "commercial_treatment": "flat_project_fee",
+            "client_quote_amount": "500.00",
+        },
+    )
+    assert booking.status_code == 201, booking.text
+    actual = production_lab.client.post(
+        f"/v1/bookings/{booking.json()['id']}/time-submissions",
+        json={
+            "actual_starts_at": "2035-10-01T09:00:00Z",
+            "actual_ends_at": "2035-10-01T12:00:00Z",
+            "overtime_minutes": 30,
+        },
+    )
+    assert actual.status_code == 201, actual.text
+    overview = production_lab.client.get(
+        f"/v1/budget/episodes/{_episode_id(production_lab)}/estimate-overview"
+    )
+    assert overview.status_code == 200, overview.text
+    estimate = overview.json()["estimate"]
+    assert estimate["unallocated_operational_actual"] == 712.5
+    assert estimate["commercial_forecast"] == {
+        "agreed_flat_fee_revenue": 500.0,
+        "flat_fee_internal_actual": 712.5,
+        "flat_fee_internal_forecast": 712.5,
+        "flat_fee_forecast_margin": -212.5,
+        "flat_fee_margin_at_risk": True,
+    }
+    ledger = production_lab.client.get(
+        f"/v1/budget/episodes/{_episode_id(production_lab)}/operational-ledger"
+    )
+    assert ledger.status_code == 200, ledger.text
+    assert {item["component_type"] for item in ledger.json()["ledger"]["unallocated_actuals"]} == {"room", "person"}
+
+
+def test_authorised_fixed_fee_override_is_a_reasoned_booking_snapshot(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    payload = {
+        "title": "Negotiated finishing package",
+        "episode_id": _episode_id(production_lab),
+        "starts_at": "2035-10-06T09:00:00Z",
+        "ends_at": "2035-10-06T18:00:00Z",
+        "booking_type": "edit",
+        "status": "confirmed",
+        "commercial_treatment": "flat_project_fee",
+        "client_quote_amount": "2500.00",
+        "commercial_overrides": [
+            {
+                "component_type": "fixed_fee",
+                "rate": "2300.00",
+                "reason": "Client approved a reduced finishing package.",
+            }
+        ],
+    }
+
+    preview = production_lab.client.post("/v1/bookings/commercial-preview", json=payload)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["components"] == [
+        {
+            "component_type": "fixed_fee",
+            "resource": "Agreed project fee",
+            "resource_id": None,
+            "category": "Project fee",
+            "rate": 2300.0,
+            "internal_cost_rate": 0.0,
+            "unit": "fixed",
+            "currency": "GBP",
+            "source": "negotiated_booking_override",
+            "source_card_id": None,
+            "source_card_item_id": None,
+            "rate_card_scope": "booking_override",
+            "estimated_quantity": 1.0,
+            "estimated_charge": 2300.0,
+            "pricing_status": "resolved",
+            "is_negotiated_override": True,
+            "override_reason": "Client approved a reduced finishing package.",
+            "billing_treatment": "billable",
+            "tax_treatment": "standard",
+        }
+    ]
+
+    created = production_lab.client.post("/v1/bookings", json=payload)
+    assert created.status_code == 201, created.text
+    saved = production_lab.client.get(f"/v1/bookings/{created.json()['id']}/commercial-components")
+    assert saved.status_code == 200, saved.text
+    component = saved.json()["components"][0]
+    assert component["rate"] == 2300.0
+    assert component["estimated_charge"] == 2300.0
+    assert component["source"] == "negotiated_booking_override"
+    assert component["is_negotiated_override"] is True
+    assert component["override_reason"] == "Client approved a reduced finishing package."
+    assert production_lab.fetchval(
+        """
+        SELECT count(*)
+        FROM activity_log
+        WHERE organization_id = $1 AND entity_type = 'booking' AND entity_id = $2
+          AND action = 'booking.price_override_approved'
+        """,
+        production_lab.data.organization_id,
+        created.json()["id"],
+    ) == 1
+
+
+def test_flat_fee_work_order_creates_one_billable_fee_and_included_service_components(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    created = production_lab.client.post(
+        "/v1/work-orders",
+        json={
+            "episode_id": _episode_id(production_lab),
+            "title": "Network finishing package",
+            "billing_scope": "billable_change",
+            "commercial_treatment": "flat_project_fee",
+            "client_quote_amount": "1800.00",
+            "items": [
+                {
+                    "type": "service",
+                    "description": "Finishing support",
+                    "quantity": 3,
+                    "unit": "hour",
+                    "unit_rate": 150,
+                    "discount_percent": 0,
+                }
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    components = {item["component_type"]: item for item in created.json()["charge_components"]}
+    assert components["fixed_fee"]["billing_treatment"] == "billable"
+    assert components["fixed_fee"]["estimated_amount"] == "1800.00"
+    assert components["service"]["billing_treatment"] == "included"
+    assert components["service"]["estimated_amount"] == "450.00"
 
 
 def test_booking_uses_the_assigned_artists_role_rate_without_a_named_person_row(
@@ -286,6 +553,44 @@ def test_confirmed_booking_creation_replays_idempotently_without_duplicate_compo
         production_lab.data.organization_id,
         payload["title"],
     ) == 1
+
+
+def test_historic_work_order_review_flag_preserves_its_recorded_commercial_values(
+    production_lab: ProductionApiLab,
+) -> None:
+    """A review flag is an attention state, never a migration-time reprice."""
+    production_lab.sign_in_as_manager()
+    created = production_lab.client.post(
+        "/v1/work-orders",
+        json={
+            "episode_id": _episode_id(production_lab),
+            "title": "Historic agreed finishing package",
+            "billing_scope": "billable_change",
+            "commercial_treatment": "flat_project_fee",
+            "client_quote_amount": "1750.25",
+        },
+    )
+    assert created.status_code == 201, created.text
+    work_order_id = created.json()["id"]
+    production_lab.execute(
+        """
+        UPDATE post_work_orders
+        SET commercial_treatment_snapshot_at = NULL,
+            commercial_review_required = TRUE,
+            commercial_review_reason = 'Historic work order has no confirmed commercial treatment snapshot.'
+        WHERE organization_id = $1 AND id = $2
+        """,
+        production_lab.data.organization_id,
+        work_order_id,
+    )
+
+    fetched = production_lab.client.get(f"/v1/work-orders/{work_order_id}")
+
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["commercial_review_required"] is True
+    assert fetched.json()["commercial_review_reason"] == "Historic work order has no confirmed commercial treatment snapshot."
+    assert fetched.json()["commercial_treatment"] == "flat_project_fee"
+    assert fetched.json()["client_quote_amount"] == "1750.25"
 
 
 def test_foreign_booking_commercial_selection_is_rejected(production_lab: ProductionApiLab) -> None:

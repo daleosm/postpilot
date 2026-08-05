@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import and_, delete, func, insert, or_, select, update
 
 from app.api.dependencies import CurrentActor, DbSession
 from app.api.production import may_view_all_episodes
-from app.api.schemas import WorkOrderBookingRequest, WorkOrderCreateRequest, WorkOrderUpdateRequest
+from app.api.routes.bookings import _audit_booking_charge_snapshot, _resolve_booking_commercial_components, _sync_booking_commercial_components
+from app.api.schemas import BookingCreateRequest, WorkOrderBookingRequest, WorkOrderCreateRequest, WorkOrderUpdateRequest
 from app.auth import has_permission, require_permission
 from app.booking_logic import booking_conflicts
 from app.budget_logic import decimal_amount, json_safe
@@ -32,6 +34,7 @@ from app.db.tables import (
     seasons,
     shows,
     vendor_invoices,
+    work_order_charge_components,
     workflow_stages,
 )
 from app.vendor_spend import external_budget_line_for_episode
@@ -44,7 +47,32 @@ def _decimal(value: object | None) -> Decimal:
     return decimal_amount(value)
 
 
-def _work_order_value(row: object, items: list[object] | None = None) -> dict[str, object]:
+def _work_order_component_value(component: object) -> dict[str, object]:
+    return {
+        "id": str(component.id),
+        "component_type": component.component_type,
+        "resource": component.resource_name,
+        "room_id": str(component.room_id) if component.room_id else None,
+        "person_id": str(component.person_id) if component.person_id else None,
+        "category": component.category,
+        "billing_unit": component.billing_unit,
+        "client_rate": str(component.client_rate),
+        "internal_cost_rate": str(component.internal_cost_rate) if component.internal_cost_rate is not None else None,
+        "quantity": str(component.estimated_quantity),
+        "estimated_amount": str(component.estimated_amount),
+        "currency": component.currency,
+        "rate_source": component.rate_source,
+        "source_rate_card_id": str(component.rate_card_id) if component.rate_card_id else None,
+        "source_rate_card_item_id": str(component.rate_card_item_id) if component.rate_card_item_id else None,
+        "billing_treatment": component.billing_treatment,
+        "tax_treatment": component.tax_treatment,
+        "override_reason": component.override_reason,
+    }
+
+
+def _work_order_value(
+    row: object, items: list[object] | None = None, charge_components: list[object] | None = None
+) -> dict[str, object]:
     value = {
         "id": str(row.id),
         "episode_id": str(row.episode_id),
@@ -66,6 +94,10 @@ def _work_order_value(row: object, items: list[object] | None = None) -> dict[st
         "status": row.status,
         "billing_scope": row.billing_scope,
         "billing_status": row.billing_status,
+        "commercial_treatment": row.commercial_treatment,
+        "commercial_treatment_snapshot_at": row.commercial_treatment_snapshot_at,
+        "commercial_review_required": bool(row.commercial_review_required),
+        "commercial_review_reason": row.commercial_review_reason,
         "planned_duration_quantity": str(row.planned_duration_quantity)
         if row.planned_duration_quantity is not None
         else None,
@@ -102,7 +134,175 @@ def _work_order_value(row: object, items: list[object] | None = None) -> dict[st
             }
             for item in items
         ]
+    if charge_components is not None:
+        value["charge_components"] = [_work_order_component_value(component) for component in charge_components]
     return value
+
+
+def _scope_billing_treatment(billing_scope: str) -> str:
+    return {
+        "billable_change": "billable",
+        "included": "included",
+        "internal": "internal_no_charge",
+    }.get(billing_scope, "internal_no_charge")
+
+
+async def _sync_work_order_charge_components(
+    session: DbSession, actor: CurrentActor, work_order: object
+) -> list[object]:
+    """Refresh the commercial ledger from the current work-order agreement.
+
+    Work-order items are commercial planning rows, not client invoices. Their
+    components are therefore explicitly tagged as billable, included, or
+    internal/no-charge. A flat fee is the only automatic billable client
+    component for a flat-project agreement.
+    """
+    items = (
+        await session.execute(
+            select(post_work_order_items)
+            .where(
+                and_(
+                    post_work_order_items.c.organization_id == actor.organization_id,
+                    post_work_order_items.c.work_order_id == work_order.id,
+                )
+            )
+            .order_by(post_work_order_items.c.position, post_work_order_items.c.id)
+        )
+    ).all()
+    now = datetime.now(UTC)
+    values: list[dict[str, object]] = []
+    standard_treatment = _scope_billing_treatment(str(work_order.billing_scope))
+
+    if work_order.commercial_treatment == "flat_project_fee":
+        fee = _decimal(work_order.client_quote_amount)
+        if fee > 0:
+            values.append(
+                {
+                    "id": str(uuid4()),
+                    "organization_id": actor.organization_id,
+                    "work_order_id": work_order.id,
+                    "work_order_item_id": None,
+                    "component_type": "fixed_fee",
+                    "room_id": None,
+                    "person_id": None,
+                    "resource_name": "Agreed project fee",
+                    "category": "Project fee",
+                    "billing_unit": "fixed",
+                    "client_rate": fee,
+                    "internal_cost_rate": Decimal(0),
+                    "currency": work_order.client_quote_currency or work_order.currency,
+                    "rate_source": "agreed_project_fee",
+                    "rate_card_id": None,
+                    "rate_card_item_id": None,
+                    "billing_treatment": "billable",
+                    "tax_treatment": "standard",
+                    "override_reason": None,
+                    "estimated_quantity": Decimal(1),
+                    "estimated_amount": fee,
+                    "actual_quantity": None,
+                    "actual_client_amount": None,
+                    "actual_internal_amount": Decimal(0),
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            )
+
+    for item in items:
+        quantity = _decimal(item.quantity)
+        rate = _decimal(item.unit_rate)
+        amount = (quantity * rate * (Decimal(100) - _decimal(item.discount_percent)) / Decimal(100)).quantize(
+            Decimal("0.01")
+        )
+        values.append(
+            {
+                "id": str(uuid4()),
+                "organization_id": actor.organization_id,
+                "work_order_id": work_order.id,
+                "work_order_item_id": item.id,
+                "component_type": "service",
+                "room_id": None,
+                "person_id": None,
+                "resource_name": item.description,
+                "category": item.type,
+                "billing_unit": item.unit,
+                "client_rate": rate if standard_treatment == "billable" else Decimal(0),
+                "internal_cost_rate": rate,
+                "currency": work_order.currency,
+                "rate_source": "work_order_item",
+                "rate_card_id": None,
+                "rate_card_item_id": None,
+                "billing_treatment": "included"
+                if work_order.commercial_treatment == "flat_project_fee"
+                else standard_treatment,
+                "tax_treatment": "standard",
+                "override_reason": None,
+                "estimated_quantity": quantity,
+                "estimated_amount": amount,
+                "actual_quantity": None,
+                "actual_client_amount": None,
+                "actual_internal_amount": None,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+
+    if work_order.allow_overtime_billing and work_order.overtime_hourly_base_rate is not None:
+        overtime_rate = (_decimal(work_order.overtime_hourly_base_rate) * _decimal(work_order.overtime_multiplier)).quantize(
+            Decimal("0.01")
+        )
+        values.append(
+            {
+                "id": str(uuid4()),
+                "organization_id": actor.organization_id,
+                "work_order_id": work_order.id,
+                "work_order_item_id": None,
+                "component_type": "overtime",
+                "room_id": None,
+                "person_id": None,
+                "resource_name": "Approved overtime allowance",
+                "category": "Overtime",
+                "billing_unit": "hour",
+                "client_rate": overtime_rate,
+                "internal_cost_rate": overtime_rate,
+                "currency": work_order.currency,
+                "rate_source": "work_order_overtime_policy",
+                "rate_card_id": None,
+                "rate_card_item_id": None,
+                "billing_treatment": "billable" if work_order.commercial_treatment != "flat_project_fee" else "included",
+                "tax_treatment": "standard",
+                "override_reason": None,
+                "estimated_quantity": Decimal(0),
+                "estimated_amount": Decimal(0),
+                "actual_quantity": None,
+                "actual_client_amount": None,
+                "actual_internal_amount": None,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+
+    await session.execute(
+        delete(work_order_charge_components).where(
+            and_(
+                work_order_charge_components.c.organization_id == actor.organization_id,
+                work_order_charge_components.c.work_order_id == work_order.id,
+            )
+        )
+    )
+    if values:
+        await session.execute(insert(work_order_charge_components), values)
+    return (
+        await session.execute(
+            select(work_order_charge_components)
+            .where(
+                and_(
+                    work_order_charge_components.c.organization_id == actor.organization_id,
+                    work_order_charge_components.c.work_order_id == work_order.id,
+                )
+            )
+            .order_by(work_order_charge_components.c.component_type, work_order_charge_components.c.resource_name)
+        )
+    ).all()
 
 
 async def _audit(
@@ -246,6 +446,16 @@ async def _validate_create_references(
 
     if booking and booking.episode_id != episode.id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Booking must belong to this episode.")
+    if booking and payload.commercial_treatment == "wet_hire" and (not booking.room_id or not booking.person_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Wet-hire work needs a linked booking with both a room and assigned person.",
+        )
+    if booking and payload.commercial_treatment == "dry_hire" and not booking.room_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Dry-hire work needs a linked booking with a room.",
+        )
     if stage and episode.workflow_stage_id:
         current_stage = await _tenant_record(
             session, workflow_stages, actor, str(episode.workflow_stage_id), "Episode workflow stage"
@@ -783,7 +993,19 @@ async def get_work_order(work_order_id: str, actor: CurrentActor, session: DbSes
             .order_by(post_work_order_items.c.position, post_work_order_items.c.id)
         )
     ).all()
-    return _work_order_value(work_order, item_rows)
+    component_rows = (
+        await session.execute(
+            select(work_order_charge_components)
+            .where(
+                and_(
+                    work_order_charge_components.c.organization_id == actor.organization_id,
+                    work_order_charge_components.c.work_order_id == work_order_id,
+                )
+            )
+            .order_by(work_order_charge_components.c.component_type, work_order_charge_components.c.resource_name)
+        )
+    ).all()
+    return _work_order_value(work_order, item_rows, component_rows)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -800,6 +1022,7 @@ async def create_work_order(
         "billing_notes",
         "items",
         "client_purchase_order_id",
+        "commercial_treatment",
     }
     if commercial_fields.intersection(payload.model_fields_set):
         await require_permission(session, actor, "manage_commercial")
@@ -841,6 +1064,11 @@ async def create_work_order(
             status="in_progress" if payload.kind == "qc_exception" else "open",
             billing_scope=payload.billing_scope,
             billing_status="draft" if payload.billing_scope == "billable_change" else "not_billable",
+            commercial_treatment=payload.commercial_treatment,
+            commercial_treatment_snapshot_at=now,
+            commercial_review_required=False,
+            commercial_review_reason=None,
+            commercial_review_marked_at=None,
             **time_block_billing,
             estimated_amount=payload.estimated_amount if payload.work_type == "external_vendor" else None,
             client_quote_amount=payload.client_quote_amount,
@@ -875,16 +1103,22 @@ async def create_work_order(
                 updated_at=now,
             )
         )
+    component_rows = await _sync_work_order_charge_components(session, actor, row)
     await _audit(
         session,
         actor,
         action="work_order.created",
         work_order_id=str(row.id),
         episode_id=str(episode.id),
-        metadata={"kind": payload.kind, "workType": payload.work_type, "itemCount": len(payload.items)},
+        metadata={
+            "kind": payload.kind,
+            "workType": payload.work_type,
+            "commercialTreatment": payload.commercial_treatment,
+            "itemCount": len(payload.items),
+        },
     )
     await session.commit()
-    return _work_order_value(row)
+    return _work_order_value(row, charge_components=component_rows)
 
 
 @router.patch("/{work_order_id}")
@@ -914,6 +1148,7 @@ async def update_work_order(
         "budget_line_id",
         "client_purchase_order_id",
         "billing_scope",
+        "commercial_treatment",
         "estimated_amount",
         "client_quote_amount",
         "allow_overtime_billing",
@@ -937,6 +1172,7 @@ async def update_work_order(
         "estimated_amount",
         "client_purchase_order_id",
         "billing_scope",
+        "commercial_treatment",
         "client_quote_amount",
         "allow_overtime_billing",
         "overtime_multiplier",
@@ -1010,6 +1246,9 @@ async def update_work_order(
     )
     next_estimated_amount = payload.estimated_amount if "estimated_amount" in fields else work_order.estimated_amount
     next_billing_scope = payload.billing_scope if "billing_scope" in fields else work_order.billing_scope
+    next_commercial_treatment = (
+        payload.commercial_treatment if "commercial_treatment" in fields else work_order.commercial_treatment
+    )
     next_client_purchase_order_id = (
         payload.client_purchase_order_id
         if "client_purchase_order_id" in fields
@@ -1033,6 +1272,46 @@ async def update_work_order(
         payload.overtime_multiplier if "overtime_multiplier" in fields else work_order.overtime_multiplier
     )
     next_billing_notes = payload.billing_notes if "billing_notes" in fields else work_order.billing_notes
+    if (
+        "commercial_treatment" in fields
+        and work_order.status not in {"open", "rejected"}
+        and next_commercial_treatment != work_order.commercial_treatment
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An approved work order's commercial treatment is already an agreed snapshot.",
+        )
+    if next_commercial_treatment == "flat_project_fee" and _decimal(next_client_quote_amount) <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Flat project fee needs an agreed client price.",
+        )
+    if next_commercial_treatment == "flat_project_fee" and (
+        next_work_type != "internal" or next_billing_scope != "billable_change"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Flat project fee is only available for internal client-billable work.",
+        )
+    if next_commercial_treatment == "flat_project_fee" and next_allow_overtime_billing:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Flat project fees require a separate authorised change for client overtime.",
+        )
+    linked_booking_id = str(work_order.booking_id) if work_order.booking_id else None
+    linked_booking = await _tenant_record(session, bookings, actor, linked_booking_id, "Linked booking")
+    if linked_booking and next_commercial_treatment == "wet_hire" and (
+        not linked_booking.room_id or not linked_booking.person_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Wet-hire work needs a linked booking with both a room and assigned person.",
+        )
+    if linked_booking and next_commercial_treatment == "dry_hire" and not linked_booking.room_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Dry-hire work needs a linked booking with a room.",
+        )
     selected_order = None
     selected_client_order = None
     if next_work_type == "internal":
@@ -1166,7 +1445,11 @@ async def update_work_order(
         # placed on the facility calendar, rather than being completed as an
         # off-calendar task. External vendor work remains intentionally free
         # of this gate because it does not reserve a post-house room.
-        if payload.status in {"ready_for_review", "complete"} and work_order.work_type == "internal":
+        if (
+            payload.status in {"ready_for_review", "complete"}
+            and work_order.work_type == "internal"
+            and (work_order.assignee_person_id or work_order.assignee_role)
+        ):
             if not work_order.booking_id:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
@@ -1273,6 +1556,7 @@ async def update_work_order(
         "estimated_amount",
         "client_purchase_order_id",
         "billing_scope",
+        "commercial_treatment",
         "client_quote_amount",
         "planned_duration_quantity",
         "planned_duration_unit",
@@ -1292,6 +1576,11 @@ async def update_work_order(
             "estimated_amount": next_estimated_amount,
             "client_purchase_order_id": next_client_purchase_order_id,
             "billing_scope": next_billing_scope,
+            "commercial_treatment": next_commercial_treatment,
+            "commercial_treatment_snapshot_at": (
+                work_order.commercial_treatment_snapshot_at
+                or (now if next_status in {"awaiting_approval", "in_progress", "ready_for_review", "complete"} else None)
+            ),
             "client_quote_amount": next_client_quote_amount,
             "client_quote_currency": actor.active_organization.currency
             if next_client_quote_amount is not None
@@ -1324,6 +1613,7 @@ async def update_work_order(
         .returning(post_work_orders)
     )
     row = changed.one()
+    component_rows = await _sync_work_order_charge_components(session, actor, row)
     allocation_id, released_commitments = (
         await _apply_po_commitment(
             session,
@@ -1444,10 +1734,11 @@ async def update_work_order(
             "status": next_status,
             "clientPurchaseOrderId": next_client_purchase_order_id,
             "clientPoAllocationId": client_allocation_id,
+            "commercialTreatment": next_commercial_treatment,
         },
     )
     await session.commit()
-    return _work_order_value(row)
+    return _work_order_value(row, charge_components=component_rows)
 
 
 @router.post("/{work_order_id}/booking", status_code=status.HTTP_201_CREATED)
@@ -1493,16 +1784,22 @@ async def reserve_work_order_room(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="This room cannot be reserved for a work order."
         )
-    person_id = work_order.assignee_person_id or actor.person_id
-    if not person_id:
+    assigned_person_id = work_order.assignee_person_id or actor.person_id
+    if work_order.commercial_treatment == "wet_hire" and not assigned_person_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Assign a person before reserving this work.")
+    # Dry hire protects only the room. Wet hire reserves the assigned artist;
+    # a flat-fee operational booking does so when an assignee exists.
+    person_id = assigned_person_id if work_order.commercial_treatment in {"wet_hire", "flat_project_fee"} else None
+    conflict_resources = [bookings.c.room_id == room.id]
+    if person_id:
+        conflict_resources.append(bookings.c.person_id == person_id)
     existing = (
         await session.execute(
             select(bookings).where(
                 and_(
                     bookings.c.organization_id == actor.organization_id,
                     bookings.c.status != "cancelled",
-                    or_(bookings.c.room_id == room.id, bookings.c.person_id == person_id),
+                    or_(*conflict_resources),
                 )
             )
         )
@@ -1549,6 +1846,29 @@ async def reserve_work_order_room(
             .limit(1)
         )
     ).first()
+    booking_payload = BookingCreateRequest(
+        title=f"Work order · {work_order.title}"[:160],
+        room_id=str(room.id),
+        episode_id=str(work_order.episode_id),
+        budget_line_id=str(budget_item.id) if budget_item else None,
+        person_id=str(person_id) if person_id else None,
+        starts_at=payload.starts_at,
+        ends_at=payload.ends_at,
+        setup_minutes=0,
+        handover_minutes=0,
+        status="confirmed",
+        commercial_treatment=work_order.commercial_treatment,
+        client_quote_amount=(
+            work_order.client_quote_amount if work_order.commercial_treatment == "flat_project_fee" else None
+        ),
+        booking_type=booking_type,
+        is_option=False,
+        notes=payload.notes.strip() if payload.notes else "Reserved from assigned work order.",
+    )
+    # Resolve exactly the same tenant rate-card data as a normal booking.
+    # This happens before the insert so a work-order reservation carries a
+    # single authoritative commercial agreement into actual-time and billing.
+    commercial_preview = await _resolve_booking_commercial_components(session, actor, booking_payload)
     created = await session.execute(
         insert(bookings)
         .values(
@@ -1557,22 +1877,36 @@ async def reserve_work_order_room(
             episode_id=work_order.episode_id,
             budget_line_id=budget_item.id if budget_item else None,
             person_id=person_id,
-            title=f"Work order · {work_order.title}"[:160],
-            starts_at=payload.starts_at,
-            ends_at=payload.ends_at,
+            title=booking_payload.title,
+            starts_at=booking_payload.starts_at,
+            ends_at=booking_payload.ends_at,
             setup_minutes=0,
             handover_minutes=0,
+            commercial_treatment=booking_payload.commercial_treatment,
+            client_quote_amount=booking_payload.client_quote_amount,
+            client_quote_currency=(
+                work_order.client_quote_currency if work_order.commercial_treatment == "flat_project_fee" else None
+            ),
+            commercial_treatment_snapshot_at=now,
             approved_overtime_minutes=0,
             is_option=False,
             status="confirmed",
             booking_type=booking_type,
-            notes=payload.notes.strip() if payload.notes else "Reserved from assigned work order.",
+            notes=booking_payload.notes,
             created_at=now,
             updated_at=now,
         )
-        .returning(bookings.c.id)
+        .returning(bookings)
     )
-    booking_id = str(created.scalar_one())
+    booking = created.one()
+    booking_id = str(booking.id)
+    snapshots = await _sync_booking_commercial_components(
+        session,
+        actor,
+        booking=booking,
+        payload=booking_payload,
+    )
+    await _audit_booking_charge_snapshot(session, actor, booking=booking, components=snapshots)
     # Guard the link update as well: serial client requests must not attach two
     # facility bookings to one work order.
     link_conditions = [
@@ -1606,6 +1940,9 @@ async def reserve_work_order_room(
         metadata={
             "bookingId": booking_id,
             "roomId": str(room.id),
+            "personId": str(person_id) if person_id else None,
+            "commercialTreatment": work_order.commercial_treatment,
+            "commercialSnapshotCount": len(snapshots),
             "resumedFromReview": work_order.status == "ready_for_review",
         },
     )
@@ -1620,6 +1957,8 @@ async def reserve_work_order_room(
                 "workOrderId": work_order_id,
                 "episodeId": str(work_order.episode_id),
                 "budgetLineId": str(budget_item.id) if budget_item else None,
+                "commercialTreatment": work_order.commercial_treatment,
+                "commercialSnapshotCount": len(snapshots),
             },
         )
     )

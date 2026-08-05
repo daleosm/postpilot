@@ -21,10 +21,19 @@ export type EstimateOverview = {
   currentApprovedEstimate: number | null;
   workingEstimate: number;
   actual: number;
+  allocatedActual: number;
+  unallocatedOperationalActual: number;
   remainingPlanned: number;
   forecast: number;
   forecastBasis: "open_revision" | "current_approved_estimate" | "working_plan";
   variance: number | null;
+  commercialForecast: {
+    agreedFlatFeeRevenue: number;
+    flatFeeInternalActual: number;
+    flatFeeInternalForecast: number;
+    flatFeeForecastMargin: number;
+    flatFeeMarginAtRisk: boolean;
+  };
   isLocked: boolean;
   openRevisionId: string | null;
   currency: string;
@@ -96,7 +105,7 @@ export function EstimateRevisionPanel({ episodeId, estimate }: { episodeId: stri
     <div className="grid gap-px bg-[#ebeae6] sm:grid-cols-2 lg:grid-cols-5">
       <Amount label="Original" value={estimate.originalEstimate} currency={estimate.currency} />
       <Amount label="Current approved" value={estimate.currentApprovedEstimate} currency={estimate.currency} />
-      <Amount label="Actual" value={estimate.actual} currency={estimate.currency} />
+      <Amount label="Actual" value={estimate.actual} currency={estimate.currency} detail={estimate.unallocatedOperationalActual > 0 ? `${money(estimate.unallocatedOperationalActual, estimate.currency)} unallocated operational cost` : undefined} />
       <Amount label="Remaining plan" value={estimate.remainingPlanned} currency={estimate.currency} />
       <Amount label="Forecast" value={estimate.forecast} currency={estimate.currency} emphasis />
     </div>
@@ -116,8 +125,8 @@ export function EstimateRevisionPanel({ episodeId, estimate }: { episodeId: stri
   </section>;
 }
 
-function Amount({ label, value, currency, emphasis = false }: { label: string; value: number | null; currency: string; emphasis?: boolean }) {
-  return <div className="bg-white px-5 py-3"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#858a87]">{label}</p><p className={`mt-1 text-base font-semibold ${emphasis ? "text-[#3e7160]" : "text-[#343d39]"}`}>{value === null ? "—" : money(value, currency)}</p></div>;
+function Amount({ label, value, currency, emphasis = false, detail }: { label: string; value: number | null; currency: string; emphasis?: boolean; detail?: string }) {
+  return <div className="bg-white px-5 py-3"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#858a87]">{label}</p><p className={`mt-1 text-base font-semibold ${emphasis ? "text-[#3e7160]" : "text-[#343d39]"}`}>{value === null ? "—" : money(value, currency)}</p>{detail && <p className="mt-1 text-[10px] leading-4 text-[#956a58]">{detail}</p>}</div>;
 }
 function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) { return <label className="block text-sm font-medium text-[#48514d]"><span>{label}</span><div className="mt-1.5">{children}</div>{error && <span className="mt-1 block text-xs font-normal text-[#a65f42]">{error}</span>}</label>; }
 function money(value: number, currency: string) { try { return new Intl.NumberFormat("en-GB", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value); } catch { return `${currency} ${value.toFixed(2)}`; } }

@@ -48,11 +48,18 @@ def _configure_invoice_profile(lab: ProductionApiLab, episode_id: str) -> None:
 
 
 def _project_actual(item: dict[str, object]) -> dict[str, object]:
+    source_type = str(item["source_type"])
     return {
-        "source_type": item["source_type"],
+        "source_type": source_type,
         "amount": item["amount"],
         "category": item["budget_item"]["category"],
-        "reference": "booking-actual" if item["source_type"] == "booking" else item["reference"],
+        "reference": (
+            "booking-actual"
+            if source_type == "booking"
+            else "booking-component-actual"
+            if source_type == "booking_component"
+            else item["reference"]
+        ),
     }
 
 
@@ -200,8 +207,7 @@ def test_golden_episode_ledger_and_invoice_match_the_checked_in_penny_fixture(
         json={
             "episode_id": episode_id,
             "workflow_stage_id": lab.data.workflow_stage_id,
-            "booking_id": booking_id,
-            "title": "Golden client editorial change",
+                "title": "Golden client editorial change",
             "work_type": "internal",
             "billing_scope": "billable_change",
             "client_purchase_order_id": client_po_id,
@@ -385,6 +391,29 @@ def test_golden_booking_room_and_artist_rate_snapshots_invoice_to_the_penny(
     booking = lab.client.post("/v1/bookings", json=payload)
     assert booking.status_code == 201, booking.text
     booking_id = booking.json()["id"]
+    # This is operationally linked work with authorised overtime billing.  The
+    # booking components remain the only invoice source; the work order only
+    # supplies the agreed overtime treatment.
+    lab.execute(
+        """
+        INSERT INTO post_work_orders (
+          id, organization_id, episode_id, booking_id, work_type, kind, title,
+              assignee_person_id, priority, is_blocking, status, billing_scope,
+              billing_status, currency, allow_overtime_billing, planned_duration_quantity,
+              planned_duration_unit, standard_day_hours_snapshot, overtime_multiplier,
+              overtime_hourly_base_rate
+            ) VALUES (
+              $1, $2, $3, $4, 'internal', 'work_order', 'Golden approved overtime',
+              $5, 'normal', false, 'in_progress', 'billable_change', 'draft', 'GBP', true,
+              1, 'hour', 10, 1.5, 100
+            )
+        """,
+        str(uuid4()),
+        lab.data.organization_id,
+        episode_id,
+        booking_id,
+        lab.data.manager_person_id,
+    )
     submitted = lab.client.post(
         f"/v1/bookings/{booking_id}/time-submissions",
         json={

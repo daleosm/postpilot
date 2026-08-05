@@ -524,6 +524,14 @@ budget_actual_allocations = Table(
     Column("source_type", Text, nullable=False),
     # A confirmed time submission belongs to its booking in the current model.
     Column("booking_id", UUID(as_uuid=False), ForeignKey("bookings.id", ondelete="SET NULL")),
+    # Component-level booking actuals keep room and artist cost sources
+    # separate.  A booking-level allocation is retained only for historical
+    # records created before commercial components existed.
+    Column(
+        "booking_charge_component_id",
+        UUID(as_uuid=False),
+        ForeignKey("booking_charge_components.id", ondelete="SET NULL"),
+    ),
     Column("work_order_id", UUID(as_uuid=False), ForeignKey("post_work_orders.id", ondelete="SET NULL")),
     Column("vendor_invoice_id", UUID(as_uuid=False), ForeignKey("vendor_invoices.id", ondelete="SET NULL")),
     Column("manual_adjustment_reason", Text),
@@ -656,6 +664,10 @@ service_rates = Table(
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
     CheckConstraint("rate >= 0", name="service_rates_rate_non_negative_check"),
+    CheckConstraint(
+        "unit IN ('hour', 'half_day', 'day', 'week', 'episode', 'fixed', 'unit')",
+        name="service_rates_billing_unit_check",
+    ),
 )
 
 rate_cards = Table(
@@ -697,6 +709,10 @@ rate_card_items = Table(
     Column("updated_at", DateTime(timezone=True)),
     CheckConstraint("rate >= 0", name="rate_card_items_rate_non_negative_check"),
     CheckConstraint(
+        "unit IN ('hour', 'half_day', 'day', 'week', 'episode', 'fixed', 'unit')",
+        name="rate_card_items_billing_unit_check",
+    ),
+    CheckConstraint(
         "internal_cost_rate IS NULL OR internal_cost_rate >= 0",
         name="rate_card_items_internal_cost_rate_non_negative_check",
     ),
@@ -729,9 +745,16 @@ bookings = Table(
     # A migration-owned attention flag. It is set only when a historical
     # confirmed booking has no complete saved room/person commercial snapshot;
     # it never invents a rate from a current catalogue or person record.
-    Column("commercial_review_required", Boolean, nullable=False),
+    Column("commercial_review_required", Boolean, nullable=False, server_default=text("false")),
     Column("commercial_review_reason", Text),
     Column("commercial_review_marked_at", DateTime(timezone=True)),
+    # The agreed commercial structure is separate from the operational
+    # booking type.  It is a tenant-owned snapshot, never a hard-coded room,
+    # person, service, or role rule.
+    Column("commercial_treatment", Text, nullable=False),
+    Column("client_quote_amount", Numeric(14, 2)),
+    Column("client_quote_currency", Text),
+    Column("commercial_treatment_snapshot_at", DateTime(timezone=True)),
     Column("is_option", Boolean, nullable=False),
     Column("option_rank", Integer),
     Column("status", existing_postgres_enum("booking_status"), nullable=False),
@@ -763,6 +786,15 @@ booking_charge_components = Table(
     Column("rate_card_scope", Text, nullable=False),
     Column("rate_card_id", UUID(as_uuid=False), ForeignKey("rate_cards.id", ondelete="SET NULL")),
     Column("rate_card_item_id", UUID(as_uuid=False), ForeignKey("rate_card_items.id", ondelete="SET NULL")),
+    # Repeat the commercial treatment on every confirmed component so an
+    # exported or reconciled component remains self-describing even when it is
+    # viewed apart from the parent booking.
+    Column("commercial_treatment", Text, nullable=False),
+    # A component's billing treatment is a commercial decision, not an
+    # inference from the booking type or the resource's role. Included and
+    # internal/no-charge components still retain their cost/forecast trail.
+    Column("billing_treatment", Text, nullable=False),
+    Column("tax_treatment", Text, nullable=False),
     Column("is_negotiated_override", Boolean, nullable=False),
     Column("override_reason", Text),
     Column("overridden_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),
@@ -780,7 +812,18 @@ booking_charge_components = Table(
     Column("actual_submitted_at", DateTime(timezone=True)),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
-    CheckConstraint("component_type IN ('room', 'person')", name="booking_charge_components_type_check"),
+    CheckConstraint(
+        "component_type IN ('room', 'person', 'service', 'overtime', 'fixed_fee')",
+        name="booking_charge_components_type_check",
+    ),
+    CheckConstraint(
+        "billing_treatment IN ('billable', 'included', 'internal_no_charge')",
+        name="booking_charge_components_billing_treatment_check",
+    ),
+    CheckConstraint(
+        "tax_treatment IN ('standard', 'zero_rated', 'exempt', 'out_of_scope')",
+        name="booking_charge_components_tax_treatment_check",
+    ),
     CheckConstraint("client_rate >= 0", name="booking_charge_components_client_rate_non_negative_check"),
     CheckConstraint(
         "internal_cost_rate IS NULL OR internal_cost_rate >= 0",
@@ -800,10 +843,85 @@ booking_charge_components = Table(
     ),
     CheckConstraint(
         "(component_type = 'room' AND room_id IS NOT NULL AND person_id IS NULL) "
-        "OR (component_type = 'person' AND person_id IS NOT NULL AND room_id IS NULL)",
+        "OR (component_type = 'person' AND person_id IS NOT NULL AND room_id IS NULL) "
+        "OR (component_type IN ('service', 'overtime', 'fixed_fee') AND room_id IS NULL AND person_id IS NULL)",
         name="booking_charge_components_resource_check",
     ),
-    UniqueConstraint("booking_id", "component_type", name="booking_charge_components_booking_type_unique"),
+    UniqueConstraint("booking_id", "component_type", "resource_name", name="booking_charge_components_booking_type_unique"),
+)
+
+# Work orders share the same commercial vocabulary as bookings, but do not
+# require a calendar reservation. This keeps a fixed project fee, a quoted
+# service, or an overtime allowance auditable before facility time exists.
+work_order_charge_components = Table(
+    "work_order_charge_components",
+    metadata,
+    Column("id", UUID(as_uuid=False), primary_key=True),
+    Column("organization_id", UUID(as_uuid=False), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+    Column("work_order_id", UUID(as_uuid=False), ForeignKey("post_work_orders.id", ondelete="CASCADE"), nullable=False),
+    Column("work_order_item_id", UUID(as_uuid=False), ForeignKey("post_work_order_items.id", ondelete="SET NULL")),
+    Column("component_type", Text, nullable=False),
+    Column("room_id", UUID(as_uuid=False), ForeignKey("rooms.id", ondelete="SET NULL")),
+    Column("person_id", UUID(as_uuid=False), ForeignKey("people.id", ondelete="SET NULL")),
+    Column("resource_name", Text, nullable=False),
+    Column("category", Text, nullable=False),
+    Column("billing_unit", Text, nullable=False),
+    Column("client_rate", Numeric(14, 2), nullable=False),
+    Column("internal_cost_rate", Numeric(14, 2)),
+    Column("currency", Text, nullable=False),
+    Column("rate_source", Text, nullable=False),
+    Column("rate_card_id", UUID(as_uuid=False), ForeignKey("rate_cards.id", ondelete="SET NULL")),
+    Column("rate_card_item_id", UUID(as_uuid=False), ForeignKey("rate_card_items.id", ondelete="SET NULL")),
+    Column("billing_treatment", Text, nullable=False),
+    Column("tax_treatment", Text, nullable=False),
+    Column("override_reason", Text),
+    Column("estimated_quantity", Numeric(14, 6), nullable=False),
+    Column("estimated_amount", Numeric(14, 2), nullable=False),
+    Column("actual_quantity", Numeric(14, 6)),
+    Column("actual_client_amount", Numeric(14, 2)),
+    Column("actual_internal_amount", Numeric(14, 2)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+    CheckConstraint(
+        "component_type IN ('room', 'person', 'service', 'overtime', 'fixed_fee')",
+        name="work_order_charge_components_type_check",
+    ),
+    CheckConstraint(
+        "billing_treatment IN ('billable', 'included', 'internal_no_charge')",
+        name="work_order_charge_components_billing_treatment_check",
+    ),
+    CheckConstraint(
+        "tax_treatment IN ('standard', 'zero_rated', 'exempt', 'out_of_scope')",
+        name="work_order_charge_components_tax_treatment_check",
+    ),
+    CheckConstraint("client_rate >= 0", name="work_order_charge_components_client_rate_non_negative_check"),
+    CheckConstraint(
+        "internal_cost_rate IS NULL OR internal_cost_rate >= 0",
+        name="work_order_charge_components_internal_rate_non_negative_check",
+    ),
+    CheckConstraint("estimated_quantity >= 0", name="work_order_charge_components_quantity_non_negative_check"),
+    CheckConstraint("estimated_amount >= 0", name="work_order_charge_components_amount_non_negative_check"),
+    CheckConstraint(
+        "actual_quantity IS NULL OR actual_quantity >= 0",
+        name="work_order_charge_components_actual_quantity_non_negative_check",
+    ),
+    CheckConstraint(
+        "actual_client_amount IS NULL OR actual_client_amount >= 0",
+        name="work_order_charge_components_actual_client_non_negative_check",
+    ),
+    CheckConstraint(
+        "actual_internal_amount IS NULL OR actual_internal_amount >= 0",
+        name="work_order_charge_components_actual_internal_non_negative_check",
+    ),
+    CheckConstraint(
+        "(component_type = 'room' AND room_id IS NOT NULL AND person_id IS NULL) "
+        "OR (component_type = 'person' AND person_id IS NOT NULL AND room_id IS NULL) "
+        "OR (component_type IN ('service', 'overtime', 'fixed_fee') AND room_id IS NULL AND person_id IS NULL)",
+        name="work_order_charge_components_resource_check",
+    ),
+    UniqueConstraint(
+        "work_order_id", "component_type", "resource_name", name="work_order_charge_components_work_order_type_unique"
+    ),
 )
 
 # An explicit commercial decision is required before a booking component can
@@ -998,6 +1116,17 @@ post_work_orders = Table(
     Column("status", existing_postgres_enum("work_order_status"), nullable=False),
     Column("billing_scope", existing_postgres_enum("work_order_billing_scope"), nullable=False),
     Column("billing_status", existing_postgres_enum("work_order_billing_status"), nullable=False),
+    # Whether the client is buying room-and-operator time, room-only time, or
+    # an agreed project fee. This intentionally does not infer anything from
+    # a room type, an assignee role, or a service catalogue label.
+    Column("commercial_treatment", Text, nullable=False),
+    Column("commercial_treatment_snapshot_at", DateTime(timezone=True)),
+    # Historic work orders that predate a deliberate treatment snapshot are
+    # visibly held for commercial review. The migration never guesses a past
+    # agreement or reprices its existing actuals/invoices.
+    Column("commercial_review_required", Boolean, nullable=False, server_default=text("false")),
+    Column("commercial_review_reason", Text),
+    Column("commercial_review_marked_at", DateTime(timezone=True)),
     # Planned occupancy is operational context; it is intentionally separate
     # from the client's agreed price.
     Column("planned_duration_quantity", Numeric(12, 2)),
@@ -1218,6 +1347,11 @@ client_invoice_items = Table(
     # Booking-derived items retain these snapshots so a later scheduling or
     # rate-card edit cannot rewrite an issued commercial document.
     Column("source_booking_id", UUID(as_uuid=False), ForeignKey("bookings.id", ondelete="RESTRICT")),
+    # A booking can originate from a work order. Keep that operational
+    # reference on the issued line as a snapshot instead of asking a historic
+    # invoice to follow the mutable booking/work-order relationship later.
+    Column("source_work_order_id", UUID(as_uuid=False), ForeignKey("post_work_orders.id", ondelete="RESTRICT")),
+    Column("source_work_order_reference", Text),
     Column("booking_date", Date),
     Column("episode_code", Text),
     Column("episode_title", Text),

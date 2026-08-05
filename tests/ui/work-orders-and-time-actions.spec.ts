@@ -15,9 +15,19 @@ const TEST_BOOKING_ID = "f7000000-0000-4000-8000-000000000001";
 const TEST_WORK_ORDER_TITLE = "UI scheduleable internal work";
 const TEST_BOOKING_TITLE = "UI actual-time booking";
 
-test.afterEach(async () => {
-  await sql`delete from bookings where id = ${TEST_BOOKING_ID}`;
+async function clearFixtures() {
   await sql`delete from post_work_orders where id = ${TEST_WORK_ORDER_ID}`;
+  await sql`delete from bookings where id = ${TEST_BOOKING_ID}`;
+}
+
+// The suite uses fixed IDs so it can exercise direct database setup. Clean
+// before every case too: an interrupted browser run must not poison its retry.
+test.beforeEach(async () => {
+  await clearFixtures();
+});
+
+test.afterEach(async () => {
+  await clearFixtures();
 });
 
 test.afterAll(async () => {
@@ -54,6 +64,20 @@ test.describe("Work-order operational UI", () => {
       billing_notes: "Approved in client review",
       items: [{ description: "Additional online pass", quantity: 3, unit_rate: 160 }],
     });
+  });
+
+  test("makes a flat-fee work order explicitly client-billable", async ({ page }) => {
+    await page.goto(`/episodes/${EPISODE_ID}`);
+    await page.getByRole("button", { name: "Work orders", exact: true }).click();
+    await page.getByRole("button", { name: "New work order" }).click();
+    const form = page.locator('input[placeholder="External caption correction"]').locator("xpath=ancestor::form[1]");
+
+    await form.getByLabel("Commercial treatment").selectOption("flat_project_fee");
+
+    await expect(form.getByLabel("Billing treatment")).toBeDisabled();
+    await expect(form.getByLabel("Billing treatment")).toHaveValue("billable_change");
+    await expect(form.getByLabel("Agreed project fee")).toBeVisible();
+    await expect(form.getByText("One agreed client fee; scheduled room and artist time remains internal cost.")).toBeVisible();
   });
 
   test("only exposes supplier and PO controls for external vendor work", async ({ page }) => {

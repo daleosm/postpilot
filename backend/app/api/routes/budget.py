@@ -25,11 +25,13 @@ from app.api.schemas import (
 )
 from app.auth import require_permission
 from app.budget_actuals import record_budget_actual
+from app.booking_costs import confirmed_hours, cost_for_hours
 from app.budget_logic import can_commit_po, cost_totals, decimal_amount, json_safe, monetary
 from app.budget_rate_resolution import resolve_budget_rate_snapshot
 from app.db.tables import (
     activity_log,
     bookings,
+    booking_charge_components,
     budget_actual_allocations,
     budget_lines,
     crm_companies,
@@ -674,7 +676,41 @@ async def _estimate_overview(session: DbSession, actor: CurrentActor, episode_id
         )
     ).all()
     actual_by_line = {str(line.id): decimal_amount(line.actual_amount) for line in line_rows}
-    actual = sum(actual_by_line.values(), Decimal(0))
+    allocated_actual = sum(actual_by_line.values(), Decimal(0))
+    # Costs from a confirmed component without an estimate match are still
+    # real operational cost. Include them in the forecast rather than hiding
+    # them because the scheduler correctly booked work before an estimate
+    # existed.
+    unallocated_actual = decimal_amount(
+        await session.scalar(
+            select(func.coalesce(func.sum(booking_charge_components.c.actual_internal_amount), 0))
+            .select_from(booking_charge_components)
+            .join(
+                bookings,
+                and_(
+                    bookings.c.id == booking_charge_components.c.booking_id,
+                    bookings.c.organization_id == actor.organization_id,
+                ),
+            )
+            .outerjoin(
+                budget_actual_allocations,
+                and_(
+                    budget_actual_allocations.c.booking_charge_component_id == booking_charge_components.c.id,
+                    budget_actual_allocations.c.organization_id == actor.organization_id,
+                ),
+            )
+            .where(
+                and_(
+                    booking_charge_components.c.organization_id == actor.organization_id,
+                    bookings.c.episode_id == episode_id,
+                    booking_charge_components.c.actual_internal_amount.is_not(None),
+                    booking_charge_components.c.actual_internal_amount > 0,
+                    budget_actual_allocations.c.id.is_(None),
+                )
+            )
+        )
+    )
+    actual = allocated_actual + unallocated_actual
     working_plan = sum((decimal_amount(line.budgeted_amount) for line in line_rows), Decimal(0))
     current_items: list[object] = []
     if current:
@@ -713,6 +749,48 @@ async def _estimate_overview(session: DbSession, actor: CurrentActor, episode_id
             Decimal(0),
         )
     forecast = actual + remaining_planned
+    flat_fee_rows = (
+        await session.execute(
+            select(
+                booking_charge_components,
+                bookings.c.starts_at,
+                bookings.c.ends_at,
+            )
+            .select_from(booking_charge_components)
+            .join(
+                bookings,
+                and_(
+                    bookings.c.id == booking_charge_components.c.booking_id,
+                    bookings.c.organization_id == actor.organization_id,
+                ),
+            )
+            .where(
+                and_(
+                    booking_charge_components.c.organization_id == actor.organization_id,
+                    bookings.c.episode_id == episode_id,
+                    booking_charge_components.c.commercial_treatment == "flat_project_fee",
+                    bookings.c.status != "cancelled",
+                )
+            )
+        )
+    ).all()
+    flat_fee_revenue = Decimal(0)
+    flat_fee_internal_actual = Decimal(0)
+    flat_fee_internal_forecast = Decimal(0)
+    for component in flat_fee_rows:
+        if component.component_type == "fixed_fee" and component.billing_treatment == "billable":
+            flat_fee_revenue += decimal_amount(component.actual_client_amount or component.estimated_amount)
+        if component.actual_internal_amount is not None:
+            internal_cost = decimal_amount(component.actual_internal_amount)
+            flat_fee_internal_actual += internal_cost
+            flat_fee_internal_forecast += internal_cost
+            continue
+        internal_rate = decimal_amount(component.internal_cost_rate)
+        if internal_rate <= 0:
+            continue
+        planned_hours = confirmed_hours(component.starts_at, component.ends_at, 0)
+        flat_fee_internal_forecast += cost_for_hours(internal_rate, component.billing_unit, planned_hours)
+    flat_fee_margin = flat_fee_revenue - flat_fee_internal_forecast
     item_counts = {
         str(row.estimate_id): row.item_count
         for row in (
@@ -731,10 +809,19 @@ async def _estimate_overview(session: DbSession, actor: CurrentActor, episode_id
         "current_approved_estimate": monetary(current_approved) if current_approved is not None else None,
         "working_estimate": monetary(working_plan),
         "actual": monetary(actual),
+        "allocated_actual": monetary(allocated_actual),
+        "unallocated_operational_actual": monetary(unallocated_actual),
         "remaining_planned": monetary(remaining_planned),
         "forecast": monetary(forecast),
         "forecast_basis": "open_revision" if draft else "current_approved_estimate" if current else "working_plan",
         "variance": monetary(forecast - current_approved) if current_approved is not None else None,
+        "commercial_forecast": {
+            "agreed_flat_fee_revenue": monetary(flat_fee_revenue),
+            "flat_fee_internal_actual": monetary(flat_fee_internal_actual),
+            "flat_fee_internal_forecast": monetary(flat_fee_internal_forecast),
+            "flat_fee_forecast_margin": monetary(flat_fee_margin),
+            "flat_fee_margin_at_risk": bool(flat_fee_revenue > 0 and flat_fee_margin < 0),
+        },
         "is_locked": bool(current and not draft),
         "open_revision_id": str(draft.id) if draft else None,
         "currency": line_rows[0].currency if line_rows else actor.active_organization.currency,
@@ -881,6 +968,7 @@ async def _episode_operational_ledger(session: DbSession, actor: CurrentActor, e
                     bookings.c.actual_starts_at,
                     bookings.c.actual_ends_at,
                     bookings.c.approved_overtime_minutes,
+                    bookings.c.commercial_treatment,
                     rooms.c.name.label("room_name"),
                     people.c.name.label("person_name"),
                     post_work_orders.c.id.label("linked_work_order_id"),
@@ -949,6 +1037,7 @@ async def _episode_operational_ledger(session: DbSession, actor: CurrentActor, e
                 "currency": row.currency,
                 "allocation_date": row.allocation_date,
                 "source_type": row.source_type,
+                "commercial_treatment": booking.commercial_treatment if booking else None,
                 "reference": row.source_reference,
                 "reason": row.manual_adjustment_reason,
                 "budget_item": {
@@ -969,7 +1058,7 @@ async def _episode_operational_ledger(session: DbSession, actor: CurrentActor, e
                     "actual_ends_at": booking.actual_ends_at,
                     "approved_overtime_minutes": booking.approved_overtime_minutes,
                 }
-                if booking and row.source_type in {"booking", "time_submission"}
+                if booking and row.source_type in {"booking", "time_submission", "booking_component"}
                 else None,
                 "work_order": {
                     "id": str(work_order.id),
@@ -999,22 +1088,28 @@ async def _episode_operational_ledger(session: DbSession, actor: CurrentActor, e
     unallocated_rows = (
         await session.execute(
             select(
-                bookings.c.id,
-                bookings.c.title,
+                booking_charge_components.c.id.label("component_id"),
+                booking_charge_components.c.component_type,
+                booking_charge_components.c.commercial_treatment,
+                booking_charge_components.c.resource_name,
+                booking_charge_components.c.actual_internal_amount,
+                booking_charge_components.c.currency,
+                bookings.c.id.label("booking_id"),
+                bookings.c.title.label("booking_title"),
                 bookings.c.actual_starts_at,
                 bookings.c.actual_ends_at,
                 bookings.c.approved_overtime_minutes,
-                rooms.c.name.label("room_name"),
-                people.c.name.label("person_name"),
                 budget_lines.c.id.label("budget_line_id"),
                 budget_lines.c.category.label("budget_category"),
                 budget_lines.c.description.label("budget_description"),
-                budget_lines.c.rate_snapshot,
-                budget_lines.c.planned_unit,
             )
-            .outerjoin(rooms, and_(rooms.c.id == bookings.c.room_id, rooms.c.organization_id == actor.organization_id))
-            .outerjoin(
-                people, and_(people.c.id == bookings.c.person_id, people.c.organization_id == actor.organization_id)
+            .select_from(booking_charge_components)
+            .join(
+                bookings,
+                and_(
+                    bookings.c.id == booking_charge_components.c.booking_id,
+                    bookings.c.organization_id == actor.organization_id,
+                ),
             )
             .outerjoin(
                 budget_lines,
@@ -1023,20 +1118,23 @@ async def _episode_operational_ledger(session: DbSession, actor: CurrentActor, e
                     budget_lines.c.organization_id == actor.organization_id,
                 ),
             )
+            .outerjoin(
+                budget_actual_allocations,
+                and_(
+                    budget_actual_allocations.c.booking_charge_component_id == booking_charge_components.c.id,
+                    budget_actual_allocations.c.organization_id == actor.organization_id,
+                ),
+            )
             .where(
                 and_(
-                    bookings.c.organization_id == actor.organization_id,
+                    booking_charge_components.c.organization_id == actor.organization_id,
                     bookings.c.episode_id == episode_id,
-                    bookings.c.actual_starts_at.is_not(None),
-                    bookings.c.actual_ends_at.is_not(None),
-                    or_(
-                        bookings.c.budget_line_id.is_(None),
-                        budget_lines.c.rate_snapshot.is_(None),
-                        budget_lines.c.planned_unit.is_(None),
-                    ),
+                    booking_charge_components.c.actual_internal_amount.is_not(None),
+                    booking_charge_components.c.actual_internal_amount > 0,
+                    budget_actual_allocations.c.id.is_(None),
                 )
             )
-            .order_by(bookings.c.actual_starts_at.desc(), bookings.c.id)
+            .order_by(bookings.c.actual_starts_at.desc(), bookings.c.id, booking_charge_components.c.id)
         )
     ).all()
     return {
@@ -1044,10 +1142,14 @@ async def _episode_operational_ledger(session: DbSession, actor: CurrentActor, e
         "actuals": actuals,
         "unallocated_actuals": [
             {
-                "booking_id": str(row.id),
-                "booking_title": row.title,
-                "room_name": row.room_name,
-                "person_name": row.person_name,
+                "component_id": str(row.component_id),
+                "component_type": row.component_type,
+                "commercial_treatment": row.commercial_treatment,
+                "resource_name": row.resource_name,
+                "amount": monetary(decimal_amount(row.actual_internal_amount)),
+                "currency": row.currency,
+                "booking_id": str(row.booking_id),
+                "booking_title": row.booking_title,
                 "actual_starts_at": row.actual_starts_at,
                 "actual_ends_at": row.actual_ends_at,
                 "approved_overtime_minutes": row.approved_overtime_minutes,
@@ -1058,9 +1160,7 @@ async def _episode_operational_ledger(session: DbSession, actor: CurrentActor, e
                 }
                 if row.budget_line_id
                 else None,
-                "reason": "The booking has no selected budget item."
-                if not row.budget_line_id
-                else "The selected budget item has no saved rate snapshot.",
+                "reason": "No matching internal estimate item was found for this commercial component.",
             }
             for row in unallocated_rows
         ],

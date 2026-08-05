@@ -200,11 +200,11 @@ class EpisodeUpdateRequest(BaseModel):
 
 
 class BookingCommercialOverrideRequest(BaseModel):
-    """A negotiated rate for one resource on one booking only."""
+    """A reasoned component price override for one booking snapshot only."""
 
     model_config = ConfigDict(extra="forbid")
 
-    component_type: str = Field(pattern="^(room|person)$")
+    component_type: str = Field(pattern="^(room|person|fixed_fee)$")
     rate: Money = Field(ge=0)
     reason: str = Field(min_length=5, max_length=1000)
 
@@ -221,13 +221,17 @@ class BookingCreateRequest(BaseModel):
     setup_minutes: int = Field(default=0, ge=0, le=480)
     handover_minutes: int = Field(default=0, ge=0, le=480)
     status: str = Field(default="confirmed", pattern="^(tentative|confirmed|hold|cancelled)$")
+    commercial_treatment: str = Field(default="wet_hire", pattern="^(wet_hire|dry_hire|flat_project_fee)$")
+    # An agreed fixed client price is meaningful only for flat-project work.
+    # Hourly/day pricing continues to resolve from the rate-card snapshot.
+    client_quote_amount: Money | None = Field(default=None, ge=0)
     booking_type: str = Field(
         default="edit",
         pattern="^(edit|color|mix|qc|client_review|ingest|conform|leave|training|sick|unavailable)$",
     )
     is_option: bool = False
     notes: str | None = Field(default=None, max_length=4000)
-    commercial_overrides: list[BookingCommercialOverrideRequest] = Field(default_factory=list, max_length=2)
+    commercial_overrides: list[BookingCommercialOverrideRequest] = Field(default_factory=list, max_length=3)
 
     @model_validator(mode="after")
     def valid_window(self) -> BookingCreateRequest:
@@ -242,6 +246,25 @@ class BookingCreateRequest(BaseModel):
             raise ValueError("Choose a room before setting its negotiated price.")
         if "person" in component_types and not self.person_id:
             raise ValueError("Choose an artist before setting their negotiated price.")
+        if "fixed_fee" in component_types and self.commercial_treatment != "flat_project_fee":
+            raise ValueError("A fixed-fee override is only available for flat project fee bookings.")
+        # Leave, training, sickness, and unavailability are personnel
+        # availability records, not client-hire bookings. They deliberately
+        # remain schedulable without inventing a commercial treatment.
+        if self.booking_type in {"leave", "training", "sick", "unavailable"}:
+            return self
+        if self.commercial_treatment == "wet_hire" and (not self.room_id or not self.person_id):
+            raise ValueError("Wet hire needs both a room and an assigned person.")
+        if self.commercial_treatment == "dry_hire":
+            if not self.room_id:
+                raise ValueError("Dry hire needs a room.")
+            if self.person_id:
+                raise ValueError("Dry hire is room-only and cannot include an assigned artist.")
+        if self.commercial_treatment == "flat_project_fee":
+            if self.client_quote_amount is None or self.client_quote_amount <= 0:
+                raise ValueError("Flat project fee needs an agreed client price.")
+        elif self.client_quote_amount is not None:
+            raise ValueError("An agreed client price is only available for flat project fee bookings.")
         return self
 
 
@@ -294,6 +317,7 @@ class WorkOrderCreateRequest(BaseModel):
     priority: str = Field(default="normal", pattern="^(blocker|high|normal|low)$")
     is_blocking: bool | None = None
     billing_scope: str = Field(default="included", pattern="^(included|billable_change|internal)$")
+    commercial_treatment: str = Field(default="wet_hire", pattern="^(wet_hire|dry_hire|flat_project_fee)$")
     estimated_amount: Money | None = Field(default=None, ge=0)
     client_quote_amount: Money | None = Field(default=None, ge=0)
     planned_duration_quantity: Quantity | None = Field(default=None, gt=0)
@@ -326,11 +350,21 @@ class WorkOrderCreateRequest(BaseModel):
             raise ValueError("A client PO is only available for internal client-billable work.")
         if self.client_purchase_order_id and (self.client_quote_amount is None or self.client_quote_amount <= 0):
             raise ValueError("Enter a quoted client amount before selecting a client PO.")
+        if self.commercial_treatment == "flat_project_fee" and (
+            self.client_quote_amount is None or self.client_quote_amount <= 0
+        ):
+            raise ValueError("Flat project fee needs an agreed client price.")
+        if self.commercial_treatment == "flat_project_fee" and (
+            self.work_type != "internal" or self.billing_scope != "billable_change"
+        ):
+            raise ValueError("Flat project fee is only available for internal client-billable work.")
         if bool(self.planned_duration_quantity) != bool(self.planned_duration_unit):
             raise ValueError("Enter both planned occupancy quantity and unit.")
         if self.allow_overtime_billing:
             if self.work_type != "internal" or self.billing_scope != "billable_change":
                 raise ValueError("Overtime billing is only available for internal client-billable work.")
+            if self.commercial_treatment == "flat_project_fee":
+                raise ValueError("Flat project fees require a separate authorised change for client overtime.")
             if self.client_quote_amount is None or self.client_quote_amount <= 0:
                 raise ValueError("Enter an agreed client charge before enabling overtime billing.")
             if not self.planned_duration_quantity or not self.planned_duration_unit:
@@ -355,6 +389,7 @@ class WorkOrderUpdateRequest(BaseModel):
     budget_line_id: str | None = None
     client_purchase_order_id: str | None = None
     billing_scope: str | None = Field(default=None, pattern="^(included|billable_change|internal)$")
+    commercial_treatment: str | None = Field(default=None, pattern="^(wet_hire|dry_hire|flat_project_fee)$")
     estimated_amount: Money | None = Field(default=None, ge=0)
     client_quote_amount: Money | None = Field(default=None, ge=0)
     planned_duration_quantity: Quantity | None = Field(default=None, gt=0)
@@ -572,7 +607,7 @@ class BudgetLineCreateRequest(BaseModel):
     cost_type: str = Field(default="internal", pattern="^(internal|billable)$")
     budgeted_amount: Money = Field(default=Decimal("0"), ge=0)
     planned_quantity: Quantity | None = Field(default=None, ge=0)
-    planned_unit: str | None = Field(default=None, pattern="^(hour|day|episode|fixed|unit)$")
+    planned_unit: str | None = Field(default=None, pattern="^(hour|half_day|day|week|episode|fixed|unit)$")
     rate_resource_type: str | None = Field(default=None, pattern="^(service|room|person)$")
     rate_resource_id: str | None = None
     manual_rate_override: Money | None = Field(default=None, ge=0)
@@ -614,7 +649,7 @@ class BudgetLineUpdateRequest(BaseModel):
     cost_type: str | None = Field(default=None, pattern="^(internal|billable)$")
     budgeted_amount: Money | None = Field(default=None, ge=0)
     planned_quantity: Quantity | None = Field(default=None, ge=0)
-    planned_unit: str | None = Field(default=None, pattern="^(hour|day|episode|fixed|unit)$")
+    planned_unit: str | None = Field(default=None, pattern="^(hour|half_day|day|week|episode|fixed|unit)$")
     rate_resource_type: str | None = Field(default=None, pattern="^(service|room|person)$")
     rate_resource_id: str | None = None
     manual_rate_override: Money | None = Field(default=None, ge=0)
@@ -661,7 +696,7 @@ class BudgetEstimatePreviewRequest(BaseModel):
     episode_id: str
     category: str = Field(min_length=2, max_length=120)
     planned_quantity: Quantity = Field(gt=0)
-    planned_unit: str = Field(pattern="^(hour|day|episode|fixed|unit)$")
+    planned_unit: str = Field(pattern="^(hour|half_day|day|week|episode|fixed|unit)$")
     rate_resource_type: str | None = Field(default=None, pattern="^(service|room|person)$")
     rate_resource_id: str | None = None
     manual_rate_override: Money | None = Field(default=None, ge=0)
@@ -687,10 +722,10 @@ class ServiceRateCreateRequest(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     category: str = Field(min_length=2, max_length=120)
     artist_role: str | None = Field(default=None, min_length=1, max_length=120)
-    # The facility service catalogue is hourly by default. Episode and fixed
-    # services remain valid catalogue exceptions; daily service prices are
-    # deliberately not accepted for new rate cards.
-    unit: str = Field(pattern="^(hour|episode|fixed)$")
+    # `episode` remains valid for historic cards. New cards may use the full
+    # practical billing vocabulary: hour, half-day, day, week, fixed fee, or
+    # an arbitrary counted unit.
+    unit: str = Field(pattern="^(hour|half_day|day|week|episode|fixed|unit)$")
     rate: Money = Field(ge=0)
     notes: str | None = Field(default=None, max_length=2000)
     is_active: bool = True
@@ -702,7 +737,7 @@ class ServiceRateUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=160)
     category: str | None = Field(default=None, min_length=2, max_length=120)
     artist_role: str | None = Field(default=None, min_length=1, max_length=120)
-    unit: str | None = Field(default=None, pattern="^(hour|episode|fixed)$")
+    unit: str | None = Field(default=None, pattern="^(hour|half_day|day|week|episode|fixed|unit)$")
     rate: Money | None = Field(default=None, ge=0)
     notes: str | None = Field(default=None, max_length=2000)
     is_active: bool | None = None
@@ -729,7 +764,7 @@ class RateCardOverrideRequest(BaseModel):
     room_id: str | None = None
     person_id: str | None = None
     category: str | None = Field(default=None, min_length=2, max_length=120)
-    unit: str | None = Field(default=None, min_length=2, max_length=40)
+    unit: str | None = Field(default=None, pattern="^(hour|half_day|day|week|episode|fixed|unit)$")
     rate: Money = Field(ge=0)
     internal_cost_rate: Money | None = Field(default=None, ge=0)
 
