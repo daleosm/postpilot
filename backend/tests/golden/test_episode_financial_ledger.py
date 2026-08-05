@@ -299,3 +299,173 @@ def test_golden_episode_ledger_and_invoice_match_the_checked_in_penny_fixture(
         },
     }
     assert projection == _expected()
+
+
+def test_golden_booking_room_and_artist_rate_snapshots_invoice_to_the_penny(
+    production_lab: ProductionApiLab,
+) -> None:
+    """A room ID and artist role must become immutable, itemised money lines.
+
+    This protects the commercial path introduced by room records selected from
+    Settings and generic artist-role rates. The deliberately awkward values
+    catch float arithmetic, rate-card precedence, overtime, and repricing
+    regressions in one invoice journey.
+    """
+    lab = production_lab
+    lab.sign_in_as_manager()
+    episode_id = _episode_id(lab)
+
+    role_rate = lab.client.post(
+        "/v1/rate-cards/services",
+        json={
+            "name": "Golden production manager role rate",
+            "category": "Production manager",
+            "artist_role": "production_manager",
+            "unit": "hour",
+            "rate": "119.99",
+        },
+    )
+    assert role_rate.status_code == 201, role_rate.text
+    assert (
+        lab.client.post(
+            "/v1/rate-cards/overrides",
+            json={"scope": "master", "service_rate_id": role_rate.json()["id"], "rate": "119.99"},
+        ).status_code
+        == 201
+    )
+    room_rate = lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={
+            "scope": "master",
+            "target_type": "room",
+            "room_id": lab.data.room_id,
+            "category": "Edit suite",
+            "unit": "hour",
+            "rate": "98.63",
+            "internal_cost_rate": "54.25",
+        },
+    )
+    assert room_rate.status_code == 201, room_rate.text
+
+    payload = {
+        "title": "Golden saved room and artist pricing",
+        "episode_id": episode_id,
+        "room_id": lab.data.room_id,
+        "person_id": lab.data.manager_person_id,
+        "starts_at": "2035-08-11T09:00:00Z",
+        "ends_at": "2035-08-11T11:45:00Z",
+        "booking_type": "edit",
+        "status": "confirmed",
+    }
+    role_preview = lab.client.post("/v1/bookings/commercial-preview", json=payload)
+    assert role_preview.status_code == 200, role_preview.text
+    role_components = {item["component_type"]: item for item in role_preview.json()["components"]}
+    assert role_components["room"]["rate"] == 98.63
+    assert role_components["person"]["rate"] == 119.99
+
+    named_artist = lab.client.post(
+        "/v1/rate-cards/overrides",
+        json={
+            "scope": "master",
+            "target_type": "person",
+            "person_id": lab.data.manager_person_id,
+            "category": "Production manager",
+            "unit": "hour",
+            "rate": "127.37",
+            "internal_cost_rate": "76.42",
+        },
+    )
+    assert named_artist.status_code == 201, named_artist.text
+    named_preview = lab.client.post("/v1/bookings/commercial-preview", json=payload)
+    assert named_preview.status_code == 200, named_preview.text
+    named_components = {item["component_type"]: item for item in named_preview.json()["components"]}
+    assert named_components["room"]["rate"] == 98.63
+    assert named_components["person"]["rate"] == 127.37
+
+    booking = lab.client.post("/v1/bookings", json=payload)
+    assert booking.status_code == 201, booking.text
+    booking_id = booking.json()["id"]
+    submitted = lab.client.post(
+        f"/v1/bookings/{booking_id}/time-submissions",
+        json={
+            "actual_starts_at": "2035-08-11T09:00:00Z",
+            "actual_ends_at": "2035-08-11T11:45:00Z",
+            "overtime_minutes": 75,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    saved = lab.client.get(f"/v1/bookings/{booking_id}/commercial-components")
+    assert saved.status_code == 200, saved.text
+    components = {item["component_type"]: item for item in saved.json()["components"]}
+    assert components["room"]["rate"] == 98.63
+    assert components["room"]["actual_quantity"] == 2.75
+    assert components["room"]["actual_overtime_quantity"] == 1.25
+    assert components["room"]["actual_client_charge"] == 456.16
+    assert components["person"]["rate"] == 127.37
+    assert components["person"]["actual_quantity"] == 2.75
+    assert components["person"]["actual_overtime_quantity"] == 1.25
+    assert components["person"]["actual_client_charge"] == 589.09
+
+    # Reprice both current card entries. The confirmed booking must keep its
+    # saved room/artist contract and therefore the exact actual totals above.
+    assert (
+        lab.client.post(
+            "/v1/rate-cards/overrides",
+            json={
+                "scope": "master",
+                "target_type": "room",
+                "room_id": lab.data.room_id,
+                "category": "Edit suite",
+                "unit": "hour",
+                "rate": "250.00",
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        lab.client.post(
+            "/v1/rate-cards/overrides",
+            json={
+                "scope": "master",
+                "target_type": "person",
+                "person_id": lab.data.manager_person_id,
+                "category": "Production manager",
+                "unit": "hour",
+                "rate": "275.00",
+            },
+        ).status_code
+        == 201
+    )
+    still_saved = lab.client.get(f"/v1/bookings/{booking_id}/commercial-components")
+    assert {item["component_type"]: item for item in still_saved.json()["components"]}["room"]["rate"] == 98.63
+    assert {item["component_type"]: item for item in still_saved.json()["components"]}["person"]["rate"] == 127.37
+
+    _configure_invoice_profile(lab, episode_id)
+    for component in components.values():
+        selected = lab.client.put(
+            f"/v1/billing/booking-components/{component['id']}/invoice-selection",
+            json={"include_in_invoice": True},
+        )
+        assert selected.status_code == 200, selected.text
+    invoice = lab.client.post("/v1/billing/invoices", json={"episode_id": episode_id})
+    assert invoice.status_code == 201, invoice.text
+    assert invoice.json()["subtotal_amount"] == 1045.25
+    assert invoice.json()["tax_amount"] == 209.05
+    assert invoice.json()["total_amount"] == 1254.30
+
+    exported = lab.client.get(f"/v1/billing/invoices/{invoice.json()['id']}/export")
+    assert exported.status_code == 200, exported.text
+    exported_lines = {
+        (item["resource"]["type"], item["resource"]["name"], item["quantity"]): {
+            "unit_amount": item["unit_amount"],
+            "amount": item["amount"],
+            "saved_rate": item["saved_rate"],
+        }
+        for item in exported.json()["items"]
+    }
+    assert exported_lines == {
+        ("room", "Python Edit Bay", 2.75): {"unit_amount": 98.63, "amount": 271.23, "saved_rate": 98.63},
+        ("room", "Python Edit Bay", 1.25): {"unit_amount": 147.945, "amount": 184.93, "saved_rate": 98.63},
+        ("person", "Python Production Manager", 2.75): {"unit_amount": 127.37, "amount": 350.27, "saved_rate": 127.37},
+        ("person", "Python Production Manager", 1.25): {"unit_amount": 191.055, "amount": 238.82, "saved_rate": 127.37},
+    }

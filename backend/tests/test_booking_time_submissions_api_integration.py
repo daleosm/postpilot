@@ -82,6 +82,43 @@ def _create_linked_booking(lab: ProductionApiLab) -> tuple[str, str]:
     return booking_id, work_order_id
 
 
+def test_confirmed_booking_snapshots_the_organization_overtime_multiplier(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    updated = production_lab.client.patch(
+        "/v1/settings/work-order-time",
+        json={"standard_day_hours": 10, "overtime_multiplier": 1.75},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["overtime_multiplier"] == "1.75"
+
+    booking_id, _ = _create_linked_booking(production_lab)
+    snapshot = production_lab.fetchrow(
+        """
+        SELECT overtime_multiplier
+        FROM booking_charge_components
+        WHERE booking_id = $1 AND component_type = 'room'
+        """,
+        booking_id,
+    )
+    assert snapshot is not None
+    assert str(snapshot["overtime_multiplier"]) == "1.750"
+
+    # The confirmed commercial agreement does not change when the facility
+    # changes its default for later bookings.
+    changed_again = production_lab.client.patch(
+        "/v1/settings/work-order-time",
+        json={"standard_day_hours": 9, "overtime_multiplier": 2},
+    )
+    assert changed_again.status_code == 200, changed_again.text
+    persisted = production_lab.fetchval(
+        "SELECT overtime_multiplier FROM booking_charge_components WHERE booking_id = $1 LIMIT 1",
+        booking_id,
+    )
+    assert str(persisted) == "1.750"
+
+
 def _create_budgeted_booking(lab: ProductionApiLab) -> tuple[str, str]:
     """Create one internal estimate item and book it before time is confirmed."""
     viewer_person_id = _viewer_person_id(lab)

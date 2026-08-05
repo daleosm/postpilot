@@ -165,11 +165,18 @@ async def _episode_scope(session: DbSession, actor: CurrentActor, episode_id: st
     return episode
 
 
-async def _standard_day_hours(session: DbSession, actor: CurrentActor) -> Decimal:
-    value = await session.scalar(
-        select(organizations.c.standard_day_hours).where(organizations.c.id == actor.organization_id).limit(1)
+async def _work_order_time_defaults(session: DbSession, actor: CurrentActor) -> tuple[Decimal, Decimal]:
+    row = (
+        await session.execute(
+            select(organizations.c.standard_day_hours, organizations.c.overtime_multiplier)
+            .where(organizations.c.id == actor.organization_id)
+            .limit(1)
+        )
+    ).first()
+    return (
+        _decimal(row.standard_day_hours if row else Decimal("10")),
+        _decimal(row.overtime_multiplier if row else Decimal("1.5")),
     )
-    return _decimal(value or Decimal("10"))
 
 
 def _overtime_billing_values(
@@ -181,6 +188,7 @@ def _overtime_billing_values(
     planned_duration_unit: str | None,
     allow_overtime_billing: bool,
     overtime_multiplier: Decimal | None,
+    default_overtime_multiplier: Decimal,
     standard_day_hours: Decimal,
 ) -> dict[str, object]:
     """Build only server-derived time-block billing fields for a work order."""
@@ -223,7 +231,7 @@ def _overtime_billing_values(
         "planned_duration_unit": planned_duration_unit,
         "standard_day_hours_snapshot": standard_day_hours,
         "allow_overtime_billing": True,
-        "overtime_multiplier": _decimal(overtime_multiplier or Decimal("1.5")),
+        "overtime_multiplier": _decimal(overtime_multiplier or default_overtime_multiplier),
         "overtime_hourly_base_rate": base_rate,
     }
 
@@ -792,6 +800,7 @@ async def create_work_order(
     if commercial_fields.intersection(payload.model_fields_set):
         await require_permission(session, actor, "manage_commercial")
     episode = await _validate_create_references(session, actor, payload)
+    standard_day_hours, default_overtime_multiplier = await _work_order_time_defaults(session, actor)
     time_block_billing = _overtime_billing_values(
         work_type=payload.work_type,
         billing_scope=payload.billing_scope,
@@ -800,7 +809,8 @@ async def create_work_order(
         planned_duration_unit=payload.planned_duration_unit,
         allow_overtime_billing=payload.allow_overtime_billing,
         overtime_multiplier=payload.overtime_multiplier,
-        standard_day_hours=await _standard_day_hours(session, actor),
+        default_overtime_multiplier=default_overtime_multiplier,
+        standard_day_hours=standard_day_hours,
     )
     now = datetime.now(UTC)
     blocking = payload.is_blocking if payload.is_blocking is not None else bool(payload.workflow_stage_id)
@@ -1092,6 +1102,7 @@ async def update_work_order(
         next_allow_overtime_billing = False
         next_overtime_multiplier = None
 
+    standard_day_hours, default_overtime_multiplier = await _work_order_time_defaults(session, actor)
     time_block_billing = _overtime_billing_values(
         work_type=next_work_type,
         billing_scope=next_billing_scope,
@@ -1100,7 +1111,8 @@ async def update_work_order(
         planned_duration_unit=next_planned_duration_unit,
         allow_overtime_billing=bool(next_allow_overtime_billing),
         overtime_multiplier=next_overtime_multiplier,
-        standard_day_hours=await _standard_day_hours(session, actor),
+        default_overtime_multiplier=default_overtime_multiplier,
+        standard_day_hours=standard_day_hours,
     )
 
     next_status = payload.status or work_order.status

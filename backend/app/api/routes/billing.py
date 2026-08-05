@@ -1961,7 +1961,10 @@ async def exportable_invoice(invoice_id: str, actor: CurrentActor, session: DbSe
                 "description": item.description,
                 "reference": item.reference,
                 "quantity": float(item.quantity),
-                "unit_amount": monetary(decimal_amount(item.unit_amount)),
+                # A unit rate may carry fractional-penny precision after an
+                # overtime multiplier. The browser displays it only; the
+                # saved two-decimal line amount remains authoritative.
+                "unit_amount": float(decimal_amount(item.unit_amount)),
                 "amount": monetary(decimal_amount(item.amount)),
                 "booking_date": item.booking_date,
                 "episode": (

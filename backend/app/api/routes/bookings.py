@@ -43,6 +43,7 @@ from app.db.tables import (
     episode_team_assignments,
     episodes,
     organization_members,
+    organizations,
     people,
     post_work_orders,
     rate_card_items,
@@ -639,6 +640,13 @@ async def _sync_booking_commercial_components(
         delete_statement = delete_statement.where(booking_charge_components.c.component_type.not_in(resolved_types))
     await session.execute(delete_statement)
 
+    overtime_multiplier = _decimal(
+        await session.scalar(
+            select(organizations.c.overtime_multiplier)
+            .where(organizations.c.id == actor.organization_id)
+            .limit(1)
+        )
+    ) or OVERTIME_MULTIPLIER
     now = datetime.now(UTC)
     for component in resolved:
         values = {
@@ -665,7 +673,7 @@ async def _sync_booking_commercial_components(
             "estimated_quantity": _decimal(component["estimated_quantity"]),
             "estimated_amount": _decimal(component["estimated_charge"]),
             "actual_overtime_quantity": Decimal(0),
-            "overtime_multiplier": OVERTIME_MULTIPLIER,
+            "overtime_multiplier": overtime_multiplier,
             "created_at": now,
             "updated_at": now,
         }

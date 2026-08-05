@@ -171,7 +171,9 @@ async def settings_bootstrap(actor: CurrentActor, session: DbSession) -> dict[st
     org = actor.active_organization
     organization_row = (
         await session.execute(
-            select(organizations.c.standard_day_hours).where(organizations.c.id == actor.organization_id).limit(1)
+            select(organizations.c.standard_day_hours, organizations.c.overtime_multiplier)
+            .where(organizations.c.id == actor.organization_id)
+            .limit(1)
         )
     ).first()
     room_rows = await session.execute(
@@ -263,6 +265,7 @@ async def settings_bootstrap(actor: CurrentActor, session: DbSession) -> dict[st
             "name": org.organization_name,
             "currency": org.currency,
             "standard_day_hours": organization_row.standard_day_hours if organization_row else 10,
+            "overtime_multiplier": organization_row.overtime_multiplier if organization_row else 1.5,
         },
         "rooms": [_room(row) for row in room_rows.all()],
         "users": [
@@ -538,16 +541,19 @@ async def update_currency(
 async def update_work_order_time_settings(
     payload: WorkOrderTimeSettingsUpdateRequest, actor: CurrentActor, session: DbSession
 ) -> dict[str, object]:
-    """Set the default that new day/half-day/week work orders snapshot.
+    """Set the defaults that new work orders and confirmed bookings snapshot.
 
-    Historical work orders retain their own snapshot so changing the policy
-    does not silently revise an agreed client overtime rate.
+    Historical work orders and confirmed bookings retain their own snapshots,
+    so changing this policy does not silently revise agreed client charges.
     """
     await require_permission(session, actor, "manage_settings")
     await session.execute(
         update(organizations)
         .where(organizations.c.id == actor.organization_id)
-        .values(standard_day_hours=payload.standard_day_hours)
+        .values(
+            standard_day_hours=payload.standard_day_hours,
+            overtime_multiplier=payload.overtime_multiplier,
+        )
     )
     await _audit(
         session,
@@ -555,10 +561,17 @@ async def update_work_order_time_settings(
         "organization.work_order_time_settings_updated",
         "organization",
         actor.organization_id,
-        {"standard_day_hours": str(payload.standard_day_hours)},
+        {
+            "standard_day_hours": str(payload.standard_day_hours),
+            "overtime_multiplier": str(payload.overtime_multiplier),
+        },
     )
     await session.commit()
-    return {"ok": True, "standard_day_hours": str(payload.standard_day_hours)}
+    return {
+        "ok": True,
+        "standard_day_hours": str(payload.standard_day_hours),
+        "overtime_multiplier": str(payload.overtime_multiplier),
+    }
 
 
 @router.patch("/settings/invoicing")

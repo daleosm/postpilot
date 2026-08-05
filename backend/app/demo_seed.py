@@ -84,37 +84,32 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
 for _permissions in ROLE_PERMISSIONS.values():
     _permissions.append("request_catering")
 
-MASTER_RATES = (
-    ("Edit bay", "Edit suite", "hour", Decimal("84.44")),
-    ("Senior editor", "Editorial artists", "hour", Decimal("76.67")),
-    ("Colour suite", "Colour", "hour", Decimal("108.89")),
-    ("Mix stage", "Sound", "hour", Decimal("124.44")),
-    ("Audio suite", "Audio suite", "hour", Decimal("102.22")),
-    ("Technical QC", "QC", "episode", 485),
-    ("VFX turnover", "VFX", "fixed", 3200),
-    ("Client review room", "Client review", "hour", 165),
-    ("Online suite", "Online", "hour", Decimal("116.67")),
-    ("Post supervisor", "Post supervision", "hour", Decimal("86.67")),
-    ("Producer", "Production", "hour", 80),
-    ("Assistant editor", "Assistant editorial", "hour", Decimal("56.67")),
-    ("Online editor", "Online editorial", "hour", Decimal("86.67")),
-    ("Colourist", "Colourist", "hour", Decimal("91.11")),
-    ("Sound mixer", "Sound mixer", "hour", Decimal("82.22")),
-    ("QC operator", "QC operator", "hour", 72),
-)
+# Demo master rates deliberately attach to configurable operational role keys,
+# rather than every individual person.  Named artist rows remain a commercial
+# exception added through the UI.  Values are USD reference hourly charges;
+# each demo post house applies its existing currency multiplier below.
+DEMO_ARTIST_HOURLY_RATES = {
+    "assistant_editor": Decimal("95"),
+    "editor": Decimal("150"),
+    "colorist": Decimal("175"),
+    "online_editor": Decimal("160"),
+    "post_supervisor": Decimal("145"),
+    "producer": Decimal("135"),
+    "sound_mixer": Decimal("145"),
+    "supervising_sound_editor": Decimal("165"),
+    "rerecording_mixer": Decimal("185"),
+    "vfx_supervisor": Decimal("175"),
+    "vfx_coordinator": Decimal("110"),
+    "qc": Decimal("90"),
+}
 
-# Generic artist rates are attached to configurable operational role keys,
-# not to a hard-coded list of people. Named artist rows remain the deliberate
-# exception for one person on one commercial scope.
-MASTER_RATE_ARTIST_ROLES = {
-    "Senior editor": "editor",
-    "Post supervisor": "post_supervisor",
-    "Producer": "producer",
-    "Assistant editor": "assistant_editor",
-    "Online editor": "online_editor",
-    "Colourist": "colorist",
-    "Sound mixer": "sound_mixer",
-    "QC operator": "qc",
+# Room rows target the actual Settings → Rooms record, never a free-text room
+# type. They therefore resolve directly for scheduling and invoice snapshots.
+DEMO_ROOM_HOURLY_RATES = {
+    "edit_bay": ("Edit suite", Decimal("110")),
+    "color_suite": ("Colour suite", Decimal("190")),
+    "mix_room": ("Mix stage", Decimal("200")),
+    "qc_room": ("QC suite", Decimal("100")),
 }
 
 # These people fill the specialist sign-off roles that each tenant's core
@@ -1644,116 +1639,77 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
         )
     )
 
+    artist_rate_specs = [
+        (role, role_label(role), rate)
+        for role, rate in DEMO_ARTIST_HOURLY_RATES.items()
+        if role in role_indices
+    ]
     service_rows = [
         {
             "id": uid(number, "36", index),
             "organization_id": organization_id,
-            "name": name,
-            "category": category,
-            "artist_role": MASTER_RATE_ARTIST_ROLES.get(name),
-            "unit": unit,
-            "rate": Decimal(rate) * multiplier,
+            "name": label,
+            "category": label,
+            "artist_role": role,
+            "unit": "hour",
+            "rate": rate * multiplier,
             "currency": currency,
-            "notes": "Standard facility rate.",
+            "notes": "Default hourly artist rate.",
             "is_active": True,
         }
-        for index, (name, category, unit, rate) in enumerate(MASTER_RATES, start=1)
+        for index, (role, label, rate) in enumerate(artist_rate_specs, start=1)
     ]
     await connection.execute(insert(t.service_rates).values(service_rows))
     master_card_id = uid(number, "45", 1)
     await connection.execute(
         insert(t.rate_cards).values(
-            nullable_rows(
-                [
-                    {
-                        "id": master_card_id,
-                        "organization_id": organization_id,
-                        "name": "Master rate card",
-                        "currency": currency,
-                        "is_active": True,
-                    },
-                    {
-                        "id": uid(number, "45", 2),
-                        "organization_id": organization_id,
-                        "client_company_id": company_id(1),
-                        "network": network,
-                        "name": f"{network} rate card",
-                        "currency": currency,
-                        "is_active": True,
-                    },
-                    {
-                        "id": uid(number, "45", 3),
-                        "organization_id": organization_id,
-                        "show_id": show_id(1),
-                        "name": f"{tenant['shows'][0][0]} override",
-                        "currency": currency,
-                        "is_active": True,
-                    },
-                    {
-                        "id": uid(number, "45", 4),
-                        "organization_id": organization_id,
-                        "episode_id": episode_id(5),
-                        "name": f"{episode_rows[4]['production_code']} override",
-                        "currency": currency,
-                        "is_active": True,
-                    },
-                ]
-            )
+            {
+                "id": master_card_id,
+                "organization_id": organization_id,
+                "name": "Master rate card",
+                "currency": currency,
+                "is_active": True,
+            }
         )
     )
     await connection.execute(
         insert(t.rate_card_items).values(
-            [
+            nullable_rows(
+                [
                 {
                     "id": uid(number, "46", index),
                     "organization_id": organization_id,
                     "rate_card_id": master_card_id,
                     "service_rate_id": uid(number, "36", index),
+                    "target_type": "service",
                     "category": category,
-                    "artist_role": MASTER_RATE_ARTIST_ROLES.get(name),
-                    "unit": unit,
-                    "rate": Decimal(rate) * multiplier,
+                    "artist_role": role,
+                    "unit": "hour",
+                    "rate": rate * multiplier,
+                    "internal_cost_rate": rate * multiplier * Decimal("0.60"),
                 }
-                for index, (name, category, unit, rate) in enumerate(MASTER_RATES, start=1)
+                for index, (role, category, rate) in enumerate(artist_rate_specs, start=1)
             ]
             + [
                 {
-                    "id": uid(number, "46", 17),
+                    "id": uid(number, "46", len(artist_rate_specs) + index),
                     "organization_id": organization_id,
-                    "rate_card_id": uid(number, "45", 2),
-                    "service_rate_id": uid(number, "36", 12),
-                    "category": "Assistant editorial",
+                    "rate_card_id": master_card_id,
+                    "target_type": "room",
+                    "room_id": room_id(index),
+                    "category": DEMO_ROOM_HOURLY_RATES.get(room_type, ("Specialist room", Decimal("125")))[0],
                     "unit": "hour",
-                    "rate": Decimal("59.44") * multiplier,
-                },
-                {
-                    "id": uid(number, "46", 18),
-                    "organization_id": organization_id,
-                    "rate_card_id": uid(number, "45", 2),
-                    "service_rate_id": uid(number, "36", 4),
-                    "category": "Sound",
-                    "unit": "hour",
-                    "rate": Decimal("128.89") * multiplier,
-                },
-                {
-                    "id": uid(number, "46", 19),
-                    "organization_id": organization_id,
-                    "rate_card_id": uid(number, "45", 3),
-                    "service_rate_id": uid(number, "36", 7),
-                    "category": "VFX",
-                    "unit": "fixed",
-                    "rate": Decimal("3450") * multiplier,
-                },
-                {
-                    "id": uid(number, "46", 20),
-                    "organization_id": organization_id,
-                    "rate_card_id": uid(number, "45", 4),
-                    "service_rate_id": uid(number, "36", 3),
-                    "category": "Colour",
-                    "unit": "hour",
-                    "rate": Decimal("113.33") * multiplier,
-                },
-            ]
+                    "rate": DEMO_ROOM_HOURLY_RATES.get(room_type, ("Specialist room", Decimal("125")))[1]
+                    * multiplier,
+                    "internal_cost_rate": DEMO_ROOM_HOURLY_RATES.get(room_type, ("Specialist room", Decimal("125")))[1]
+                    * multiplier
+                    * Decimal("0.55"),
+                }
+                for index, room_type in enumerate(
+                    ("edit_bay", "edit_bay", "color_suite", "mix_room", "qc_room"), start=1
+                )
+                ]
+            )
         )
     )
 

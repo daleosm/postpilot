@@ -88,6 +88,10 @@ organizations = Table(
     # time-block basis for client overtime.  Existing bookings retain their
     # real start/end times and are not silently rescaled.
     Column("standard_day_hours", Numeric(5, 2), nullable=False),
+    # The default client and internal overtime uplift.  It is copied to a
+    # confirmed booking/work-order snapshot so later policy changes cannot
+    # revise agreed or invoiced history.
+    Column("overtime_multiplier", Numeric(6, 3), nullable=False, server_default="1.500"),
 )
 
 # SSO connections are configured per post house.  They deliberately do not
@@ -1200,7 +1204,10 @@ client_invoice_items = Table(
     Column("description", Text, nullable=False),
     Column("reference", Text),
     Column("quantity", Numeric(14, 6), nullable=False),
-    Column("unit_amount", Numeric(14, 2), nullable=False),
+    # Rates can carry fractions of a penny after an overtime multiplier. Keep
+    # sufficient precision to prove quantity × unit rate equals the rounded
+    # invoice-line amount; only the line amount itself is a penny value.
+    Column("unit_amount", Numeric(14, 6), nullable=False),
     Column("amount", Numeric(14, 2), nullable=False),
     Column(
         "booking_charge_component_id",
@@ -1244,7 +1251,7 @@ client_invoice_line_reversals = Table(
     Column("client_invoice_item_id", UUID(as_uuid=False), ForeignKey("client_invoice_items.id", ondelete="RESTRICT"), nullable=False),
     Column("reversal_type", Text, nullable=False),
     Column("quantity", Numeric(14, 6), nullable=False),
-    Column("unit_amount", Numeric(14, 2), nullable=False),
+    Column("unit_amount", Numeric(14, 6), nullable=False),
     Column("amount", Numeric(14, 2), nullable=False),
     Column("reason", Text, nullable=False),
     Column("created_by_user_id", Text, ForeignKey("users.id", ondelete="SET NULL")),

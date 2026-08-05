@@ -299,7 +299,7 @@ class WorkOrderCreateRequest(BaseModel):
     planned_duration_quantity: Quantity | None = Field(default=None, gt=0)
     planned_duration_unit: str | None = Field(default=None, pattern="^(hour|half_day|day|week)$")
     allow_overtime_billing: bool = False
-    overtime_multiplier: Percentage = Field(default=Decimal("1.5"), gt=0, le=10)
+    overtime_multiplier: Percentage | None = Field(default=None, gt=0, le=10)
     billing_notes: str | None = Field(default=None, max_length=2000)
     items: list[WorkOrderItemRequest] = Field(default_factory=list, max_length=50)
     external_url: str | None = Field(default=None, max_length=2000)
@@ -1303,9 +1303,10 @@ class CurrencySettingsUpdateRequest(BaseModel):
 
 
 class WorkOrderTimeSettingsUpdateRequest(BaseModel):
-    """Tenant policy used when a work order snapshots day-based occupancy."""
+    """Tenant defaults copied to new work-order and booking charge snapshots."""
 
     standard_day_hours: Quantity = Field(ge=1, le=24)
+    overtime_multiplier: Percentage = Field(ge=1, le=10)
 
 
 class InvoiceSettingsUpdateRequest(BaseModel):
