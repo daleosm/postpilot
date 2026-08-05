@@ -47,7 +47,7 @@ export function EpisodeDetailTabs({ data, canUpdateWorkflowWork, canSubmitWorkfl
             const Icon = tabIcons[item];
             const active = tab === item;
             return <li key={item} className="mr-1.5 last:mr-0">
-              <button type="button" data-active={active} aria-current={active ? "page" : undefined} onClick={() => setTab(item)} className={`inline-flex appearance-none items-center justify-center gap-2 rounded-none border-x-0 border-t-0 border-b-2 bg-transparent px-3 py-3 text-xs font-semibold shadow-none transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-[#8caf9f] focus:ring-offset-2 ${active ? "border-[#567b72] text-[#385c54]" : "border-transparent text-[#838986] hover:border-[#aec7ba] hover:bg-transparent hover:text-[#4f7569]"}`}>
+              <button type="button" data-active={active} aria-current={active ? "page" : undefined} onClick={() => setTab(item)} className={`inline-flex appearance-none items-center justify-center gap-2 rounded-none border-x-0 border-t-0 border-b-2 bg-transparent px-3 py-3 text-xs font-semibold shadow-none transition-colors duration-150 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8caf9f] ${active ? "border-[#567b72] text-[#385c54]" : "border-transparent text-[#838986] hover:border-[#aec7ba] hover:bg-transparent hover:text-[#4f7569]"}`}>
                 <Icon aria-hidden="true" size={15} strokeWidth={2} className={active ? "text-[#4d796b]" : "text-[#909a95]"} />
                 <span>{item}</span>
               </button>
