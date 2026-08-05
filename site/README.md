@@ -2,6 +2,17 @@
 
 This is a separate, static Next.js site for Cutluma's public product and sales material. It deliberately has no connection to the authenticated PostPilot application, FastAPI API, database, session, or product routes.
 
+The repository is licensed under GNU AGPLv3 (`AGPL-3.0-only`). See the root [LICENSE](../LICENSE).
+
+## Public pages
+
+- `/` — concise product introduction and evaluation entry point
+- `/product` — workflow, booking, delivery, commercial, CRM, and runner product screens
+- `/evaluate` — a focused facility-evaluation and design-partner path
+- `/deployment` — Cutluma Cloud, self-hosted, and enterprise self-hosted options
+- `/contribute` — source inspection and contribution direction
+- `/faq` — practical evaluation and self-hosting answers
+
 ## Local development
 
 From the repository root:
@@ -34,6 +45,7 @@ Set these **at build time** for a real public deployment:
 ~~~bash
 MARKETING_SITE_URL=https://www.example.com \
 NEXT_PUBLIC_CUTLUMA_APP_URL=https://app.example.com \
+NEXT_PUBLIC_CUTLUMA_CONTACT_URL=https://www.example.com/evaluate \
 pnpm --filter @cutluma/site build
 ~~~
 
@@ -46,7 +58,12 @@ canonical URL.
 `NEXT_PUBLIC_CUTLUMA_APP_URL` sets the **Open demo** destination. It is a
 public URL and is intentionally separate from the static site host.
 
-## Deployment handoff: `www` and the application host
+`NEXT_PUBLIC_CUTLUMA_CONTACT_URL` sets the **Start a facility evaluation**
+destination. It can point to a calendar, hosted contact form, CRM landing page,
+or `mailto:` URL. Until configured, the site falls back to a GitHub issue URL
+so the call to action remains usable without inventing a contact address.
+
+## Static-site hosting: `www` and the application host
 
 Deploy `site/out/` to a static host under the public site hostname,
 for example `www.example.com`. This site has no application API, database,

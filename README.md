@@ -1,6 +1,6 @@
 # PostPilot
 
-> Open-source, self-hosted operations software for episodic television post-production.
+> GNU AGPLv3-licensed operations software for episodic television post-production.
 
 [View the public demo](http://postpilot-189307880.eu-west-1.elb.amazonaws.com) — sign in with `maya@postpilot.debug` / `password`.
 
@@ -8,16 +8,16 @@ PostPilot is a workflow-first operating system for post houses. It brings progra
 
 It is deliberately **not** a media-hosting platform. Facilities retain masters, cuts, project files, and review media in the MAM, storage, transfer, and review systems they already trust. PostPilot records the operational work around them and can store external references where useful.
 
-## Why self-hosted and open source?
+## Why AGPLv3 and flexible deployment?
 
-Facilities cannot afford to be blocked by a vendor outage or a slow support queue during a live series. PostPilot is intended to run on infrastructure the facility controls, with a PostgreSQL database it owns.
+Facilities cannot afford to be blocked by a vendor outage or a slow support queue during a live series. PostPilot can be offered as Cutluma Cloud, or self-hosted on facility infrastructure or in its own cloud account. Enterprise self-hosted can add a separately agreed support and release-management package.
 
-- Keep operational data under facility control.
-- Retain the ability to diagnose, patch, and deploy urgent fixes locally.
+- Choose the operating model that suits the facility’s technical ownership and control requirements.
+- Retain the ability to inspect, diagnose, patch, and deploy urgent fixes.
 - Avoid forced media migration or platform lock-in.
-- Develop the product with people who understand editorial, finishing, audio, QC, delivery, and finance workflows.
+- Keep improvements available to network users when a modified version is offered as a service, as required by GNU AGPLv3.
 
-Self-hosting still needs backups, monitoring, secure credentials, tested upgrades, and an accountable operator. It gives the facility control; it does not remove operational responsibility.
+Customer-managed deployments still need backups, monitoring, secure credentials, tested upgrades, and an accountable operator. They give the facility control; they do not remove operational responsibility.
 
 ## Deployment options
 
@@ -143,4 +143,6 @@ Open [http://localhost:5000](http://localhost:5000). Demo accounts use the passw
 
 PostPilot is an actively evolving application. Evaluate it deliberately, pilot it with non-critical or mirrored operational data, document a local runbook, and validate backup/restore before relying on it for a live delivery schedule.
 
-Before publishing a public fork or deploying to users, add a licence that matches how you want the community to use and contribute to the project. This repository currently has no `LICENSE` file, so reuse rights are not yet defined by a standard open-source licence.
+## Licence
+
+PostPilot is licensed under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). If you modify it and make the modified version available for users to interact with over a network, GNU AGPLv3 requires you to offer those users the corresponding source of that version. Review the [full licence text](LICENSE) before distributing or operating a modified deployment.

@@ -7,13 +7,13 @@ import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: new URL(marketingSiteUrl),
   title: {
-    default: "Cutluma | Open-source TV post-production operations",
+    default: "Cutluma | TV post-production operations",
     template: "%s | Cutluma",
   },
-  description: "Open-source, self-hosted workflow software for episodic television post-production facilities.",
+  description: "Workflow software for episodic television post-production facilities, available as Cutluma Cloud or self-hosted with an enterprise support path.",
   applicationName: "Cutluma",
   category: "Business software",
-  keywords: ["TV post-production", "episodic television", "post house", "workflow", "self-hosted", "open source"],
+  keywords: ["TV post-production", "episodic television", "post house", "workflow", "managed cloud", "self-hosted"],
   alternates: {
     canonical: "/",
   },
@@ -22,22 +22,22 @@ export const metadata: Metadata = {
     locale: "en_GB",
     url: "/",
     siteName: "Cutluma",
-    title: "Cutluma | Open-source TV post-production operations",
+    title: "Cutluma | TV post-production operations",
     description: "Workflow software for episodic TV post-production facilities: episodes, approvals, bookings, QC, delivery, and commercial operations.",
     images: [
       {
-        url: "/opengraph-image",
-        width: 1200,
-        height: 630,
-        alt: "Cutluma — open-source workflow software for episodic TV post-production",
+        url: "/og.png",
+        width: 1731,
+        height: 909,
+        alt: "Cutluma — workflow software for episodic TV post-production",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Cutluma | Open-source TV post-production operations",
+    title: "Cutluma | TV post-production operations",
     description: "Workflow software for episodic TV post-production facilities.",
-    images: ["/opengraph-image"],
+    images: ["/og.png"],
   },
   robots: hasConfiguredMarketingSiteUrl
     ? { index: true, follow: true }

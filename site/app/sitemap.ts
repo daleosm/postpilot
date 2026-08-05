@@ -7,11 +7,9 @@ export const dynamic = "force-static";
 export default function sitemap(): MetadataRoute.Sitemap {
   if (!hasConfiguredMarketingSiteUrl) return [];
 
-  return [
-    {
-      url: marketingSiteUrl,
-      changeFrequency: "weekly",
-      priority: 1,
-    },
-  ];
+  return ["", "/product", "/evaluate", "/deployment", "/contribute", "/faq"].map((path, index) => ({
+    url: `${marketingSiteUrl}${path}`,
+    changeFrequency: "weekly" as const,
+    priority: index === 0 ? 1 : 0.8,
+  }));
 }

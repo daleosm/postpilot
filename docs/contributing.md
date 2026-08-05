@@ -49,4 +49,4 @@ Run the relevant focused suite from [the test guide](../tests/README.md), and in
 
 ## Licence
 
-This repository does not currently contain a `LICENSE` file. Do not assume standard open-source reuse rights until maintainers select and add a licence.
+This repository is licensed under the [GNU Affero General Public License v3.0](../LICENSE) (`AGPL-3.0-only`). Contributions are accepted on that basis. If you operate a modified version for users over a network, GNU AGPLv3 requires you to offer those users the corresponding source of that version. Review the full licence before contributing or redistributing the project.

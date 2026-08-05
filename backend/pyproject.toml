@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "postpilot-api"
 version = "0.1.0"
 description = "FastAPI backend for PostPilot TV post-production operations."
+license = { text = "AGPL-3.0-only" }
 requires-python = ">=3.12"
 dependencies = [
   "alembic>=1.14,<2",
