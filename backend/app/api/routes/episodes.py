@@ -565,10 +565,25 @@ async def get_episode_workspace(episode_id: str, actor: CurrentActor, session: D
         )
     ).all()
 
+    booking_person = people.alias("workspace_booking_person")
     schedule_rows = (
         await session.execute(
-            select(bookings.c.id, bookings.c.title, bookings.c.starts_at, rooms.c.name.label("room_name"))
+            select(
+                bookings.c.id,
+                bookings.c.title,
+                bookings.c.starts_at,
+                bookings.c.ends_at,
+                rooms.c.name.label("room_name"),
+                booking_person.c.name.label("person_name"),
+            )
             .outerjoin(rooms, and_(rooms.c.id == bookings.c.room_id, rooms.c.organization_id == actor.organization_id))
+            .outerjoin(
+                booking_person,
+                and_(
+                    booking_person.c.id == bookings.c.person_id,
+                    booking_person.c.organization_id == actor.organization_id,
+                ),
+            )
             .where(and_(bookings.c.organization_id == actor.organization_id, bookings.c.episode_id == episode_id))
             .order_by(bookings.c.starts_at, bookings.c.id)
         )
@@ -761,7 +776,14 @@ async def get_episode_workspace(episode_id: str, actor: CurrentActor, session: D
             },
         },
         "schedule": [
-            {"id": str(item.id), "title": item.title, "starts_at": item.starts_at, "room_name": item.room_name}
+            {
+                "id": str(item.id),
+                "title": item.title,
+                "starts_at": item.starts_at,
+                "ends_at": item.ends_at,
+                "room_name": item.room_name,
+                "person_name": item.person_name,
+            }
             for item in schedule_rows
         ],
         "budget": [

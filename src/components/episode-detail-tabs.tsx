@@ -3,7 +3,7 @@
 import { postpilotUiFetch } from "@/lib/postpilot-api-client";
 
 import { Button } from "@heroui/react";
-import { Activity, CalendarDays, Check, CircleDollarSign, Clapperboard, ClipboardCheck, FileCheck2, LayoutDashboard, MonitorUp, Palette, Send, ShieldCheck, Sparkles, Volume2, Workflow, type LucideIcon } from "lucide-react";
+import { Activity, CalendarDays, Check, CircleDollarSign, Clapperboard, ClipboardCheck, FileCheck2, LayoutDashboard, MapPin, MonitorUp, Palette, Send, ShieldCheck, Sparkles, UserRound, Volume2, Workflow, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { EpisodeWorkOrders } from "@/components/episode-work-orders";
@@ -33,7 +33,8 @@ type WorkflowException = { id: string; workflowStageId: string; type: "early_sta
 type WorkOrder = { id: string; workflowStageId: string | null; workflowStageName: string | null; kind: string; title: string; description: string | null; department: string | null; assigneePersonId: string | null; assigneeName: string | null; assigneeRole: string | null; workType: "internal" | "external_vendor"; vendorCompanyId: string | null; purchaseOrderId: string | null; purchaseOrderNumber: string | null; clientPurchaseOrderId: string | null; priority: string; isBlocking: boolean; status: string; billingScope: string; billingStatus: string; commercialTreatment: "wet_hire" | "dry_hire" | "flat_project_fee"; commercialReviewRequired: boolean; commercialReviewReason: string | null; estimatedAmount: string | number | null; clientQuoteAmount: string | number | null; actualAmount: string | number | null; currency: string; clientQuoteCurrency: string | null; billingNotes: string | null; budgetLineId: string | null; budgetItem: { id: string; label: string } | null; budgetItemContext: { estimatedAmount: string | number; actualAmount: string | number; remainingEstimate: string | number; currency: string } | null; plannedDurationQuantity: string | number | null; plannedDurationUnit: "hour" | "half_day" | "day" | "week" | null; standardDayHoursSnapshot: string | number | null; allowOvertimeBilling: boolean; overtimeMultiplier: string | number | null; overtimeHourlyBaseRate: string | number | null; approvedByPersonId: string | null; approvedByName: string | null; approvedAt: Date | string | null; approvalNote: string | null; externalUrl: string | null; dueAt: Date | string | null; completedAt: Date | string | null; items: Array<{ id: string; type: "service" | "material" | "expense"; description: string; quantity: string | number; unit: string; unitRate: string | number; discountPercent: string | number; notes: string | null; position: number }> };
 type QcReport = { id: string; status: string; reportUrl: string | null; summary: string | null; waiverReason: string | null; completedAt: Date | string | null; createdAt: Date | string };
 type QcIssue = { id: string; qcReportId: string; code: string | null; severity: string; description: string; timecodeSeconds: string | number | null; status: string; resolution: string | null; resolvedAt: Date | string | null; createdAt: Date | string };
-type WorkspaceData = { episode: EpisodeData; schedule: Array<Row & { title: string; startsAt: Date | string; roomName: string | null }>; budget: Array<Row & { category: string; actualAmount: string | number; budgetedAmount: string | number }>; activity: Array<Row & { action: string; createdAt: Date | string }>; workflowStages: readonly WorkflowStage[]; workflowApprovalRules: WorkflowApprovalRule[]; workflowApprovals: WorkflowApproval[]; workflowExceptions: WorkflowException[]; workflowOperationalBlockers: Array<{ kind: "qc" | "delivery" | "client_acceptance" | "work_order"; message: string }>; workflowApprovers: Array<{ id: string; name: string; role: string }>; workflowSigners: Array<{ approvalRuleId: string; personId: string; name: string; role: string }>; episodeTeam: Array<{ id: string; personId: string; name: string; role: string; isLead: boolean }>; workOrders: WorkOrder[]; qcHistory: QcReport[]; qcIssueHistory: QcIssue[]; vendorOptions: Array<{ id: string; name: string }>; deliveryManifest: DeliveryManifest | null; deliveryProfiles: Array<{ id: string; name: string }> };
+type EpisodeBooking = Row & { title: string; startsAt: Date | string; endsAt?: Date | string | null; roomName: string | null; personName?: string | null };
+type WorkspaceData = { episode: EpisodeData; schedule: EpisodeBooking[]; budget: Array<Row & { category: string; actualAmount: string | number; budgetedAmount: string | number }>; activity: Array<Row & { action: string; createdAt: Date | string }>; workflowStages: readonly WorkflowStage[]; workflowApprovalRules: WorkflowApprovalRule[]; workflowApprovals: WorkflowApproval[]; workflowExceptions: WorkflowException[]; workflowOperationalBlockers: Array<{ kind: "qc" | "delivery" | "client_acceptance" | "work_order"; message: string }>; workflowApprovers: Array<{ id: string; name: string; role: string }>; workflowSigners: Array<{ approvalRuleId: string; personId: string; name: string; role: string }>; episodeTeam: Array<{ id: string; personId: string; name: string; role: string; isLead: boolean }>; workOrders: WorkOrder[]; qcHistory: QcReport[]; qcIssueHistory: QcIssue[]; vendorOptions: Array<{ id: string; name: string }>; deliveryManifest: DeliveryManifest | null; deliveryProfiles: Array<{ id: string; name: string }> };
 
 export function EpisodeDetailTabs({ data, canUpdateWorkflowWork, canSubmitWorkflowTracks, canSignOffWorkflowTracks, canAuthorizeWorkflowExceptions, canManageWorkOrders, canApproveWorkOrders, canUpdateWorkOrders, canManageCommercial, canViewCommercial, canManageQc, canVerifyQc, canWaiveQc, canViewDelivery, canManageDelivery, canUpdateDelivery, canConfirmDeliveryReceipt, currentPersonId }: { data: WorkspaceData; canUpdateWorkflowWork: boolean; canSubmitWorkflowTracks: boolean; canSignOffWorkflowTracks: boolean; canAuthorizeWorkflowExceptions: boolean; canManageWorkOrders: boolean; canApproveWorkOrders: boolean; canUpdateWorkOrders: boolean; canManageCommercial: boolean; canViewCommercial: boolean; canManageQc: boolean; canVerifyQc: boolean; canWaiveQc: boolean; canViewDelivery: boolean; canManageDelivery: boolean; canUpdateDelivery: boolean; canConfirmDeliveryReceipt: boolean; currentPersonId: string | null }) {
   const [tab, setTab] = useState<TabName>("Overview");
@@ -65,7 +66,7 @@ function TabContent({ tab, data, canUpdateWorkflowWork, canSubmitWorkflowTracks,
   if (tab === "Workflow") return <SimpleWorkflowPanel key={`${data.episode.workflowStageId ?? ""}:${data.episode.workflowState?.displayStatus ?? data.episode.status}:${data.workflowApprovals.map((approval) => `${approval.id}:${approval.status}:${approval.respondedAt ?? ""}`).join("|")}:${data.workflowExceptions.map((item) => item.id).join("|")}:${data.workflowOperationalBlockers.map((blocker) => `${blocker.kind}:${blocker.message}`).join("|")}:${data.workflowSigners.map((item) => `${item.approvalRuleId}:${item.personId}`).join("|")}:${data.workOrders.map((item) => `${item.id}:${item.workflowStageId}:${item.status}`).join("|")}`} episodeId={data.episode.id} currentStageId={data.episode.workflowStageId} currentStatus={data.episode.workflowState?.displayStatus ?? data.episode.status} stages={data.workflowStages} rules={data.workflowApprovalRules} approvals={data.workflowApprovals} exceptions={data.workflowExceptions} blockers={data.workflowOperationalBlockers} workflowSigners={data.workflowSigners} workOrders={data.workOrders} canUpdateWorkflowWork={canUpdateWorkflowWork} canSubmitWorkflowTracks={canSubmitWorkflowTracks} canSignOffWorkflowTracks={canSignOffWorkflowTracks} canAuthorizeWorkflowExceptions={canAuthorizeWorkflowExceptions} currentPersonId={currentPersonId} />;
   if (tab === "QC") return <QcPanel key={`${data.qcHistory.map((report) => `${report.id}:${report.status}`).join("|")}:${data.qcIssueHistory.map((issue) => `${issue.id}:${issue.status}`).join("|")}`} episodeId={data.episode.id ?? ""} episodeStatus={data.episode.qcStatus} workflowState={data.episode.workflowState?.displayStatus ?? data.episode.status} initialHistory={data.qcHistory} initialIssues={data.qcIssueHistory} workOrders={data.workOrders} canManage={canManageQc} canVerify={canVerifyQc} canWaive={canWaiveQc} />;
   if (tab === "Work orders") return <EpisodeWorkOrders key={data.workOrders.map((item) => `${item.id}:${item.status}:${item.billingStatus}`).join("|")} episodeId={data.episode.id ?? ""} initialWorkOrders={data.workOrders} people={data.workflowApprovers} stages={data.workflowStages} currentStageId={data.episode.workflowStageId} vendors={data.vendorOptions} canManage={canManageWorkOrders} canApprove={canApproveWorkOrders} canUpdate={canUpdateWorkOrders} canManageCommercial={canManageCommercial} />;
-  if (tab === "Bookings") return <List eyebrow="Episode schedule" title="Bookings" description="Room and suite time currently linked to this episode." empty="No scheduled room bookings." items={data.schedule} render={(item) => <><b>{item.title}</b><span>{formatDate(item.startsAt)} · {item.roomName}</span></>} />;
+  if (tab === "Bookings") return <EpisodeBookings schedule={data.schedule} />;
   if (tab === "Delivery manifest") return <DeliveryManifestPanel episodeId={data.episode.id ?? ""} manifest={data.deliveryManifest} profiles={data.deliveryProfiles} canManageManifest={canManageDelivery} canUpdate={canUpdateDelivery} canConfirmReceipt={canConfirmDeliveryReceipt} />;
   if (tab === "Budget") return <List eyebrow="Episode commercial" title="Budget" description="Live episode-level cost lines, estimates, and actuals." empty="No budget lines are linked." items={data.budget} render={(item) => <><b>{item.category}</b><span>${Number(item.actualAmount).toLocaleString()} actual / ${Number(item.budgetedAmount).toLocaleString()} estimate</span></>} />;
   return <List eyebrow="Episode record" title="Activity" description="A concise record of operational changes for this episode." empty="No recent activity." items={data.activity} render={(item) => <><b className="capitalize">{item.action.replaceAll(".", " ").replaceAll("_", " ")}</b><span>{formatDate(item.createdAt)}</span></>} />;
@@ -540,6 +541,42 @@ function WorkflowPanel({ episodeId, initialStageId, stages, rules, approvals, tr
 }
 
 */
+
+function EpisodeBookings({ schedule }: { schedule: EpisodeBooking[] }) {
+  const now = new Date();
+  const upcoming = schedule.filter((booking) => bookingDates(booking).endsAt >= now);
+
+  return <div className="space-y-5">
+    <EpisodeTabHeader eyebrow="Episode schedule" title="Upcoming bookings" description="Scheduled room and artist time linked to this episode." />
+    <EpisodeWorkspaceSurface className="overflow-hidden">
+      {upcoming.length ? <div className="divide-y divide-[#efeeea]">{upcoming.map((booking) => <EpisodeBookingRow key={booking.id} booking={booking} />)}</div> : <EpisodeEmptyState>No upcoming room bookings are linked to this episode.</EpisodeEmptyState>}
+    </EpisodeWorkspaceSurface>
+  </div>;
+}
+
+function EpisodeBookingRow({ booking }: { booking: EpisodeBooking }) {
+  const { startsAt, endsAt, hasEndTime } = bookingDates(booking);
+  return <article className="episode-queue-row grid gap-2 px-5 py-4 sm:grid-cols-[150px_minmax(0,1fr)] sm:items-center sm:gap-5">
+    <p className="text-xs font-semibold text-[#52625a]">{formatScheduleDay(startsAt)} · {formatScheduleTime(startsAt)}{hasEndTime ? `–${formatScheduleTime(endsAt)}` : ""}</p>
+    <div className="min-w-0"><p className="truncate text-sm font-semibold text-[#3d4943]">{booking.title}</p><div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#74817a]"><span className="inline-flex items-center gap-1"><MapPin aria-hidden="true" size={12} />{booking.roomName ?? "Room to confirm"}</span>{booking.personName ? <span className="inline-flex items-center gap-1"><UserRound aria-hidden="true" size={12} />{booking.personName}</span> : null}</div></div>
+  </article>;
+}
+
+function bookingDates(booking: EpisodeBooking) {
+  const startsAt = new Date(booking.startsAt);
+  const safeStart = Number.isNaN(startsAt.getTime()) ? new Date() : startsAt;
+  const candidateEnd = booking.endsAt ? new Date(booking.endsAt) : null;
+  const hasEndTime = Boolean(candidateEnd && !Number.isNaN(candidateEnd.getTime()) && candidateEnd > safeStart);
+  return { startsAt: safeStart, endsAt: hasEndTime ? candidateEnd! : safeStart, hasEndTime };
+}
+
+function formatScheduleTime(value: Date) {
+  return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }).format(value);
+}
+
+function formatScheduleDay(value: Date | string) {
+  return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" }).format(new Date(value));
+}
 
 function List<T extends Row>({ eyebrow, title, description, items, empty, render }: { eyebrow: string; title: string; description: string; items: T[]; empty: string; render: (item: T) => React.ReactNode }) {
   return <div className="space-y-5">
