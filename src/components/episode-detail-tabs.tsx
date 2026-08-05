@@ -69,7 +69,7 @@ function TabContent({ tab, data, canUpdateWorkflowWork, canSubmitWorkflowTracks,
   if (tab === "Bookings") return <EpisodeBookings schedule={data.schedule} />;
   if (tab === "Delivery manifest") return <DeliveryManifestPanel episodeId={data.episode.id ?? ""} manifest={data.deliveryManifest} profiles={data.deliveryProfiles} canManageManifest={canManageDelivery} canUpdate={canUpdateDelivery} canConfirmReceipt={canConfirmDeliveryReceipt} />;
   if (tab === "Budget") return <List eyebrow="Episode commercial" title="Budget" description="Live episode-level cost lines, estimates, and actuals." empty="No budget lines are linked." items={data.budget} render={(item) => <><b>{item.category}</b><span>${Number(item.actualAmount).toLocaleString()} actual / ${Number(item.budgetedAmount).toLocaleString()} estimate</span></>} />;
-  return <List eyebrow="Episode record" title="Activity" description="A concise record of operational changes for this episode." empty="No recent activity." items={data.activity} render={(item) => <><b className="capitalize">{item.action.replaceAll(".", " ").replaceAll("_", " ")}</b><span>{formatDate(item.createdAt)}</span></>} />;
+  return <EpisodeActivity activity={data.activity} />;
 }
 
 function EpisodeOverview({ data }: { data: WorkspaceData }) {
@@ -554,6 +554,18 @@ function EpisodeBookings({ schedule }: { schedule: EpisodeBooking[] }) {
   </div>;
 }
 
+function EpisodeActivity({ activity }: { activity: WorkspaceData["activity"] }) {
+  return <div className="space-y-5">
+    <EpisodeTabHeader eyebrow="Episode record" title="Recent activity" description="A concise timeline of changes recorded against this episode." />
+    <EpisodeWorkspaceSurface className="overflow-hidden">
+      {activity.length ? <div className="divide-y divide-[#efeeea]">{activity.map((item) => <article key={item.id} className="episode-queue-row grid gap-3 px-5 py-4 sm:grid-cols-[132px_minmax(0,1fr)] sm:items-center sm:gap-5">
+        <time className="text-xs font-medium text-[#75817c]">{formatActivityDate(item.createdAt)}</time>
+        <div className="flex min-w-0 items-center gap-3"><span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-[#84a697]" /><p className="truncate text-sm font-medium capitalize text-[#414c46]">{activityLabel(item.action)}</p></div>
+      </article>)}</div> : <EpisodeEmptyState>No recent activity.</EpisodeEmptyState>}
+    </EpisodeWorkspaceSurface>
+  </div>;
+}
+
 function EpisodeBookingRow({ booking }: { booking: EpisodeBooking }) {
   const { startsAt, endsAt, hasEndTime } = bookingDates(booking);
   return <article className="episode-queue-row grid gap-2 px-5 py-4 sm:grid-cols-[150px_minmax(0,1fr)] sm:items-center sm:gap-5">
@@ -572,6 +584,14 @@ function bookingDates(booking: EpisodeBooking) {
 
 function formatScheduleTime(value: Date) {
   return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }).format(value);
+}
+
+function formatActivityDate(value: Date | string) {
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
+}
+
+function activityLabel(value: string) {
+  return value.replaceAll(".", " ").replaceAll("_", " ");
 }
 
 function formatScheduleDay(value: Date | string) {
