@@ -302,7 +302,7 @@ jobs:
           docker run --rm --network host \
             -v "$RUNNER_TEMP/zap:/zap/wrk:rw" \
             ghcr.io/zaproxy/zaproxy@sha256:8d387b1a63e3425beef4846e39719f5af2a787753af2d8b6558c6257d7a577a2 \
-            zap-api-scan.py -t http://127.0.0.1:8000/openapi.json -S -I -J zap-api-report.json -r zap-api-report.html
+            zap-api-scan.py -t http://127.0.0.1:8000/openapi.json -f openapi -S -I -J zap-api-report.json -r zap-api-report.html
       - name: Enforce reviewed passive DAST policy
         run: |
           python scripts/security/check_zap_report.py \
