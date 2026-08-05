@@ -10,7 +10,7 @@ from sqlalchemy import and_, insert, select, update
 from app.api.dependencies import CurrentActor, DbSession
 from app.api.schemas import QcIssueCreateRequest, QcIssueUpdateRequest, QcReportCreateRequest
 from app.auth import require_permission
-from app.db.tables import activity_log, episodes, post_work_orders, qc_issues, qc_reports
+from app.db.tables import activity_log, episode_delivery_items, episodes, post_work_orders, qc_issues, qc_reports
 
 router = APIRouter(tags=["qc"])
 
@@ -175,13 +175,52 @@ async def create_or_update_qc_report(
         .where(and_(episodes.c.id == payload.episode_id, episodes.c.organization_id == actor.organization_id))
         .values(qc_status=qc_status, updated_at=now)
     )
+    reconciled_delivery_qc_items = 0
+    reset_non_qc_delivery_items = 0
+    if payload.status == "passed":
+        # A formal passed re-QC replaces the failed QC outcome for the
+        # corrected delivery package.  Delivery still needs to be dispatched
+        # and received separately; this only removes the stale QC failure.
+        reconciled = await session.execute(
+            update(episode_delivery_items)
+            .where(
+                and_(
+                    episode_delivery_items.c.organization_id == actor.organization_id,
+                    episode_delivery_items.c.episode_id == payload.episode_id,
+                    episode_delivery_items.c.qc_required.is_(True),
+                    episode_delivery_items.c.status == "qc_failed",
+                )
+            )
+            .values(status="qc_passed", qc_result="passed", updated_at=now)
+        )
+        reconciled_delivery_qc_items = reconciled.rowcount or 0
+        # A non-QC manifest item cannot meaningfully remain in a `qc_failed`
+        # state.  Return it to preparation instead of incorrectly treating it
+        # as passed by the facility QC report.
+        reset = await session.execute(
+            update(episode_delivery_items)
+            .where(
+                and_(
+                    episode_delivery_items.c.organization_id == actor.organization_id,
+                    episode_delivery_items.c.episode_id == payload.episode_id,
+                    episode_delivery_items.c.qc_required.is_(False),
+                    episode_delivery_items.c.status == "qc_failed",
+                )
+            )
+            .values(status="preparing", qc_result="not_required", updated_at=now)
+        )
+        reset_non_qc_delivery_items = reset.rowcount or 0
     await _audit(
         session,
         actor,
         action=f"qc.{payload.status}",
         entity_type="qc_report",
         entity_id=str(report_id),
-        metadata={"episodeId": payload.episode_id},
+        metadata={
+            "episodeId": payload.episode_id,
+            "reconciledDeliveryQcItems": reconciled_delivery_qc_items,
+            "resetNonQcDeliveryItems": reset_non_qc_delivery_items,
+        },
     )
     await session.commit()
     return {"id": str(report_id), "status": payload.status, "qc_status": qc_status, "updated": bool(active_run)}

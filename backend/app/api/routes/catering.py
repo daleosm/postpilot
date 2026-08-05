@@ -7,7 +7,7 @@ does not store payment details, dietary profiles, or media data.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, HTTPException, status
@@ -34,6 +34,7 @@ from app.db.tables import (
 )
 
 router = APIRouter(tags=["catering"])
+OVERTIME_CATERING_GRACE = timedelta(hours=4)
 
 
 def _money(value: object | None) -> float | None:
@@ -73,6 +74,31 @@ async def _current_person(session: DbSession, actor: CurrentActor) -> object | N
             .limit(1)
         )
     ).first()
+
+
+def _eligible_booking_conditions(person_id: object, now: datetime) -> list[object]:
+    """Limit catering to a current booking or short unreported-overtime window."""
+    return [
+        bookings.c.episode_id.is_not(None),
+        bookings.c.status == "confirmed",
+        bookings.c.starts_at <= now,
+        or_(bookings.c.person_id == person_id, bookings.c.guest_person_id == person_id),
+        or_(
+            # An actual end means the person has formally finished. Until it
+            # is recorded, a recent planned end may still be overtime.
+            bookings.c.actual_ends_at >= now,
+            and_(
+                bookings.c.actual_ends_at.is_(None),
+                bookings.c.ends_at >= now - OVERTIME_CATERING_GRACE,
+            ),
+        ),
+    ]
+
+
+def _booking_catering_coverage(booking: object, now: datetime) -> str:
+    if booking.actual_ends_at is not None:
+        return "actual_time"
+    return "overtime_pending" if booking.ends_at < now else "scheduled"
 
 
 @router.get("/catering-requests")
@@ -124,19 +150,22 @@ async def catering_resources(actor: CurrentActor, session: DbSession) -> dict[st
     if person:
         active_booking = (
             await session.execute(
-                select(bookings.c.id, bookings.c.room_id, rooms.c.name.label("room_name"))
+                select(
+                    bookings.c.id,
+                    bookings.c.room_id,
+                    bookings.c.ends_at,
+                    bookings.c.actual_ends_at,
+                    rooms.c.name.label("room_name"),
+                )
                 .select_from(bookings)
                 .join(rooms, and_(rooms.c.id == bookings.c.room_id, rooms.c.organization_id == actor.organization_id))
                 .where(
                     and_(
                         bookings.c.organization_id == actor.organization_id,
-                        bookings.c.episode_id.is_not(None),
-                        bookings.c.starts_at <= now,
-                        bookings.c.ends_at >= now,
-                        or_(bookings.c.person_id == person.id, bookings.c.guest_person_id == person.id),
+                        *_eligible_booking_conditions(person.id, now),
                     )
                 )
-                .order_by(bookings.c.starts_at.desc())
+                .order_by(bookings.c.ends_at.desc())
                 .limit(1)
             )
         ).first()
@@ -165,6 +194,7 @@ async def catering_resources(actor: CurrentActor, session: DbSession) -> dict[st
                 "id": str(active_booking.id),
                 "room_id": str(active_booking.room_id),
                 "room_name": active_booking.room_name,
+                "coverage": _booking_catering_coverage(active_booking, now),
             }
             if active_booking
             else None
@@ -195,28 +225,22 @@ async def create_catering_request(
     booking = None
     work_order = None
     if payload.booking_id:
+        now = datetime.now(UTC)
+        if not person:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is not linked to a person.")
         booking_conditions = [
             bookings.c.id == payload.booking_id,
             bookings.c.organization_id == actor.organization_id,
+            *_eligible_booking_conditions(person.id, now),
         ]
-        if actor.active_organization and actor.active_organization.role == "client":
-            if not person:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN, detail="Client account is not linked to a person."
-                )
-            booking_conditions.extend(
-                [
-                    bookings.c.starts_at <= datetime.now(UTC),
-                    bookings.c.ends_at >= datetime.now(UTC),
-                    bookings.c.episode_id.is_not(None),
-                    or_(bookings.c.person_id == person.id, bookings.c.guest_person_id == person.id),
-                ]
-            )
         booking = (
             await session.execute(select(bookings.c.id, bookings.c.room_id).where(and_(*booking_conditions)).limit(1))
         ).first()
         if not booking:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No current booking or unreported overtime booking was found.",
+            )
     if payload.work_order_id:
         if not person or (actor.active_organization and actor.active_organization.role == "client"):
             raise HTTPException(

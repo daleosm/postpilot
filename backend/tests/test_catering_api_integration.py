@@ -188,3 +188,73 @@ def test_worker_catering_requires_an_active_booking_or_assigned_work_order(
         "budget_work_order_id": work_order_id,
         "actual_amount": 11.5,
     }
+
+
+def test_catering_allows_recent_unreported_booking_overtime_but_not_stale_bookings(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.execute(
+        """
+        UPDATE organization_role_policies
+        SET permissions = $1::jsonb
+        WHERE organization_id = $2 AND role = 'production_manager'
+        """,
+        json.dumps(["manage_production", "do_assigned_work", "request_catering"]),
+        production_lab.data.organization_id,
+    )
+    now = datetime.now(UTC)
+    episode_id = str(
+        production_lab.fetchval(
+            "SELECT id::text FROM episodes WHERE organization_id = $1 ORDER BY created_at NULLS FIRST LIMIT 1",
+            production_lab.data.organization_id,
+        )
+    )
+    overtime_booking_id, stale_booking_id = str(uuid4()), str(uuid4())
+    for booking_id, ends_at in (
+        (overtime_booking_id, now - timedelta(hours=2)),
+        (stale_booking_id, now - timedelta(hours=4, minutes=1)),
+    ):
+        production_lab.execute(
+            """
+            INSERT INTO bookings (
+              id, organization_id, room_id, episode_id, person_id, title,
+              starts_at, ends_at, setup_minutes, handover_minutes,
+              approved_overtime_minutes, is_option, status, booking_type
+            ) VALUES ($1, $2, $3, $4, $5, 'Overtime catering fixture',
+              $6, $7, 0, 0, 0, false, 'confirmed', 'edit')
+            """,
+            booking_id,
+            production_lab.data.organization_id,
+            production_lab.data.room_id,
+            episode_id,
+            production_lab.data.manager_person_id,
+            now - timedelta(hours=4),
+            ends_at,
+        )
+
+    production_lab.sign_in_as_manager()
+    resources = production_lab.client.get("/v1/catering/resources")
+    accepted = production_lab.client.post(
+        "/v1/catering-requests",
+        json={
+            "booking_id": overtime_booking_id,
+            "room_id": production_lab.data.room_id,
+            "request_type": "tea_coffee",
+            "item": "Overtime coffee",
+        },
+    )
+    stale = production_lab.client.post(
+        "/v1/catering-requests",
+        json={
+            "booking_id": stale_booking_id,
+            "room_id": production_lab.data.room_id,
+            "request_type": "snack",
+            "item": "Too-late snack",
+        },
+    )
+
+    assert resources.status_code == 200, resources.text
+    assert resources.json()["active_booking"]["id"] == overtime_booking_id
+    assert resources.json()["active_booking"]["coverage"] == "overtime_pending"
+    assert accepted.status_code == 201, accepted.text
+    assert stale.status_code == 404

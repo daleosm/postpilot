@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 from test_production_api_integration import ProductionApiLab
@@ -138,6 +140,67 @@ def test_failed_qc_requires_a_new_run_and_closed_corrections_before_a_pass(produ
 
     assert passed.status_code == 200
     assert production_lab.fetchval("SELECT qc_status FROM episodes WHERE id = $1", episode_id) == "passed"
+
+
+def test_passed_re_qc_reconciles_stale_failed_delivery_items(production_lab: ProductionApiLab) -> None:
+    """A passed re-QC must not leave the delivery manifest reporting failure."""
+    production_lab.sign_in_as_manager()
+    episode_id = _episode_id(production_lab)
+    manifest_id, qc_item_id, metadata_item_id = str(uuid4()), str(uuid4()), str(uuid4())
+    now = datetime.now(UTC)
+    production_lab.execute(
+        """
+        INSERT INTO episode_delivery_manifests (
+          id, organization_id, episode_id, profile_name, created_at, updated_at
+        ) VALUES ($1, $2, $3, 'QC reconciliation fixture', $4, $4)
+        """,
+        manifest_id,
+        production_lab.data.organization_id,
+        episode_id,
+        now,
+    )
+    production_lab.execute(
+        """
+        INSERT INTO episode_delivery_items (
+          id, organization_id, episode_delivery_manifest_id, episode_id,
+          component_type, label, required, requires_external_recipient,
+          qc_required, status, qc_result, is_externally_shared, position, created_at, updated_at
+        ) VALUES
+          ($1, $2, $3, $4, 'master', 'Corrected picture master', true, false, true,
+           'qc_failed', 'failed', false, 1, $5, $5),
+          ($6, $2, $3, $4, 'metadata', 'Metadata sheet', true, false, false,
+           'qc_failed', 'not_required', false, 2, $5, $5)
+        """,
+        qc_item_id,
+        production_lab.data.organization_id,
+        manifest_id,
+        episode_id,
+        now,
+        metadata_item_id,
+    )
+    failed = _report(production_lab, episode_id, "failed", summary="Correct the delivery package.")
+    assert failed.status_code == 201, failed.text
+    assert _report(production_lab, episode_id, "in_progress", summary="Re-QC underway.").status_code == 201
+    production_lab.execute(
+        """
+        UPDATE post_work_orders SET status = 'complete'
+        WHERE organization_id = $1 AND episode_id = $2 AND kind = 'qc_exception'
+        """,
+        production_lab.data.organization_id,
+        episode_id,
+    )
+
+    passed = _report(production_lab, episode_id, "passed", summary="Corrected package passed re-QC.")
+
+    assert passed.status_code == 200, passed.text
+    qc_item = production_lab.fetchrow(
+        "SELECT status, qc_result FROM episode_delivery_items WHERE id = $1", qc_item_id
+    )
+    metadata_item = production_lab.fetchrow(
+        "SELECT status, qc_result FROM episode_delivery_items WHERE id = $1", metadata_item_id
+    )
+    assert qc_item and dict(qc_item) == {"status": "qc_passed", "qc_result": "passed"}
+    assert metadata_item and dict(metadata_item) == {"status": "preparing", "qc_result": "not_required"}
 
 
 def test_qc_issue_waive_and_reopen_updates_its_linked_work_order(production_lab: ProductionApiLab) -> None:
