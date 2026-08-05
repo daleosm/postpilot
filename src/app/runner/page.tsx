@@ -8,7 +8,7 @@ import { postpilotApiServerFetch } from "@/lib/postpilot-api-server";
 export default async function RunnerPage() {
   if (!(await can("manage_catering"))) redirect("/catering");
   const data = await load();
-  return <div className="space-y-5"><header className="flex items-start gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#edf1ee] text-[#557269]"><ChefHat size={19} /></span><div><p className="text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">Internal hospitality operations</p><h1 className="mt-1 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Runner desk</h1><p className="mt-1 text-sm text-[#747977]">Catering requests from edit bays, suites, and mix rooms.</p></div></header><RunnerRequestList requests={data.filter((request) => request.status !== "cancelled")} /></div>;
+  return <div className="space-y-5"><header className="flex items-start gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#edf1ee] text-[#557269]"><ChefHat size={19} /></span><div><p className="text-xs font-medium uppercase tracking-[.12em] text-[#7c827f]">Internal hospitality operations</p><h1 className="mt-1 text-[27px] font-semibold tracking-[-.045em] text-[#202524]">Runner desk</h1><p className="mt-1 text-sm text-[#747977]">Leave this page open while you are on the floor. New catering requests appear automatically and play a short alert sound.</p></div></header><RunnerRequestList requests={data.filter((request) => request.status !== "cancelled")} /></div>;
 }
 
 async function load() {
