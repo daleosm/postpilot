@@ -935,6 +935,15 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
                     "actual_starts_at": now_at(actual_day, 9) if actual_day is not None else None,
                     "actual_ends_at": now_at(actual_day, actual_end_hour) if actual_day is not None else None,
                     "approved_overtime_minutes": 60 if actual_day is not None else 0,
+                    # A confirmed seed booking has an explicit wet-hire
+                    # agreement and its room/person components below snapshot
+                    # the matching rates. Holds remain deliberately
+                    # unconfirmed and are never eligible for actual time.
+                    "commercial_treatment": "wet_hire",
+                    "commercial_treatment_snapshot_at": now_at(0) if status == "confirmed" and not is_option else None,
+                    "commercial_review_required": False,
+                    "commercial_review_reason": None,
+                    "commercial_review_marked_at": None,
                     "is_option": is_option,
                     "option_rank": option_rank,
                     "status": status,

@@ -185,6 +185,10 @@ def test_demo_calendar_and_work_orders_exercise_current_operational_states(clien
     assert any(item["is_option"] and item["option_rank"] == 2 for item in booking_rows)
     assert any(item["work_order_id"] for item in booking_rows)
     assert any(item["actual_starts_at"] and item["approved_overtime_minutes"] for item in booking_rows)
+    confirmed_bookings = [item for item in booking_rows if item["status"] == "confirmed" and not item["is_option"]]
+    assert confirmed_bookings
+    assert all(not item["commercial_review_required"] for item in confirmed_bookings)
+    assert all(item["commercial_treatment_snapshot_at"] for item in confirmed_bookings)
     assert {"open", "in_progress", "ready_for_review", "complete"} <= {item["status"] for item in work_order_rows}
     assert any(
         item["work_type"] == "internal" and item["status"] == "in_progress" and not item["booking_id"]
