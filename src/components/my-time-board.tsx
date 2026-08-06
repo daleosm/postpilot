@@ -49,13 +49,13 @@ export function MyTimeBoard({ bookings }: { bookings: MyTimeBooking[] }) {
         <div className="flex shrink-0 flex-wrap gap-2">
           <Button
             size="sm"
-            variant="tertiary"
+            variant="secondary"
             onPress={() => router.push(`/bookings?booking=${encodeURIComponent(booking.id)}`)}
-            className="border border-[#dfe1dd] bg-white text-[#54605b]"
+            className="border border-[#d9e2dc] bg-[#f6f8f5] font-semibold text-[#40544b]"
           >
             <CalendarDays size={15} /> Open booking
           </Button>
-          {booking.timeStatus === "ready" ? <ActualTimeDialog booking={booking} /> : <Button size="sm" variant="tertiary" isDisabled className="border border-[#dbe8de] bg-[#f0f7f1] text-[#4d8068]">Confirmed</Button>}
+          {booking.timeStatus === "ready" ? <ActualTimeDialog booking={booking} /> : <Button size="sm" variant="secondary" isDisabled className="border border-[#dbe8de] bg-[#f0f7f1] font-semibold text-[#4d8068]">Confirmed</Button>}
         </div>
       </article>)}</div> : <div className="px-5 py-14 text-center"><Clock3 className="mx-auto text-[#a0a6a1]" size={23} /><p className="mt-3 text-sm font-medium text-[#59615d]">No assigned bookings in this period</p><p className="mt-1 text-xs text-[#858a87]">When production assigns you to a booking, it will appear here for time confirmation.</p></div>}
     </section>
