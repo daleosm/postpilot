@@ -603,7 +603,7 @@ class BudgetLineCreateRequest(BaseModel):
     cost_type: str = Field(default="internal", pattern="^(internal|billable)$")
     budgeted_amount: Money = Field(default=Decimal("0"), ge=0)
     planned_quantity: Quantity | None = Field(default=None, ge=0)
-    planned_unit: str | None = Field(default=None, pattern="^(hour|half_day|day|week|episode|fixed|unit)$")
+    planned_unit: str | None = Field(default=None, pattern="^(hour|day|fixed)$")
     rate_resource_type: str | None = Field(default=None, pattern="^(service|room|person)$")
     rate_resource_id: str | None = None
     manual_rate_override: Money | None = Field(default=None, ge=0)
@@ -645,7 +645,7 @@ class BudgetLineUpdateRequest(BaseModel):
     cost_type: str | None = Field(default=None, pattern="^(internal|billable)$")
     budgeted_amount: Money | None = Field(default=None, ge=0)
     planned_quantity: Quantity | None = Field(default=None, ge=0)
-    planned_unit: str | None = Field(default=None, pattern="^(hour|half_day|day|week|episode|fixed|unit)$")
+    planned_unit: str | None = Field(default=None, pattern="^(hour|day|fixed)$")
     rate_resource_type: str | None = Field(default=None, pattern="^(service|room|person)$")
     rate_resource_id: str | None = None
     manual_rate_override: Money | None = Field(default=None, ge=0)
@@ -692,7 +692,7 @@ class BudgetEstimatePreviewRequest(BaseModel):
     episode_id: str
     category: str = Field(min_length=2, max_length=120)
     planned_quantity: Quantity = Field(gt=0)
-    planned_unit: str = Field(pattern="^(hour|half_day|day|week|episode|fixed|unit)$")
+    planned_unit: str = Field(pattern="^(hour|day|fixed)$")
     rate_resource_type: str | None = Field(default=None, pattern="^(service|room|person)$")
     rate_resource_id: str | None = None
     manual_rate_override: Money | None = Field(default=None, ge=0)
@@ -718,10 +718,7 @@ class ServiceRateCreateRequest(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     category: str = Field(min_length=2, max_length=120)
     artist_role: str | None = Field(default=None, min_length=1, max_length=120)
-    # `episode` remains valid for historic cards. New cards may use the full
-    # practical billing vocabulary: hour, half-day, day, week, fixed fee, or
-    # an arbitrary counted unit.
-    unit: str = Field(pattern="^(hour|half_day|day|week|episode|fixed|unit)$")
+    unit: str = Field(pattern="^(hour|day|fixed)$")
     rate: Money = Field(ge=0)
     notes: str | None = Field(default=None, max_length=2000)
     is_active: bool = True
@@ -733,7 +730,7 @@ class ServiceRateUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=160)
     category: str | None = Field(default=None, min_length=2, max_length=120)
     artist_role: str | None = Field(default=None, min_length=1, max_length=120)
-    unit: str | None = Field(default=None, pattern="^(hour|half_day|day|week|episode|fixed|unit)$")
+    unit: str | None = Field(default=None, pattern="^(hour|day|fixed)$")
     rate: Money | None = Field(default=None, ge=0)
     notes: str | None = Field(default=None, max_length=2000)
     is_active: bool | None = None
@@ -760,7 +757,7 @@ class RateCardOverrideRequest(BaseModel):
     room_id: str | None = None
     person_id: str | None = None
     category: str | None = Field(default=None, min_length=2, max_length=120)
-    unit: str | None = Field(default=None, pattern="^(hour|half_day|day|week|episode|fixed|unit)$")
+    unit: str | None = Field(default=None, pattern="^(hour|day|fixed)$")
     rate: Money = Field(ge=0)
     internal_cost_rate: Money | None = Field(default=None, ge=0)
 

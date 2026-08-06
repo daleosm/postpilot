@@ -35,7 +35,7 @@ router = APIRouter(prefix="/rate-cards", tags=["rate-cards"])
 # These values are deliberately a commercial vocabulary rather than a list of
 # facility services or job roles. Services, rooms, and named artists stay
 # tenant-configured records.
-SUPPORTED_BILLING_UNITS = frozenset({"hour", "half_day", "day", "week", "episode", "fixed", "unit"})
+SUPPORTED_BILLING_UNITS = frozenset({"hour", "day", "fixed"})
 
 
 def _scope_name(card: object) -> str:
@@ -675,32 +675,26 @@ async def list_master_room_rates(actor: CurrentActor, session: DbSession) -> dic
             .order_by(rooms.c.name, rooms.c.id)
         )
     ).all()
-    return {
-        "rooms": [
-            {
-                "id": str(row.room_id),
-                "name": row.room_name,
-                "type": row.room_type,
-                "rate": (
-                    {
-                        "id": str(row.item_id),
-                        "category": row.category,
-                        "unit": row.unit,
-                        "rate": monetary(decimal_amount(row.rate)),
-                        "internal_cost_rate": (
-                            monetary(decimal_amount(row.internal_cost_rate))
-                            if row.internal_cost_rate is not None
-                            else None
-                        ),
-                        "currency": actor.active_organization.currency,
-                    }
-                    if row.item_id
-                    else None
-                ),
-            }
-            for row in rows
-        ]
-    }
+    grouped: dict[str, dict[str, object]] = {}
+    for row in rows:
+        room = grouped.setdefault(
+            str(row.room_id),
+            {"id": str(row.room_id), "name": row.room_name, "type": row.room_type, "rates": []},
+        )
+        if row.item_id:
+            room["rates"].append(
+                {
+                    "id": str(row.item_id),
+                    "category": row.category,
+                    "unit": row.unit,
+                    "rate": monetary(decimal_amount(row.rate)),
+                    "internal_cost_rate": (
+                        monetary(decimal_amount(row.internal_cost_rate)) if row.internal_cost_rate is not None else None
+                    ),
+                    "currency": actor.active_organization.currency,
+                }
+            )
+    return {"rooms": list(grouped.values())}
 
 
 @router.get("/room-rates")
@@ -785,23 +779,15 @@ async def list_scoped_room_rates(
             + [card for card in cards if master(card)]
         )
 
-    def room_item(card_list: list[object], room_id: object) -> tuple[object, object] | None:
+    def room_items(card_list: list[object], room_id: object) -> list[tuple[object, object]]:
+        matched: dict[str, tuple[object, object]] = {}
         for card in card_list:
-            match = next(
-                (
-                    item
-                    for item in items.get(str(card.id), [])
-                    if item.target_type == "room" and str(item.room_id) == str(room_id)
-                ),
-                None,
-            )
-            if match:
-                return card, match
-        return None
+            for item in items.get(str(card.id), []):
+                if item.target_type == "room" and str(item.room_id) == str(room_id):
+                    matched.setdefault(str(item.unit), (card, item))
+        return list(matched.values())
 
-    def response_rate(result: tuple[object, object] | None) -> dict[str, object] | None:
-        if not result:
-            return None
+    def response_rate(result: tuple[object, object]) -> dict[str, object]:
         card, item = result
         return {
             "id": str(item.id),
@@ -828,8 +814,8 @@ async def list_scoped_room_rates(
                 "id": str(room.id),
                 "name": room.name,
                 "type": room.type,
-                "own_rate": response_rate(room_item(own, room.id)),
-                "inherited_rate": response_rate(room_item(inherited_cards, room.id)),
+                "own_rates": [response_rate(result) for result in room_items(own, room.id)],
+                "inherited_rates": [response_rate(result) for result in room_items(inherited_cards, room.id)],
             }
             for room in room_rows
         ]
@@ -882,7 +868,7 @@ async def create_service_rate(
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A service with that name already exists in this post house.",
+            detail="This service already has a price for that billing unit in this post house.",
         ) from error
     return _service_response(service)
 
@@ -962,7 +948,7 @@ async def update_service_rate(
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A service with that name already exists in this post house.",
+            detail="This service already has a price for that billing unit in this post house.",
         ) from error
     return _service_response(service)
 
@@ -1179,12 +1165,14 @@ async def set_rate_card_override(
                 rate_card_items.c.rate_card_id == card.id,
                 rate_card_items.c.target_type == "room",
                 rate_card_items.c.room_id == item_target["room_id"],
+                rate_card_items.c.unit == unit,
             )
         else:
             identity = and_(
                 rate_card_items.c.rate_card_id == card.id,
                 rate_card_items.c.target_type == "person",
                 rate_card_items.c.person_id == item_target["person_id"],
+                rate_card_items.c.unit == unit,
             )
         existing = (await session.execute(select(rate_card_items.c.id).where(identity).limit(1))).first()
         if existing:
@@ -1327,7 +1315,7 @@ async def get_rate_card_overrides(
                 value = {"rate": monetary(decimal_amount(item.rate)), "currency": card.currency, "source": str(card.id)}
                 inherited[key] = value
                 if str(card.id) in own_ids:
-                    overrides[key] = {"rate": value["rate"], "currency": card.currency}
+                    overrides[key] = {"id": str(item.id), "rate": value["rate"], "currency": card.currency}
     return {"overrides": overrides, "inherited": inherited}
 
 

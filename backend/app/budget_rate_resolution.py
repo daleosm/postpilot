@@ -14,7 +14,7 @@ from app.budget_logic import decimal_amount, money_amount
 from app.db.tables import people, rooms, service_rates
 
 RATE_RESOURCE_TYPES = {"service", "room", "person"}
-PLANNING_UNITS = {"hour", "day", "episode", "fixed", "unit"}
+PLANNING_UNITS = {"hour", "day", "fixed"}
 
 
 @dataclass(frozen=True)
@@ -50,8 +50,8 @@ async def resolve_budget_rate_snapshot(
     """Resolve a selected resource to one inherited rate and snapshot it.
 
     The resource is tenant-scoped before its category/unit can participate in
-    the hierarchy. A service supplies its own category and unit; a room or
-    person is an operational reference and uses the selected cost category.
+    the hierarchy. A service supplies its category and unit; a room or person
+    is an operational reference and uses the selected cost category.
     """
     if resource_type not in RATE_RESOURCE_TYPES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Choose a valid budget resource.")
@@ -72,7 +72,7 @@ async def resolve_budget_rate_snapshot(
         ).first()
         if not service:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service rate not found.")
-        resolved_category, resolved_unit, label = service.category, service.unit, service.name
+        resolved_category, resolved_unit, label = service.category, resolved_unit or service.unit, service.name
     elif resource_type == "room":
         room = (
             await session.execute(
@@ -98,7 +98,7 @@ async def resolve_budget_rate_snapshot(
     if resolved_unit not in PLANNING_UNITS:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Choose hour, day, episode, fixed, or unit for this planned item.",
+            detail="Choose hourly, daily, or fixed-fee billing for this planned item.",
         )
     resolved_quantity = decimal_amount(quantity)
     if resolved_quantity <= 0:

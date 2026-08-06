@@ -43,6 +43,9 @@ test.describe("Episode estimate to actual UI", () => {
     // seeded master-card service rather than relying on a retired combined
     // "Edit bay" option label.
     await builder.getByLabel("Estimate service").selectOption({ index: 1 });
+    const unit = builder.getByLabel("Estimate billing unit");
+    await expect(unit).toBeEnabled();
+    await unit.selectOption({ index: 1 });
     const previewResponse = page.waitForResponse((response) => response.url().includes("/v1/budget/estimate-preview") && response.request().method() === "POST");
     await builder.getByRole("button", { name: "Resolve rate", exact: true }).click();
     const preview = await (await previewResponse).json() as { category: string; unit: string; estimate: number; rate_source: string };

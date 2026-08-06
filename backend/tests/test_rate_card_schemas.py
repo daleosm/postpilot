@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from app.api.schemas import RateCardOverrideRequest, ServiceRateCreateRequest, ServiceRateUpdateRequest
 
 
-@pytest.mark.parametrize("unit", ["hour", "half_day", "day", "week", "fixed", "unit", "episode"])
+@pytest.mark.parametrize("unit", ["hour", "day", "fixed"])
 def test_rate_card_billing_units_are_supported_consistently(unit: str) -> None:
     service = ServiceRateCreateRequest(
         name="Colour service",
@@ -36,6 +36,8 @@ def test_rate_card_billing_units_are_supported_consistently(unit: str) -> None:
 def test_rate_cards_reject_unsupported_billing_units() -> None:
     with pytest.raises(ValidationError):
         ServiceRateCreateRequest(name="Monthly retainer", category="Commercial", unit="month", rate=100)
+    with pytest.raises(ValidationError):
+        ServiceRateCreateRequest(name="Weekly retainer", category="Commercial", unit="week", rate=100)
     with pytest.raises(ValidationError):
         RateCardOverrideRequest(
             scope="master",

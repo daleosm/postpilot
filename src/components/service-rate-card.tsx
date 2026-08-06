@@ -11,15 +11,9 @@ import { z } from "zod";
 import { postpilotUiFetch } from "@/lib/postpilot-api-client";
 
 const billingUnits = [
-  ["hour", "Hour"],
-  ["half_day", "Half-day"],
+  ["hour", "Hourly"],
   ["day", "Day"],
-  ["week", "Week"],
   ["fixed", "Fixed fee"],
-  ["unit", "Unit"],
-  // Existing rate cards may still be priced per episode. Keep that saved
-  // commercial structure editable rather than invalidating historic cards.
-  ["episode", "Per episode"],
 ] as const;
 
 type BillingUnit = (typeof billingUnits)[number][0];
@@ -28,8 +22,9 @@ const schema = z.object({
   name: z.string().trim().min(1, "Service name is required.").max(120),
   category: z.string().trim().min(1, "Category is required.").max(120),
   artistRole: z.string(),
-  unit: z.enum(["hour", "half_day", "day", "week", "fixed", "unit", "episode"]),
-  rate: z.coerce.number().positive("Rate must be greater than zero."),
+  hourlyRate: z.string(),
+  dayRate: z.string(),
+  fixedFee: z.string(),
   notes: z.string().trim().max(2000).optional(),
   isActive: z.boolean(),
 });
@@ -41,14 +36,14 @@ type MasterRoom = {
   id: string;
   name: string;
   type: string;
-  rate: {
+  rates: Array<{
     id: string;
     category: string;
     unit: BillingUnit;
     rate: string | number;
     internal_cost_rate: string | number | null;
     currency: string;
-  } | null;
+  }>;
 };
 
 export type ServiceRate = {
@@ -64,6 +59,7 @@ export type ServiceRate = {
 };
 
 type MasterServiceRate = ServiceRate & { masterRate?: string | number };
+type MasterServiceRateGroup = Omit<ServiceRate, "id" | "unit" | "rate"> & { rates: MasterServiceRate[] };
 
 export function ServiceRateCard({ rates, embedded = false }: { rates: ServiceRate[]; embedded?: boolean }) {
   const [masterPrices, setMasterPrices] = useState<Record<string, MasterPrice>>({});
@@ -95,6 +91,12 @@ export function ServiceRateCard({ rates, embedded = false }: { rates: ServiceRat
     ...rate,
     masterRate: masterPrices[rate.category + ":" + rate.unit]?.rate,
   }));
+  const groupedRates = Object.values(masterRates.reduce<Record<string, MasterServiceRateGroup>>((groups, rate) => {
+    const key = [rate.name, rate.category, rate.artistRole ?? ""].join("\u0000");
+    groups[key] ??= { name: rate.name, category: rate.category, artistRole: rate.artistRole, currency: rate.currency, notes: rate.notes, isActive: rate.isActive, rates: [] };
+    groups[key].rates.push(rate);
+    return groups;
+  }, {}));
 
   return <section className={(embedded ? "rounded-lg border border-[#ebeae6]" : "panel") + " overflow-hidden"}>
     <div className="flex flex-col justify-between gap-3 border-b border-[#ebeae6] px-5 py-4 sm:flex-row sm:items-center">
@@ -105,8 +107,8 @@ export function ServiceRateCard({ rates, embedded = false }: { rates: ServiceRat
       <div className="flex flex-wrap gap-2"><RoomRateDialog rooms={rooms} /><MasterServiceRateDialog /></div>
     </div>
     <div className="divide-y divide-[#efeeea]">
-      {masterRates.map((rate) => <RateRow key={rate.id} rate={rate} />)}
-      {rooms.filter((room) => room.rate).map((room) => <RoomRateRow key={room.id} room={room} rooms={rooms} />)}
+      {groupedRates.map((rate) => <RateRow key={`${rate.name}:${rate.category}:${rate.artistRole ?? ""}`} rate={rate} />)}
+      {rooms.filter((room) => room.rates.length).map((room) => <RoomRateRow key={room.id} room={room} rooms={rooms} />)}
       {!rates.length && <div className="px-5 py-12 text-center">
         <ReceiptText className="mx-auto text-[#a1a7a3]" size={22} />
         <p className="mt-3 text-sm font-medium text-[#59615d]">No master rates yet</p>
@@ -116,8 +118,8 @@ export function ServiceRateCard({ rates, embedded = false }: { rates: ServiceRat
   </section>;
 }
 
-function RateRow({ rate }: { rate: MasterServiceRate }) {
-  const displayedRate = rate.masterRate ?? rate.rate;
+function RateRow({ rate }: { rate: MasterServiceRateGroup }) {
+  const price = (unit: BillingUnit) => rate.rates.find((candidate) => candidate.unit === unit);
   return <div className="flex flex-col justify-between gap-3 px-5 py-4 sm:flex-row sm:items-center">
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
@@ -127,22 +129,23 @@ function RateRow({ rate }: { rate: MasterServiceRate }) {
       <p className="mt-1.5 text-xs text-[#7d837f]">{rate.artistRole ? `Artist role · ${titleCase(rate.artistRole)}` : rate.category}{rate.notes ? " · " + rate.notes : ""}</p>
     </div>
     <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-      <p className="mr-1 text-sm font-semibold text-[#3d4642]">{formatMoney(displayedRate, rate.currency)} <span className="text-xs font-normal text-[#7d837f]">/ {formatBillingUnit(rate.unit)}</span></p>
-      <MasterServiceRateDialog rate={rate} />
-      <RemoveMasterServiceRateButton rate={rate} />
+      <div className="grid grid-cols-3 gap-2 text-right text-xs">{billingUnits.map(([unit, label]) => { const configured = price(unit); const value = configured?.masterRate ?? configured?.rate; return <div key={unit}><p className="text-[#858a87]">{label}</p><p className="font-semibold text-[#3d4642]">{value == null ? "—" : formatMoney(value, rate.currency)}</p></div>; })}</div>
+      <MasterServiceRateDialog rates={rate.rates} />
+      <RemoveMasterServiceRateButton rates={rate.rates} />
     </div>
   </div>;
 }
 
 function RoomRateRow({ room, rooms }: { room: MasterRoom; rooms: MasterRoom[] }) {
-  if (!room.rate) return null;
+  if (!room.rates.length) return null;
+  const prices = billingUnits.map(([unit, label]) => ({ unit, label, rate: room.rates.find((candidate) => candidate.unit === unit) }));
   return <div className="flex flex-col justify-between gap-3 px-5 py-4 sm:flex-row sm:items-center">
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-semibold text-[#404844]">{room.name}</p><span className="service-rate-inactive">Room</span></div>
       <p className="mt-1.5 text-xs text-[#7d837f]">{room.type} · selected from Settings → Rooms</p>
     </div>
     <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-      <p className="mr-1 text-sm font-semibold text-[#3d4642]">{formatMoney(room.rate.rate, room.rate.currency)} <span className="text-xs font-normal text-[#7d837f]">/ {formatBillingUnit(room.rate.unit)}</span></p>
+      <div className="mr-1 grid grid-cols-3 gap-2 text-right text-xs">{prices.map(({ unit, label, rate }) => <div key={unit}><p className="text-[#858a87]">{label}</p><p className="font-semibold text-[#3d4642]">{rate ? formatMoney(rate.rate, rate.currency) : "—"}</p></div>)}</div>
       <RoomRateDialog room={room} rooms={rooms} />
       <RemoveRoomRateButton room={room} />
     </div>
@@ -153,9 +156,9 @@ function RoomRateDialog({ room, rooms }: { room?: MasterRoom; rooms: MasterRoom[
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [roomId, setRoomId] = useState(room?.id ?? "");
-  const [unit, setUnit] = useState<BillingUnit>(room?.rate?.unit ?? "hour");
-  const [rate, setRate] = useState(room?.rate ? String(room.rate.rate) : "");
-  const [internalCostRate, setInternalCostRate] = useState(room?.rate?.internal_cost_rate == null ? "" : String(room.rate.internal_cost_rate));
+  const [unit, setUnit] = useState<BillingUnit>(room?.rates[0]?.unit ?? "hour");
+  const [rate, setRate] = useState(room?.rates[0] ? String(room.rates[0].rate) : "");
+  const [internalCostRate, setInternalCostRate] = useState(room?.rates[0]?.internal_cost_rate == null ? "" : String(room.rates[0].internal_cost_rate));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const selectedRoom = rooms.find((candidate) => candidate.id === roomId);
@@ -163,9 +166,9 @@ function RoomRateDialog({ room, rooms }: { room?: MasterRoom; rooms: MasterRoom[
   function close() {
     setOpen(false);
     setRoomId(room?.id ?? "");
-    setUnit(room?.rate?.unit ?? "hour");
-    setRate(room?.rate ? String(room.rate.rate) : "");
-    setInternalCostRate(room?.rate?.internal_cost_rate == null ? "" : String(room.rate.internal_cost_rate));
+    setUnit(room?.rates[0]?.unit ?? "hour");
+    setRate(room?.rates[0] ? String(room.rates[0].rate) : "");
+    setInternalCostRate(room?.rates[0]?.internal_cost_rate == null ? "" : String(room.rates[0].internal_cost_rate));
     setError("");
   }
 
@@ -219,37 +222,32 @@ function RemoveRoomRateButton({ room }: { room: MasterRoom }) {
   const router = useRouter();
   const [error, setError] = useState("");
   const [removing, setRemoving] = useState(false);
-  if (!room.rate) return null;
-  const rateId = room.rate.id;
+  if (!room.rates.length) return null;
+  const rateIds = room.rates.map((rate) => rate.id);
   async function remove() {
     setRemoving(true);
     setError("");
-    const response = await postpilotUiFetch("/v1/rate-cards/items/" + rateId, { method: "DELETE" });
-    if (!response.ok) {
-      const body = await response.json().catch(() => null);
-      setError(body?.detail ?? body?.error ?? "Could not remove this room rate.");
-      setRemoving(false);
-      return;
-    }
+    for (const rateId of rateIds) { const response = await postpilotUiFetch("/v1/rate-cards/items/" + rateId, { method: "DELETE" }); if (!response.ok) { const body = await response.json().catch(() => null); setError(body?.detail ?? body?.error ?? "Could not remove this room rate."); setRemoving(false); return; } }
     router.refresh();
   }
   return <div className="relative"><Button variant="tertiary" onPress={remove} isDisabled={removing} className="min-w-0 border border-[#eeded8] bg-[#fffdfb] text-[#a35e41]"><Trash2 size={14} /> {removing ? "Removing…" : "Remove"}</Button>{error && <p role="alert" className="absolute right-0 top-full z-10 mt-1 w-48 text-right text-[11px] text-[#a35e41]">{error}</p>}</div>;
 }
 
-export function MasterServiceRateDialog({ rate }: { rate?: MasterServiceRate }) {
+export function MasterServiceRateDialog({ rate, rates }: { rate?: MasterServiceRate; rates?: MasterServiceRate[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   const [roles, setRoles] = useState<Array<{ role: string; label: string }>>([]);
   const form = useForm<Input, unknown, Values>({
     resolver: zodResolver(schema),
-    defaultValues: defaults(rate),
+    defaultValues: defaults(rates ?? (rate ? [rate] : undefined)),
   });
+  const groupedRates = rates ?? (rate ? [rate] : []);
 
   function close() {
     setOpen(false);
     setError("");
-    form.reset(defaults(rate));
+    form.reset(defaults(groupedRates));
   }
 
   useEffect(() => {
@@ -264,51 +262,53 @@ export function MasterServiceRateDialog({ rate }: { rate?: MasterServiceRate }) 
 
   async function submit(values: Values) {
     setError("");
-    const serviceResponse = await postpilotUiFetch(
-      rate ? "/v1/rate-cards/services/" + rate.id : "/v1/rate-cards/services",
-      {
-        method: rate ? "PATCH" : "POST",
+    const prices: Array<[BillingUnit, string]> = [["hour", values.hourlyRate], ["day", values.dayRate], ["fixed", values.fixedFee]];
+    if (!prices.some(([, price]) => price.trim())) return setError("Enter at least one price.");
+    for (const [unit, price] of prices) {
+      const existing = groupedRates.find((candidate) => candidate.unit === unit);
+      if (!price.trim()) {
+        if (existing) {
+          const removed = await postpilotUiFetch(`/v1/rate-cards/services/${existing.id}`, { method: "DELETE" });
+          if (!removed.ok) return setError("Could not remove the cleared price.");
+        }
+        continue;
+      }
+      const serviceResponse = await postpilotUiFetch(existing ? `/v1/rate-cards/services/${existing.id}` : "/v1/rate-cards/services", {
+        method: existing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...values, artistRole: values.artistRole || null, notes: values.notes || null }),
-      },
-    );
-    const service = await serviceResponse.json().catch(() => null);
-    if (!serviceResponse.ok) return setError(service?.error ?? "Could not save this master rate.");
-
-    const masterResponse = await postpilotUiFetch("/v1/rate-cards/overrides", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scope: "master", serviceRateId: service.id, rate: values.rate }),
-    });
-    const masterBody = await masterResponse.json().catch(() => null);
-    if (!masterResponse.ok) return setError(masterBody?.error ?? "The service was saved, but its master price could not be set.");
+        body: JSON.stringify({ name: values.name, category: values.category, artistRole: values.artistRole || null, unit, rate: Number(price), notes: values.notes || null, isActive: values.isActive }),
+      });
+      const service = await serviceResponse.json().catch(() => null);
+      if (!serviceResponse.ok) return setError(service?.detail ?? service?.error ?? "Could not save this master rate.");
+      const masterResponse = await postpilotUiFetch("/v1/rate-cards/overrides", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "master", serviceRateId: service.id, rate: Number(price) }),
+      });
+      if (!masterResponse.ok) return setError("The service was saved, but its master price could not be set.");
+    }
     close();
     router.refresh();
   }
 
   return <>
-    <Button variant={rate ? "tertiary" : "primary"} onPress={() => setOpen(true)} className={rate ? "min-w-0 border border-[#dfe3df] bg-white text-[#58635e]" : "bg-[#263130] text-white"}>
-      {rate ? <><Pencil size={14} /> Edit</> : <><Plus size={16} /> Add service rate</>}
+    <Button variant={groupedRates.length ? "tertiary" : "primary"} onPress={() => setOpen(true)} className={groupedRates.length ? "min-w-0 border border-[#dfe3df] bg-white text-[#58635e]" : "bg-[#263130] text-white"}>
+      {groupedRates.length ? <><Pencil size={14} /> Edit</> : <><Plus size={16} /> Add service rate</>}
     </Button>
     {open && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#202725]/25 p-4">
       <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-xl border border-[#e2e3de] bg-[#fafbf9] p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold tracking-[-0.03em] text-[#2d3431]">{rate ? "Edit master rate" : "Add master rate"}</h2>
+            <h2 className="text-lg font-semibold tracking-[-0.03em] text-[#2d3431]">{groupedRates.length ? "Edit master rate" : "Add master rate"}</h2>
             <p className="mt-1 text-sm text-[#767c78]">The post house currency is set in Settings. This price becomes the inherited default.</p>
           </div>
           <Button isIconOnly variant="tertiary" onPress={close} aria-label="Close" className="min-w-0 text-[#7d827e]"><X size={18} /></Button>
         </div>
         <form className="mt-6 space-y-4" onSubmit={form.handleSubmit(submit)}>
           <Field label="Service" error={form.formState.errors.name?.message}><input {...form.register("name")} placeholder="Senior editor" /></Field>
-          <Field label="Applies to"><select {...form.register("artistRole", { onChange: (event) => { const match = roles.find((role) => role.role === event.target.value); if (match && !rate) { form.setValue("name", match.label); form.setValue("category", match.label); } } })}><option value="">Generic service</option>{roles.map((role) => <option key={role.role} value={role.role}>{role.label}</option>)}</select></Field>
+          <Field label="Applies to"><select {...form.register("artistRole", { onChange: (event) => { const match = roles.find((role) => role.role === event.target.value); if (match && !groupedRates.length) { form.setValue("name", match.label); form.setValue("category", match.label); } } })}><option value="">Generic service</option>{roles.map((role) => <option key={role.role} value={role.role}>{role.label}</option>)}</select></Field>
           <Field label="Budget category" error={form.formState.errors.category?.message}><input {...form.register("category")} placeholder="Editorial artists" /></Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Master rate" error={form.formState.errors.rate?.message}><input type="number" min="0" step="0.01" {...form.register("rate")} /></Field>
-            <Field label="Per" error={form.formState.errors.unit?.message}>
-              <select {...form.register("unit")}>{billingUnits.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-            </Field>
-          </div>
+          <div className="grid gap-3 sm:grid-cols-3"><Field label="Hourly"><input type="number" min="0" step="0.01" {...form.register("hourlyRate")} placeholder="Optional" /></Field><Field label="Day"><input type="number" min="0" step="0.01" {...form.register("dayRate")} placeholder="Optional" /></Field><Field label="Fixed fee"><input type="number" min="0" step="0.01" {...form.register("fixedFee")} placeholder="Optional" /></Field></div>
           <Field label="Notes" error={form.formState.errors.notes?.message}><textarea rows={2} {...form.register("notes")} placeholder="Overtime, equipment, or terms…" /></Field>
           <label className="flex items-center gap-2 text-xs text-[#535b57]"><input type="checkbox" {...form.register("isActive")} /> Available for new estimates</label>
           {error && <p role="alert" className="text-xs text-[#a35e41]">{error}</p>}
@@ -322,7 +322,7 @@ export function MasterServiceRateDialog({ rate }: { rate?: MasterServiceRate }) 
   </>;
 }
 
-export function RemoveMasterServiceRateButton({ rate }: { rate: ServiceRate }) {
+export function RemoveMasterServiceRateButton({ rate, rates }: { rate?: ServiceRate; rates?: ServiceRate[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
@@ -331,26 +331,29 @@ export function RemoveMasterServiceRateButton({ rate }: { rate: ServiceRate }) {
   async function remove() {
     setRemoving(true);
     setError("");
-    const response = await postpilotUiFetch("/v1/rate-cards/services/" + rate.id, { method: "DELETE" });
-    if (!response.ok) {
-      const body = await response.json().catch(() => null);
-      setError(body?.error ?? "Could not remove this master rate.");
-      setRemoving(false);
-      return;
+    for (const service of rates ?? (rate ? [rate] : [])) {
+      const response = await postpilotUiFetch("/v1/rate-cards/services/" + service.id, { method: "DELETE" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        setError(body?.error ?? "Could not remove this master rate.");
+        setRemoving(false);
+        return;
+      }
     }
     setOpen(false);
     router.refresh();
   }
 
-  const titleId = "remove-service-" + rate.id;
+  const selectedRates = rates ?? (rate ? [rate] : []);
+  const titleId = "remove-service-" + (selectedRates[0]?.id ?? "new");
   return <>
-    <Button variant="tertiary" onPress={() => setOpen(true)} className="min-w-0 border border-[#eeded8] bg-[#fffdfb] text-[#a35e41]" aria-label={"Remove " + rate.name}><Trash2 size={14} /> Remove</Button>
+    <Button variant="tertiary" onPress={() => setOpen(true)} className="min-w-0 border border-[#eeded8] bg-[#fffdfb] text-[#a35e41]" aria-label={"Remove " + (selectedRates[0]?.name ?? "service")}><Trash2 size={14} /> Remove</Button>
     {open && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#202725]/30 p-4" role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <div className="w-full max-w-md rounded-xl border border-[#e2e3de] bg-[#fafbf9] p-6 shadow-2xl">
         <div className="flex gap-3">
           <div className="rounded-full bg-[#fff0eb] p-2 text-[#a35e41]"><AlertTriangle size={18} /></div>
           <div>
-            <h2 id={titleId} className="text-lg font-semibold tracking-[-0.03em] text-[#2d3431]">Remove {rate.name}?</h2>
+            <h2 id={titleId} className="text-lg font-semibold tracking-[-0.03em] text-[#2d3431]">Remove {selectedRates[0]?.name}?</h2>
             <p className="mt-1 text-sm text-[#767c78]">This removes the service and its live rate-card prices across the post house. Existing approved estimates keep their saved rate snapshots.</p>
           </div>
         </div>
@@ -372,24 +375,23 @@ function Field({ label, error, children }: { label: string; error?: string; chil
   </label>;
 }
 
-function defaults(rate?: MasterServiceRate): Input {
+function defaults(rates?: MasterServiceRate[]): Input {
+  const rate = (unit: BillingUnit) => rates?.find((candidate) => candidate.unit === unit);
+  const first = rates?.[0];
   return {
-    name: rate?.name ?? "",
-    category: rate?.category ?? "",
-    artistRole: rate?.artistRole ?? "",
-    unit: (rate?.unit as Input["unit"]) ?? "hour",
-    rate: rate ? Number(rate.masterRate ?? rate.rate) : 0,
-    notes: rate?.notes ?? "",
-    isActive: rate?.isActive ?? true,
+    name: first?.name ?? "",
+    category: first?.category ?? "",
+    artistRole: first?.artistRole ?? "",
+    hourlyRate: rate("hour") ? String(rate("hour")?.masterRate ?? rate("hour")?.rate) : "",
+    dayRate: rate("day") ? String(rate("day")?.masterRate ?? rate("day")?.rate) : "",
+    fixedFee: rate("fixed") ? String(rate("fixed")?.masterRate ?? rate("fixed")?.rate) : "",
+    notes: first?.notes ?? "",
+    isActive: first?.isActive ?? true,
   };
 }
 
 function titleCase(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function formatBillingUnit(value: string) {
-  return billingUnits.find(([unit]) => unit === value)?.[1] ?? titleCase(value);
 }
 
 function formatMoney(value: string | number, currency: string) {

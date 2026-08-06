@@ -259,6 +259,76 @@ def test_budget_rate_resolution_snapshots_inherited_rate_and_rejects_foreign_res
     assert person_line.json()["resource_reference"].startswith(f"person:{production_lab.data.editor_person_id}")
 
 
+def test_estimate_builder_lists_only_configured_units_and_never_converts_hourly_rates(
+    production_lab: ProductionApiLab,
+) -> None:
+    production_lab.sign_in_as_manager()
+    episode_id = _episode_id(production_lab)
+    category = f"Python configured estimate {uuid4().hex[:8]}"
+    hourly_service_id = _service_rate(production_lab, category=category, unit="hour", rate=100)
+    _rate_override(production_lab, scope="master", service_rate_id=hourly_service_id, rate=100)
+
+    available = production_lab.client.get(
+        "/v1/budget/estimate-available-units",
+        params={
+            "episode_id": episode_id,
+            "category": category,
+            "rate_resource_type": "service",
+            "rate_resource_id": hourly_service_id,
+        },
+    )
+    assert available.status_code == 200, available.text
+    assert available.json()["units"] == [{"unit": "hour", "label": "Hourly"}]
+
+    unavailable_day = production_lab.client.post(
+        "/v1/budget/estimate-preview",
+        json={
+            "episode_id": episode_id,
+            "category": category,
+            "planned_quantity": 2,
+            "planned_unit": "day",
+            "rate_resource_type": "service",
+            "rate_resource_id": hourly_service_id,
+        },
+    )
+    assert unavailable_day.status_code == 409
+
+    day_service_id = _service_rate(production_lab, category=category, unit="day", rate=650)
+    _rate_override(production_lab, scope="master", service_rate_id=day_service_id, rate=650)
+    fixed_service_id = _service_rate(production_lab, category=category, unit="fixed", rate=1_500)
+    _rate_override(production_lab, scope="master", service_rate_id=fixed_service_id, rate=1_500)
+    configured = production_lab.client.get(
+        "/v1/budget/estimate-available-units",
+        params={
+            "episode_id": episode_id,
+            "category": category,
+            "rate_resource_type": "service",
+            "rate_resource_id": hourly_service_id,
+        },
+    )
+    assert configured.status_code == 200, configured.text
+    assert configured.json()["units"] == [
+        {"unit": "hour", "label": "Hourly"},
+        {"unit": "day", "label": "Day"},
+        {"unit": "fixed", "label": "Fixed fee"},
+    ]
+    explicit_day = production_lab.client.post(
+        "/v1/budget/estimate-preview",
+        json={
+            "episode_id": episode_id,
+            "category": category,
+            "planned_quantity": 2,
+            "planned_unit": "day",
+            "rate_resource_type": "service",
+            "rate_resource_id": hourly_service_id,
+        },
+    )
+    assert explicit_day.status_code == 200, explicit_day.text
+    assert explicit_day.json()["rate"] == 650
+    assert explicit_day.json()["estimate"] == 1300
+    assert explicit_day.json()["rate_source"] == "master_rate_card"
+
+
 def test_budget_lines_create_live_episode_and_show_rollups_with_po_commitments(
     production_lab: ProductionApiLab,
 ) -> None:

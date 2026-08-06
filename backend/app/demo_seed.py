@@ -1360,7 +1360,7 @@ async def _seed_tenant(connection, number: int, organization_id: str, tenant: di
             "QC",
             "Technical QC pass and corrective re-check allowance.",
             1,
-            "episode",
+            "fixed",
             485,
             "master_rate_card",
             f"room:{room_id(5)} · {tenant['rooms'][4]}",

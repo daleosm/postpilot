@@ -16,6 +16,7 @@ from sqlalchemy import and_, case, delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.api.dependencies import CurrentActor, DbSession
+from app.api.routes.rate_cards import resolve_effective_rate
 from app.api.schemas import (
     BudgetEstimatePreviewRequest,
     BudgetEstimateRevisionCreateRequest,
@@ -1193,6 +1194,60 @@ async def preview_budget_estimate(
     """Resolve one builder row without persisting or trusting browser totals."""
     await require_permission(session, actor, "manage_commercial")
     return await _preview_estimate(session, actor, payload)
+
+
+@router.get("/estimate-available-units")
+async def estimate_available_units(
+    episode_id: str,
+    category: str,
+    rate_resource_type: str,
+    rate_resource_id: str,
+    actor: CurrentActor,
+    session: DbSession,
+) -> dict[str, object]:
+    """Return only the configured price units for one estimate resource."""
+    await require_permission(session, actor, "manage_commercial")
+    await _episode_scope(session, actor, episode_id)
+    if rate_resource_type not in {"service", "room", "person"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Choose a valid estimate resource."
+        )
+
+    resolved_category = category.strip()
+    if rate_resource_type == "service":
+        service = (
+            await session.execute(
+                select(service_rates.c.category)
+                .where(
+                    and_(
+                        service_rates.c.id == rate_resource_id,
+                        service_rates.c.organization_id == actor.organization_id,
+                        service_rates.c.is_active.is_(True),
+                    )
+                )
+                .limit(1)
+            )
+        ).first()
+        if not service:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service rate not found.")
+        resolved_category = service.category
+    if not resolved_category:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Enter a rate category first.")
+
+    available = []
+    for unit, label in (("hour", "Hourly"), ("day", "Day"), ("fixed", "Fixed fee")):
+        effective = await resolve_effective_rate(
+            session,
+            actor,
+            episode_id=episode_id,
+            category=resolved_category,
+            unit=unit,
+            target_type=rate_resource_type if rate_resource_type in {"room", "person"} else None,
+            target_id=rate_resource_id if rate_resource_type in {"room", "person"} else None,
+        )
+        if effective["rate"] is not None:
+            available.append({"unit": unit, "label": label})
+    return {"units": available}
 
 
 @router.get("/episodes/{episode_id}/summary")

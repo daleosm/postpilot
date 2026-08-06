@@ -511,7 +511,7 @@ export const insertServiceRateSchema = z.object({
   organizationId: id,
   name: z.string().trim().min(1).max(120),
   category: z.string().trim().min(1).max(120),
-  unit: z.enum(["hour", "day", "episode", "fixed"]),
+  unit: z.enum(["hour", "day", "fixed"]),
   rate: money.positive(),
   notes: z.string().trim().max(2000).nullable().optional(),
   isActive: z.boolean().default(true),

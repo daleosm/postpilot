@@ -663,7 +663,7 @@ service_rates = Table(
     Column("updated_at", DateTime(timezone=True)),
     CheckConstraint("rate >= 0", name="service_rates_rate_non_negative_check"),
     CheckConstraint(
-        "unit IN ('hour', 'half_day', 'day', 'week', 'episode', 'fixed', 'unit')",
+        "unit IN ('hour', 'day', 'fixed')",
         name="service_rates_billing_unit_check",
     ),
 )
@@ -707,7 +707,7 @@ rate_card_items = Table(
     Column("updated_at", DateTime(timezone=True)),
     CheckConstraint("rate >= 0", name="rate_card_items_rate_non_negative_check"),
     CheckConstraint(
-        "unit IN ('hour', 'half_day', 'day', 'week', 'episode', 'fixed', 'unit')",
+        "unit IN ('hour', 'day', 'fixed')",
         name="rate_card_items_billing_unit_check",
     ),
     CheckConstraint(
