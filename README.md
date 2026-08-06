@@ -10,7 +10,7 @@ It is deliberately **not** a media-hosting platform. Facilities retain masters, 
 
 ## Why AGPLv3 and flexible deployment?
 
-Facilities cannot afford to be blocked by a vendor outage or a slow support queue during a live series. PostPilot can be offered as Cutluma Cloud, or self-hosted on facility infrastructure or in its own cloud account. Enterprise self-hosted can add a separately agreed support and release-management package.
+Facilities cannot afford to be blocked by a vendor outage or a slow support queue during a live series.
 
 - Choose the operating model that suits the facility’s technical ownership and control requirements.
 - Retain the ability to inspect, diagnose, patch, and deploy urgent fixes.
@@ -127,7 +127,6 @@ Open [http://localhost:5000](http://localhost:5000). Demo accounts use the passw
 | [Contributing](docs/contributing.md) | Scope, standards, and contribution expectations |
 | [Infrastructure README](infra/README.md) | GitHub Actions, ECR, Terraform, EKS, and Argo CD details |
 | [Test guide](tests/README.md) | Test-suite conventions and coverage map |
-| [Cutluma static site](site/README.md) | Separate static sales-site development and build instructions |
 
 ## Stack
 
