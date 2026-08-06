@@ -132,10 +132,11 @@ test.describe("Commercial completion journeys", () => {
     await page.getByRole("button", { name: "Manage rate card" }).click();
     await expect(page.getByRole("heading", { name: /rate card$/i })).toBeVisible();
     await page.getByRole("button", { name: "Override" }).first().click();
-    await page.getByRole("spinbutton", { name: "Rate", exact: true }).fill("712");
+    const dialog = page.getByRole("dialog", { name: /override/i });
+    await dialog.getByRole("spinbutton", { name: "Hourly", exact: true }).fill("712");
     const body = await captureJsonWrite(page, "**/v1/rate-cards/overrides");
 
-    await page.getByRole("button", { name: "Save override" }).click();
+    await dialog.getByRole("button", { name: "Save overrides" }).click();
 
     await expect.poll(body).toMatchObject({ scope: "network", network: expect.any(String), show_id: null, episode_id: null, rate: 712 });
   });
@@ -153,8 +154,8 @@ test.describe("Commercial completion journeys", () => {
             id: "room-rate-ui-001",
             name: "North Bay Grade",
             type: "Colour suite",
-            own_rate: null,
-            inherited_rate: {
+            own_rates: [],
+            inherited_rates: [{
               id: "master-room-rate-ui-001",
               category: "Colour suite",
               unit: "hour",
@@ -162,7 +163,7 @@ test.describe("Commercial completion journeys", () => {
               internal_cost_rate: 115,
               currency: "GBP",
               source_scope: "master",
-            },
+            }],
           }],
         }),
       });
@@ -176,12 +177,12 @@ test.describe("Commercial completion journeys", () => {
     const rooms = page.getByRole("heading", { name: "Room prices" }).locator("xpath=ancestor::section[1]");
     await expect(rooms.getByText("North Bay Grade", { exact: true })).toBeVisible();
     await rooms.getByRole("button", { name: "Override" }).click();
-    const dialog = page.getByRole("dialog", { name: "Override room price" });
-    await dialog.getByLabel("Client rate").fill("275");
-    await dialog.getByLabel(/Internal cost rate/).fill("125");
+    const dialog = page.getByRole("dialog", { name: "Override room prices" });
+    await dialog.locator('input[type="number"]').nth(0).fill("275");
+    await dialog.locator('input[type="number"]').nth(1).fill("125");
     const body = await captureJsonWrite(page, "**/v1/rate-cards/overrides");
 
-    await dialog.getByRole("button", { name: "Save room override" }).click();
+    await dialog.getByRole("button", { name: "Save room prices" }).click();
 
     await expect.poll(body).toMatchObject({
       scope: "network",
@@ -211,11 +212,11 @@ test.describe("Commercial completion journeys", () => {
     const dialog = page.getByRole("dialog", { name: "Add artist rate" });
     await dialog.getByLabel("Artist", { exact: true }).fill("Ari");
     await dialog.getByRole("button", { name: /Ari Taylor/ }).click();
-    await dialog.getByLabel("Client rate").fill("185");
-    await dialog.getByLabel(/Internal cost rate/).fill("96");
+    await dialog.locator('input[type="number"]').nth(0).fill("185");
+    await dialog.locator('input[type="number"]').nth(1).fill("96");
     const body = await captureJsonWrite(page, "**/v1/rate-cards/overrides");
 
-    await dialog.getByRole("button", { name: "Add artist rate", exact: true }).click();
+    await dialog.getByRole("button", { name: "Save artist prices", exact: true }).click();
 
     await expect.poll(body).toMatchObject({
       scope: "master",

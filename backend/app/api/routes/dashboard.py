@@ -103,9 +103,7 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
         if not actor.person_id or (actor.active_organization and actor.active_organization.role == "client"):
             work_order_attention_conditions.append(post_work_orders.c.id.is_(None))
         else:
-            work_order_attention_conditions.append(
-                post_work_orders.c.assignee_person_id == actor.person_id
-            )
+            work_order_attention_conditions.append(post_work_orders.c.assignee_person_id == actor.person_id)
     work_order_attention_conditions.append(
         or_(
             post_work_orders.c.due_at <= now + timedelta(hours=48),

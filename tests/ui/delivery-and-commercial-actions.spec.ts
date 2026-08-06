@@ -130,7 +130,7 @@ test.describe("Commercial register actions", () => {
     });
     await page.getByRole("button", { name: "Manage rate card" }).click();
     await page.getByRole("button", { name: "Edit", exact: true }).first().click();
-    await page.getByRole("spinbutton", { name: "Master rate", exact: true }).fill("999");
+    await page.getByRole("spinbutton", { name: "Hourly", exact: true }).fill("999");
     const requestBody = await captureJsonWrite(page, "**/v1/rate-cards/overrides");
 
     await page.getByRole("button", { name: "Save master rate" }).click();
