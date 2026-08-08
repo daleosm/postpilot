@@ -136,11 +136,11 @@ def test_worker_catering_requires_an_active_booking_or_assigned_work_order(
         """
         INSERT INTO post_work_orders (
           id, organization_id, episode_id, work_type, kind, title,
-          assignee_person_id, priority, is_blocking, status,
+          assignee_person_id is_blocking, status,
           billing_scope, billing_status, currency
         ) VALUES (
           $1, $2, $3, 'internal', 'work_order', 'Current conform correction',
-          $4, 'normal', false, 'in_progress', 'included', 'not_billable', 'GBP'
+          $4, false, 'in_progress', 'included', 'not_billable', 'GBP'
         )
         """,
         work_order_id,

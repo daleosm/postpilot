@@ -312,7 +312,6 @@ class WorkOrderCreateRequest(BaseModel):
     title: str = Field(min_length=2, max_length=160)
     description: str | None = Field(default=None, max_length=4000)
     assignee_person_id: str | None = None
-    priority: str = Field(default="normal", pattern="^(blocker|high|normal|low)$")
     is_blocking: bool | None = None
     billing_scope: str = Field(default="included", pattern="^(included|billable_change|internal)$")
     commercial_treatment: str = Field(default="wet_hire", pattern="^(wet_hire|dry_hire|flat_project_fee)$")
@@ -393,7 +392,6 @@ class WorkOrderUpdateRequest(BaseModel):
     allow_overtime_billing: bool | None = None
     overtime_multiplier: Percentage | None = Field(default=None, gt=0, le=10)
     billing_notes: str | None = Field(default=None, max_length=2000)
-    priority: str | None = Field(default=None, pattern="^(blocker|high|normal|low)$")
     is_blocking: bool | None = None
     external_url: str | None = Field(default=None, max_length=2000)
     due_at: datetime | None = None

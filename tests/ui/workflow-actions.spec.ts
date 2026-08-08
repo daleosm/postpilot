@@ -95,11 +95,11 @@ test.describe("Workflow operational actions", () => {
     if (!episode?.workflow_stage_id) throw new Error("Workflow-stage fixture is missing.");
     await sql`
       insert into post_work_orders (
-        id, organization_id, episode_id, workflow_stage_id, work_type, kind, title, priority,
+        id, organization_id, episode_id, workflow_stage_id, work_type, kind, title
         is_blocking, status, billing_scope, billing_status, currency
       ) values (
         ${TEST_WORK_ORDER_ID}, ${COPPERLINE_ORGANIZATION_ID}, ${EPISODE_IN_PROGRESS}, ${episode.workflow_stage_id},
-        'internal', 'work_order', ${TEST_WORK_ORDER_TITLE}, 'normal', false, 'in_progress', 'included', 'not_billable', 'USD'
+        'internal', 'work_order', ${TEST_WORK_ORDER_TITLE}, false, 'in_progress', 'included', 'not_billable', 'USD'
       )
     `;
 

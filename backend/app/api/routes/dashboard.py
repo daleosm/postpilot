@@ -121,7 +121,6 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
             select(
                 post_work_orders.c.id,
                 post_work_orders.c.title,
-                post_work_orders.c.priority,
                 post_work_orders.c.status,
                 post_work_orders.c.due_at,
                 post_work_orders.c.is_blocking,
@@ -202,7 +201,6 @@ async def get_dashboard(actor: CurrentActor, session: DbSession) -> dict[str, ob
             {
                 "id": item.id,
                 "title": item.title,
-                "priority": item.priority,
                 "status": item.status,
                 "due_at": item.due_at,
                 "is_blocking": item.is_blocking,

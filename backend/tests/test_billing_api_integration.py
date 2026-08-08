@@ -255,10 +255,10 @@ def test_invoice_readiness_requires_submitted_actual_time_and_tenant_scope(produ
     production_lab.execute(
         """
         INSERT INTO post_work_orders (
-          id, organization_id, episode_id, work_type, kind, title, priority,
+          id, organization_id, episode_id, work_type, kind, title
           is_blocking, status, billing_scope, billing_status, currency
         ) VALUES (
-          $1, $2, $3, 'internal', 'work_order', 'Foreign billed change', 'normal',
+          $1, $2, $3, 'internal', 'work_order', 'Foreign billed change',
           false, 'complete', 'billable_change', 'draft', 'GBP'
         )
         """,

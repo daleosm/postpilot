@@ -99,11 +99,11 @@ test.describe("Work-order operational UI", () => {
   test("sends an explicit approval decision for a pending work order", async ({ page }) => {
     await sql`
       insert into post_work_orders (
-        id, organization_id, episode_id, work_type, kind, title, priority,
+        id, organization_id, episode_id, work_type, kind, title
         is_blocking, status, billing_scope, billing_status, currency
       ) values (
         ${TEST_WORK_ORDER_ID}, ${COPPERLINE_ORGANIZATION_ID}, ${EPISODE_ID}, 'internal', 'work_order',
-        ${TEST_WORK_ORDER_TITLE}, 'normal', false, 'awaiting_approval', 'included', 'not_billable', 'USD'
+        ${TEST_WORK_ORDER_TITLE}, false, 'awaiting_approval', 'included', 'not_billable', 'USD'
       )
     `;
     await page.goto(`/episodes/${EPISODE_ID}`);
@@ -133,11 +133,11 @@ test.describe("Work-order reservation and time confirmation UI", () => {
     if (!editor) throw new Error("Copperline editor fixture is missing.");
     await sql`
       insert into post_work_orders (
-        id, organization_id, episode_id, work_type, kind, title, priority,
+        id, organization_id, episode_id, work_type, kind, title
         is_blocking, status, billing_scope, billing_status, currency, assignee_person_id
       ) values (
         ${TEST_WORK_ORDER_ID}, ${COPPERLINE_ORGANIZATION_ID}, ${EPISODE_ID}, 'internal', 'work_order',
-        ${TEST_WORK_ORDER_TITLE}, 'normal', false, 'ready_for_review', 'included', 'not_billable', 'USD', ${editor.id}
+        ${TEST_WORK_ORDER_TITLE}, false, 'ready_for_review', 'included', 'not_billable', 'USD', ${editor.id}
       )
     `;
     await page.goto("/bookings");
@@ -158,11 +158,11 @@ test.describe("Work-order reservation and time confirmation UI", () => {
     if (!editor) throw new Error("Copperline editor fixture is missing.");
     await sql`
       insert into post_work_orders (
-        id, organization_id, episode_id, work_type, kind, title, priority,
+        id, organization_id, episode_id, work_type, kind, title
         is_blocking, status, billing_scope, billing_status, currency, assignee_person_id
       ) values (
         ${TEST_WORK_ORDER_ID}, ${COPPERLINE_ORGANIZATION_ID}, ${EPISODE_ID}, 'internal', 'work_order',
-        ${TEST_WORK_ORDER_TITLE}, 'normal', false, 'ready_for_review', 'included', 'not_billable', 'USD', ${editor.id}
+        ${TEST_WORK_ORDER_TITLE}, false, 'ready_for_review', 'included', 'not_billable', 'USD', ${editor.id}
       )
     `;
 
@@ -195,11 +195,11 @@ test.describe("Work-order reservation and time confirmation UI", () => {
     `;
     await sql`
       insert into post_work_orders (
-        id, organization_id, episode_id, booking_id, work_type, kind, title, priority,
+        id, organization_id, episode_id, booking_id, work_type, kind, title
         is_blocking, status, billing_scope, billing_status, currency, assignee_person_id
       ) values (
         ${TEST_WORK_ORDER_ID}, ${COPPERLINE_ORGANIZATION_ID}, ${EPISODE_ID}, ${TEST_BOOKING_ID}, 'internal', 'work_order',
-        ${TEST_WORK_ORDER_TITLE}, 'normal', false, 'in_progress', 'included', 'not_billable', 'USD', ${editor.id}
+        ${TEST_WORK_ORDER_TITLE}, false, 'in_progress', 'included', 'not_billable', 'USD', ${editor.id}
       )
     `;
 

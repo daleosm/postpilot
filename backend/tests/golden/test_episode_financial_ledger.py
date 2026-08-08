@@ -398,13 +398,13 @@ def test_golden_booking_room_and_artist_rate_snapshots_invoice_to_the_penny(
         """
         INSERT INTO post_work_orders (
           id, organization_id, episode_id, booking_id, work_type, kind, title,
-              assignee_person_id, priority, is_blocking, status, billing_scope,
+              assignee_person_id is_blocking, status, billing_scope,
               billing_status, currency, allow_overtime_billing, planned_duration_quantity,
               planned_duration_unit, standard_day_hours_snapshot, overtime_multiplier,
               overtime_hourly_base_rate
             ) VALUES (
               $1, $2, $3, $4, 'internal', 'work_order', 'Golden approved overtime',
-              $5, 'normal', false, 'in_progress', 'billable_change', 'draft', 'GBP', true,
+              $5, false, 'in_progress', 'billable_change', 'draft', 'GBP', true,
               1, 'hour', 10, 1.5, 100
             )
         """,

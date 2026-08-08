@@ -36,7 +36,6 @@ def _payload(lab: ProductionApiLab, **overrides: object) -> dict[str, object]:
         "workflow_stage_id": lab.data.workflow_stage_id,
         "title": "Resolve client title-card correction",
         "assignee_person_id": lab.data.editor_person_id,
-        "priority": "high",
         **overrides,
     }
 
@@ -890,10 +889,10 @@ def test_work_order_rejects_foreign_records_and_hides_records_from_clients(produ
     production_lab.execute(
         """
         INSERT INTO post_work_orders (
-          id, organization_id, episode_id, work_type, kind, title, priority,
+          id, organization_id, episode_id, work_type, kind, title
           is_blocking, status, billing_scope, billing_status, currency
         ) VALUES (
-          $1, $2, $3, 'internal', 'work_order', 'Foreign work', 'normal',
+          $1, $2, $3, 'internal', 'work_order', 'Foreign work',
           false, 'open', 'included', 'not_billable', 'GBP'
         )
         """,

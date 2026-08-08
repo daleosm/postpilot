@@ -576,9 +576,6 @@ details[open] > :not(summary) { animation: pp-expand-in 170ms ease-out both; }
 .availability-badge--booked { background: #e9eff4; color: #4d6d7e; }
 .availability-badge--overtime { background: #fff1da; color: #95622a; }
 .availability-badge--unavailable { background: #fbeae5; color: #9a5040; }
-.work-order-priority { border-radius: 999px; padding: 0.125rem 0.375rem; background: #edf0ed; color: #64716a; font-size: 0.625rem; font-weight: 750; text-transform: capitalize; }
-.work-order-priority--high { background: #fff1d9; color: #936129; }
-.work-order-priority--blocker { background: #fbe8e3; color: #a15240; }
 
 /* Premium workflow presentation: live status is always more prominent than
  * decorative colour, and motion remains deliberately subtle. */

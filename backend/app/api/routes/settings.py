@@ -324,7 +324,6 @@ async def settings_bootstrap(actor: CurrentActor, session: DbSession) -> dict[st
                     "workflow_stage_id": str(row.workflow_stage_id),
                     "title": row.title,
                     "description": row.description,
-                    "priority": row.priority,
                     "is_blocking": row.is_blocking,
                     "position": row.position,
                 }
@@ -1126,7 +1125,6 @@ async def update_workflow(
                     "workflow_stage_id": str(item["workflow_stage_id"]),
                     "title": str(item.get("title") or "Work order").strip(),
                     "description": item.get("description"),
-                    "priority": str(item.get("priority") or "normal"),
                     "is_blocking": bool(item.get("is_blocking", True)),
                     "position": int(item.get("position") or index + 1),
                 }

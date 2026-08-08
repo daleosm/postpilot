@@ -44,7 +44,7 @@ type CommandEpisode = {
 };
 
 type DashboardBooking = { id: string; title: string; startsAt: Date; endsAt: Date; roomName: string | null; personName: string | null };
-type WorkOrderAttention = { id: string; title: string; priority: string; status: string; dueAt: Date | null; isBlocking: boolean; assigneePersonId: string | null; workflowStageId: string | null; episodeId: string; episodeTitle: string; episodeNumber: number; episodeWorkflowStageId: string | null; episodeWorkflowStatus: string; showTitle: string; workflowStageName: string | null };
+type WorkOrderAttention = { id: string; title: string; status: string; dueAt: Date | null; isBlocking: boolean; assigneePersonId: string | null; workflowStageId: string | null; episodeId: string; episodeTitle: string; episodeNumber: number; episodeWorkflowStageId: string | null; episodeWorkflowStatus: string; showTitle: string; workflowStageName: string | null };
 type OperationalTimelineItem = { id: string; title: string; context: string; href: string; at: Date | null; tone: "danger" | "attention" | "calm"; icon: React.ReactNode; label: string };
 
 function formatToday(value: Date) {
@@ -231,7 +231,7 @@ async function getCommandCenterData() {
       shows: Array<{ id: string; title: string; code: string; seasons: Array<{ id: string; number: number }>; season_count: number; episode_count: number; active_episode_count: number }>;
       schedule: Array<{ id: string; title: string; starts_at: string; ends_at: string; room_name: string | null; person_name: string | null }>;
       team: Array<{ id: string; name: string; role: string }>;
-      work_order_attention: Array<{ id: string; title: string; priority: string; status: string; due_at: string | null; is_blocking: boolean; assignee_person_id: string | null; work_order_stage_id: string | null; episode_id: string; episode_title: string; episode_number: number; episode_workflow_stage_id: string | null; episode_workflow_status: string; show_title: string; workflow_stage_name: string | null }>;
+      work_order_attention: Array<{ id: string; title: string; status: string; due_at: string | null; is_blocking: boolean; assignee_person_id: string | null; work_order_stage_id: string | null; episode_id: string; episode_title: string; episode_number: number; episode_workflow_stage_id: string | null; episode_workflow_status: string; show_title: string; workflow_stage_name: string | null }>;
       budget: { budgeted: number; actual: number } | null;
       activity: Array<{ id: string; action: string; entity_type: string; entity_id: string; metadata: unknown; created_at: string }>;
     }>("/dashboard");
@@ -258,7 +258,7 @@ async function getCommandCenterData() {
         }),
       })),
       schedule: response.schedule.map((booking) => ({ ...booking, startsAt: new Date(booking.starts_at), endsAt: new Date(booking.ends_at), roomName: booking.room_name, personName: booking.person_name })),
-      workOrderAttention: response.work_order_attention.map((workOrder) => ({ id: workOrder.id, title: workOrder.title, priority: workOrder.priority, status: workOrder.status, dueAt: workOrder.due_at ? new Date(workOrder.due_at) : null, isBlocking: workOrder.is_blocking, assigneePersonId: workOrder.assignee_person_id, workflowStageId: workOrder.work_order_stage_id, episodeId: workOrder.episode_id, episodeTitle: workOrder.episode_title, episodeNumber: workOrder.episode_number, episodeWorkflowStageId: workOrder.episode_workflow_stage_id, episodeWorkflowStatus: workOrder.episode_workflow_status, showTitle: workOrder.show_title, workflowStageName: workOrder.workflow_stage_name })),
+      workOrderAttention: response.work_order_attention.map((workOrder) => ({ id: workOrder.id, title: workOrder.title, status: workOrder.status, dueAt: workOrder.due_at ? new Date(workOrder.due_at) : null, isBlocking: workOrder.is_blocking, assigneePersonId: workOrder.assignee_person_id, workflowStageId: workOrder.work_order_stage_id, episodeId: workOrder.episode_id, episodeTitle: workOrder.episode_title, episodeNumber: workOrder.episode_number, episodeWorkflowStageId: workOrder.episode_workflow_stage_id, episodeWorkflowStatus: workOrder.episode_workflow_status, showTitle: workOrder.show_title, workflowStageName: workOrder.workflow_stage_name })),
       budget: response.budget ? { totals: { budgeted: response.budget.budgeted, actual: response.budget.actual } } : null,
       team: response.team,
       isDemo: false,

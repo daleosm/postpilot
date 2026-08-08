@@ -1325,7 +1325,6 @@ async def transition_delivery_item(
                             kind="delivery_correction",
                             title=f"Delivery correction — {item.label}",
                             description=payload.reason.strip(),
-                            priority="blocker",
                             is_blocking=True,
                             status="open",
                             external_url=next_url,

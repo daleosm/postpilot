@@ -57,7 +57,7 @@ def _work_order(lab: ProductionApiLab, episode_id: str) -> str:
     lab.execute(
         """
         INSERT INTO post_work_orders (
-          id, organization_id, episode_id, work_type, kind, title, priority,
+          id, organization_id, episode_id, work_type, kind, title
           is_blocking, status, billing_scope, billing_status, currency
         ) VALUES (
           $1, $2, $3, 'internal', 'work_order', 'Python conform correction',
@@ -585,7 +585,7 @@ def test_budget_api_requires_commercial_capability_and_validates_tenant_referenc
     production_lab.execute(
         """
         INSERT INTO post_work_orders (
-          id, organization_id, episode_id, work_type, kind, title, priority,
+          id, organization_id, episode_id, work_type, kind, title
           is_blocking, status, billing_scope, billing_status, currency
         ) VALUES (
           $1, $2, $3, 'internal', 'work_order', 'Foreign correction',

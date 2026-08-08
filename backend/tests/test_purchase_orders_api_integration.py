@@ -106,10 +106,10 @@ def _external_work_order(lab: ProductionApiLab, *, vendor_id: str, episode_id: s
         """
         INSERT INTO post_work_orders (
           id, organization_id, episode_id, work_type, vendor_company_id, kind,
-          title, priority, is_blocking, status, billing_scope, billing_status, currency
+          title is_blocking, status, billing_scope, billing_status, currency
         ) VALUES (
           $1, $2, $3, 'external_vendor', $4, 'work_order',
-          'External finishing', 'normal', false, 'in_progress', 'included', 'not_billable', 'GBP'
+          'External finishing', false, 'in_progress', 'included', 'not_billable', 'GBP'
         )
         """,
         work_order_id,

@@ -66,13 +66,13 @@ def _create_linked_booking(lab: ProductionApiLab) -> tuple[str, str]:
         """
         INSERT INTO post_work_orders (
           id, organization_id, episode_id, booking_id, work_type, kind, title,
-          assignee_person_id, priority, is_blocking, status, billing_scope,
+          assignee_person_id is_blocking, status, billing_scope,
           billing_status, currency, allow_overtime_billing, planned_duration_quantity,
           planned_duration_unit, standard_day_hours_snapshot, overtime_multiplier,
           overtime_hourly_base_rate
         ) VALUES (
           $1, $2, $3, $4, 'internal', 'work_order', 'Editorial title adjustment',
-          $5, 'normal', false, 'in_progress', 'billable_change', 'draft', 'GBP', true,
+          $5, false, 'in_progress', 'billable_change', 'draft', 'GBP', true,
           1, 'hour', 10, 1.5, 100
         )
         """,
@@ -711,7 +711,7 @@ def test_work_order_room_reservation_preserves_its_internal_budget_item(producti
         """
         INSERT INTO post_work_orders (
           id, organization_id, episode_id, work_type, kind, title, assignee_person_id,
-          priority, is_blocking, status, billing_scope, billing_status, currency
+          is_blocking, status, billing_scope, billing_status, currency
         ) VALUES (
           $1, $2, $3, 'internal', 'work_order', 'Budgeted sound correction', $4,
           'normal', false, 'in_progress', 'included', 'not_billable', 'GBP'
