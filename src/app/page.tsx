@@ -167,7 +167,6 @@ export default async function DashboardPage() {
   }, {});
   const suites = Object.entries(suiteHours).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const workload = team.map((member) => ({ ...member, hours: schedule.filter((booking) => booking.personName === member.name).reduce((sum, booking) => sum + (booking.endsAt.getTime() - booking.startsAt.getTime()) / 3_600_000, 0) })).sort((a, b) => b.hours - a.hours).slice(0, 5);
-  const attentionCount = lockedCuts.length + qcFailures.length + workOrderAttention.length;
   const operationalTimeline = buildOperationalTimeline({ lockedCuts, qcFailures, dueThisWeek, schedule, workOrderAttention, now });
 
   return (
@@ -179,7 +178,6 @@ export default async function DashboardPage() {
           <p className="mt-1.5 text-sm text-[#68736e]">{formatToday(now)} · capacity, approvals, and delivery risk in one live view.</p>
         </div>
         <div className="dashboard-command-center__aside">
-          <div className="dashboard-command-center__signals" aria-label="Today’s operational signals"><CommandSignal label="Attention" value={attentionCount} tone={attentionCount ? "attention" : "calm"} /><CommandSignal label="Scheduled" value={schedule.length} /><CommandSignal label="Due this week" value={dueThisWeek.length} tone={dueThisWeek.length ? "attention" : "calm"} /></div>
           <div className="flex items-center gap-2"><Link href="/bookings" className="inline-flex h-10 items-center gap-2 rounded-md border border-[#e4e4df] bg-white px-3 text-sm font-medium text-[#4e5653] shadow-sm hover:bg-[#fafaf8]"><CalendarDays size={15} /> Calendar</Link><Link href="/bookings" className="inline-flex h-10 items-center gap-2 rounded-md bg-[#263130] px-3 text-sm font-medium text-white hover:bg-[#394542]"><Plus size={16} /> New work</Link></div>
         </div>
       </section>
@@ -269,10 +267,6 @@ async function getCommandCenterData() {
 
 function Metric({ href, label, value, detail, icon, alert = false }: { href: string; label: string; value: string; detail: string; icon: React.ReactNode; alert?: boolean }) {
   return <Link href={href} data-alert={alert} className="dashboard-signal min-w-0"><span className={`dashboard-signal__icon ${alert ? "dashboard-signal__icon--attention" : ""}`}>{icon}</span><span className="min-w-0"><span className="dashboard-signal__label">{label}</span><span className="mt-1 flex items-baseline gap-2"><strong>{value}</strong><small className={alert ? "text-[#a86843]" : ""}>{detail}</small></span></span></Link>;
-}
-
-function CommandSignal({ label, value, tone = "calm" }: { label: string; value: number; tone?: "calm" | "attention" }) {
-  return <div className={`command-signal command-signal--${tone}`}><span>{label}</span><strong>{value}</strong></div>;
 }
 
 function SectionHeading({ title, detail, action, href }: { title: string; detail: string; action: string; href: string }) {
