@@ -171,9 +171,6 @@ def _payload_from_booking(row: object) -> BookingCreateRequest:
     )
 
 
-
-
-
 def _person_rate(person: object, currency: str) -> dict[str, object] | None:
     hourly = _decimal(person.hourly_rate)
     if hourly is not None:
