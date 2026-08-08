@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.booking_costs import BOOKING_RATE_DEFINITIONS
+from app.api.routes.rate_cards import SUPPORTED_BILLING_UNITS
 from app.work_order_billing import overtime_charge, overtime_hourly_base_rate, time_block_hours
 
 
@@ -26,5 +26,7 @@ def test_fixed_fee_has_no_implied_overtime_basis_without_planned_occupancy() -> 
         time_block_hours(Decimal("1"), "fixed", Decimal("10"))
 
 
-def test_qc_bookings_resolve_to_hourly_room_and_artist_rate_cards() -> None:
-    assert BOOKING_RATE_DEFINITIONS["qc"] == ("QC", "hour")
+def test_supported_billing_units_include_hourly_and_fixed() -> None:
+    assert "hour" in SUPPORTED_BILLING_UNITS
+    assert "day" in SUPPORTED_BILLING_UNITS
+    assert "fixed" in SUPPORTED_BILLING_UNITS

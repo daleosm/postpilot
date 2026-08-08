@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.dependencies import CurrentActor, DbSession
 from app.api.production import may_view_all_episodes
-from app.api.routes.rate_cards import resolve_effective_rate
+from app.api.routes.rate_cards import SUPPORTED_BILLING_UNITS, resolve_effective_rate
 from app.api.schemas import (
     BookingConflictFlagRequest,
     BookingConflictRequest,
@@ -24,7 +24,6 @@ from app.api.schemas import (
 )
 from app.auth import has_permission, require_permission
 from app.booking_costs import (
-    BOOKING_RATE_DEFINITIONS,
     OVERTIME_MULTIPLIER,
     confirmed_hours,
     cost_for_hours,
@@ -172,123 +171,7 @@ def _payload_from_booking(row: object) -> BookingCreateRequest:
     )
 
 
-async def _resolve_room_rate(
-    session: DbSession,
-    actor: CurrentActor,
-    *,
-    episode_id: str | None,
-    booking_type: str,
-) -> dict[str, object] | None:
-    """Resolve the live inherited room/service rate for one booking type."""
-    definition = BOOKING_RATE_DEFINITIONS.get(booking_type)
-    if not definition:
-        return None
-    category, unit = definition
-    episode_scope = None
-    if episode_id:
-        episode_scope = (
-            await session.execute(
-                select(shows.c.id.label("show_id"), shows.c.client_company_id, shows.c.network)
-                .select_from(episodes)
-                .join(
-                    seasons,
-                    and_(seasons.c.id == episodes.c.season_id, seasons.c.organization_id == actor.organization_id),
-                )
-                .join(shows, and_(shows.c.id == seasons.c.show_id, shows.c.organization_id == actor.organization_id))
-                .where(and_(episodes.c.id == episode_id, episodes.c.organization_id == actor.organization_id))
-                .limit(1)
-            )
-        ).first()
-        if not episode_scope:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found.")
 
-    cards = (
-        await session.execute(
-            select(
-                rate_cards.c.id,
-                rate_cards.c.currency,
-                rate_cards.c.client_company_id,
-                rate_cards.c.network,
-                rate_cards.c.show_id,
-                rate_cards.c.episode_id,
-            ).where(and_(rate_cards.c.organization_id == actor.organization_id, rate_cards.c.is_active.is_(True)))
-        )
-    ).all()
-    ordered: list[tuple[object, str]] = []
-    if episode_scope:
-        ordered.extend((card, "episode_rate_card") for card in cards if str(card.episode_id or "") == episode_id)
-        ordered.extend(
-            (card, "show_rate_card")
-            for card in cards
-            if card.show_id and str(card.show_id) == str(episode_scope.show_id) and not card.episode_id
-        )
-        ordered.extend(
-            (card, "network_rate_card")
-            for card in cards
-            if card.network and card.network == episode_scope.network and not card.show_id and not card.episode_id
-        )
-        ordered.extend(
-            (card, "client_rate_card")
-            for card in cards
-            if card.client_company_id
-            and str(card.client_company_id) == str(episode_scope.client_company_id or "")
-            and not card.network
-            and not card.show_id
-            and not card.episode_id
-        )
-    ordered.extend(
-        (card, "master_rate_card")
-        for card in cards
-        if not card.client_company_id and not card.network and not card.show_id and not card.episode_id
-    )
-    for card, source in ordered:
-        item = (
-            await session.execute(
-                select(rate_card_items.c.id, rate_card_items.c.rate)
-                .where(
-                    and_(
-                        rate_card_items.c.organization_id == actor.organization_id,
-                        rate_card_items.c.rate_card_id == card.id,
-                        rate_card_items.c.category == category,
-                        rate_card_items.c.unit == unit,
-                    )
-                )
-                .limit(1)
-            )
-        ).first()
-        if item:
-            return {
-                "category": category,
-                "unit": unit,
-                "rate": _decimal(item.rate),
-                "currency": card.currency,
-                "source": source,
-                "rate_card_id": str(card.id),
-            }
-    facility = (
-        await session.execute(
-            select(service_rates.c.id, service_rates.c.rate, service_rates.c.currency)
-            .where(
-                and_(
-                    service_rates.c.organization_id == actor.organization_id,
-                    service_rates.c.category == category,
-                    service_rates.c.unit == unit,
-                    service_rates.c.is_active.is_(True),
-                )
-            )
-            .limit(1)
-        )
-    ).first()
-    if not facility:
-        return None
-    return {
-        "category": category,
-        "unit": unit,
-        "rate": _decimal(facility.rate),
-        "currency": facility.currency,
-        "source": "facility_rate_card",
-        "rate_card_id": None,
-    }
 
 
 def _person_rate(person: object, currency: str) -> dict[str, object] | None:
@@ -491,6 +374,126 @@ def _commercial_component_response(component: object) -> dict[str, object]:
     }
 
 
+async def _rate_candidate_pairs(
+    session: DbSession,
+    actor: CurrentActor,
+    *,
+    component_type: str,
+    target_id: str,
+    person_role: str | None,
+    booking_type: str,
+) -> list[tuple[str, str]]:
+    """Collect ordered candidate (category, unit) pairs for preview resolution."""
+
+    ordered: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _collect(*pairs: tuple[str, str | None, str | None]) -> None:
+        for category, unit, _source in pairs:
+            if not category or not unit:
+                continue
+            if unit not in SUPPORTED_BILLING_UNITS:
+                continue
+            pair = (str(category), str(unit))
+            if pair not in seen:
+                seen.add(pair)
+                ordered.append(pair)
+
+    if component_type == "room":
+        room_rows = await session.execute(
+            select(rate_card_items.c.category, rate_card_items.c.unit)
+            .select_from(
+                rate_card_items.join(
+                    rate_cards,
+                    and_(
+                        rate_cards.c.id == rate_card_items.c.rate_card_id,
+                        rate_cards.c.organization_id == actor.organization_id,
+                        rate_cards.c.is_active.is_(True),
+                    ),
+                )
+            )
+            .where(
+                and_(
+                    rate_card_items.c.organization_id == actor.organization_id,
+                    rate_card_items.c.target_type == "room",
+                    rate_card_items.c.room_id == target_id,
+                )
+            )
+            .order_by(rate_card_items.c.category, rate_card_items.c.unit)
+        )
+        for row in room_rows.all():
+            _collect((row.category, row.unit, "rate_card"))
+
+    elif component_type == "person":
+        person_rows = await session.execute(
+            select(rate_card_items.c.category, rate_card_items.c.unit)
+            .select_from(
+                rate_card_items.join(
+                    rate_cards,
+                    and_(
+                        rate_cards.c.id == rate_card_items.c.rate_card_id,
+                        rate_cards.c.organization_id == actor.organization_id,
+                        rate_cards.c.is_active.is_(True),
+                    ),
+                )
+            )
+            .where(
+                and_(
+                    rate_card_items.c.organization_id == actor.organization_id,
+                    rate_card_items.c.target_type == "person",
+                    rate_card_items.c.person_id == target_id,
+                )
+            )
+            .order_by(rate_card_items.c.category, rate_card_items.c.unit)
+        )
+        for row in person_rows.all():
+            _collect((row.category, row.unit, "rate_card"))
+
+        if person_role:
+            role_rows = await session.execute(
+                select(rate_card_items.c.category, rate_card_items.c.unit)
+                .select_from(
+                    rate_card_items.join(
+                        rate_cards,
+                        and_(
+                            rate_cards.c.id == rate_card_items.c.rate_card_id,
+                            rate_cards.c.organization_id == actor.organization_id,
+                            rate_cards.c.is_active.is_(True),
+                        ),
+                    )
+                )
+                .where(
+                    and_(
+                        rate_card_items.c.organization_id == actor.organization_id,
+                        rate_card_items.c.target_type == "service",
+                        rate_card_items.c.artist_role == person_role,
+                    )
+                )
+                .order_by(rate_card_items.c.category, rate_card_items.c.unit)
+            )
+            for row in role_rows.all():
+                _collect((row.category, row.unit, "rate_card"))
+
+    fallback_rows = await session.execute(
+        select(service_rates.c.category, service_rates.c.unit)
+        .where(
+            and_(
+                service_rates.c.organization_id == actor.organization_id,
+                service_rates.c.is_active.is_(True),
+                service_rates.c.unit.in_(SUPPORTED_BILLING_UNITS),
+            )
+        )
+        .order_by(service_rates.c.category, service_rates.c.unit)
+    )
+    for row in fallback_rows.all():
+        _collect((row.category, row.unit, "facility_rate_card"))
+
+    for unit in ("hour", "day", "fixed"):
+        _collect((booking_type, unit, "booking_type"))
+
+    return ordered
+
+
 async def _resolve_booking_commercial_components(
     session: DbSession,
     actor: CurrentActor,
@@ -501,10 +504,8 @@ async def _resolve_booking_commercial_components(
     The browser supplies only operational booking choices.  Every rate, rate
     source and amount is resolved here against the selected episode contract.
     """
-    definition = BOOKING_RATE_DEFINITIONS.get(payload.booking_type)
-    if not definition or not payload.episode_id or payload.status == "cancelled":
+    if not payload.episode_id or payload.status == "cancelled":
         return []
-    category, unit = definition
     quantity = confirmed_hours(payload.starts_at, payload.ends_at, 0)
     targets: list[tuple[str, str, object]] = []
     components: list[dict[str, object]] = []
@@ -564,24 +565,51 @@ async def _resolve_booking_commercial_components(
             targets.append(("person", str(person.id), person))
 
     for component_type, target_id, resource in targets:
-        effective = await resolve_effective_rate(
+        override = overrides.get(component_type)
+        candidate_pairs = await _rate_candidate_pairs(
             session,
             actor,
-            episode_id=payload.episode_id,
-            category=category,
-            unit=unit,
-            target_type=component_type,
+            component_type=component_type,
             target_id=target_id,
+            person_role=str(getattr(resource, "role", None)) if component_type == "person" else None,
+            booking_type=payload.booking_type,
         )
-        resolved_category = str(effective.get("category") or category)
-        override = overrides.get(component_type)
-        rate = _decimal(override.rate) if override else _decimal(effective.get("client_rate", effective.get("rate")))
-        source = effective.get("source")
+        resolved: dict[str, object] | None = None
+        resolved_category = payload.booking_type
+        unit = "hour"
+        for candidate_category, candidate_unit in candidate_pairs:
+            candidate = await resolve_effective_rate(
+                session,
+                actor,
+                episode_id=payload.episode_id,
+                category=candidate_category,
+                unit=candidate_unit,
+                target_type=component_type,
+                target_id=target_id,
+            )
+            if candidate.get("source") and _decimal(candidate.get("rate")) is not None:
+                resolved = candidate
+                resolved_category = str(candidate.get("category") or candidate_category)
+                unit = candidate_unit
+                break
         if override:
-            source = "negotiated_booking_override"
-        # A preview should make a missing commercial rule obvious, rather than
-        # quietly inventing a price from a person profile or the browser.
-        if rate is None or not source:
+            if candidate_pairs:
+                resolved_category = candidate_pairs[0][0]
+                unit = candidate_pairs[0][1]
+            resolved = {
+                "rate": _decimal(override.rate),
+                "currency": actor.active_organization.currency,
+                "source": "negotiated_booking_override",
+                "card_id": None,
+                "item_id": None,
+                "category": resolved_category,
+                "internal_cost_rate": override.rate,
+                "target_type": component_type,
+                "room_id": target_id if component_type == "room" else None,
+                "person_id": target_id if component_type == "person" else None,
+                "unit": unit,
+            }
+        if not resolved:
             components.append(
                 {
                     "component_type": component_type,
@@ -608,14 +636,44 @@ async def _resolve_booking_commercial_components(
                 }
             )
             continue
+        rate = _decimal(resolved.get("client_rate", resolved.get("rate")))
+        source = resolved.get("source")
+        if rate is None:
+            components.append(
+                {
+                    "component_type": component_type,
+                    "resource": resource.name,
+                    "resource_id": target_id,
+                    "category": resolved_category,
+                    "rate": None,
+                    "internal_cost_rate": None,
+                    "unit": unit,
+                    "currency": actor.active_organization.currency,
+                    "source": None,
+                    "source_card_id": None,
+                    "source_card_item_id": None,
+                    "rate_card_scope": None,
+                    "estimated_quantity": _money(quantity),
+                    "estimated_charge": None,
+                    "pricing_status": "rate_missing",
+                    "is_negotiated_override": bool(override),
+                    "override_reason": override.reason.strip() if override else None,
+                    "billing_treatment": "included"
+                    if payload.commercial_treatment == "flat_project_fee"
+                    else "billable",
+                    "tax_treatment": "standard",
+                }
+            )
+            continue
+
         # Rate cards can deliberately provide a separate internal rate. Until
         # a facility has done that, retain the current operational fallback at
         # confirmation time: a person's matching profile rate, otherwise the
         # resolved commercial rate. The fallback is still a snapshot, never a
         # live lookup made when actuals are submitted.
-        internal_rate = _decimal(effective.get("internal_cost_rate"))
+        internal_rate = _decimal(resolved.get("internal_cost_rate"))
         if internal_rate is None and component_type == "person":
-            profile_rate = _person_rate(resource, str(effective["currency"]))
+            profile_rate = _person_rate(resource, str(resolved["currency"]))
             if profile_rate and profile_rate["unit"] == unit:
                 internal_rate = _decimal(profile_rate["rate"])
         if internal_rate is None:
@@ -639,12 +697,10 @@ async def _resolve_booking_commercial_components(
                 "rate": _money(rate),
                 "internal_cost_rate": _money(internal_rate),
                 "unit": unit,
-                "currency": str(effective["currency"]),
+                "currency": str(resolved["currency"]),
                 "source": str(source),
-                "source_card_id": str(effective["card_id"]) if source_is_card and effective.get("card_id") else None,
-                "source_card_item_id": (
-                    str(effective["item_id"]) if source_is_card and effective.get("item_id") else None
-                ),
+                "source_card_id": str(resolved["card_id"]) if source_is_card and resolved.get("card_id") else None,
+                "source_card_item_id": str(resolved["item_id"]) if source_is_card and resolved.get("item_id") else None,
                 "rate_card_scope": rate_card_scope,
                 "estimated_quantity": _money(quantity),
                 "estimated_charge": _money(amount),

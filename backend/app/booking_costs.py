@@ -9,22 +9,6 @@ FACILITY_DAY_HOURS = Decimal("9")
 FACILITY_WEEK_DAYS = Decimal("5")
 OVERTIME_MULTIPLIER = Decimal("1.5")
 
-# These are service-rate categories, not role names. A post house can alter
-# their rates or use a more-specific rate card without changing this logic.
-BOOKING_RATE_DEFINITIONS: dict[str, tuple[str, str]] = {
-    "edit": ("Edit suite", "hour"),
-    "color": ("Colour", "hour"),
-    "mix": ("Audio suite", "hour"),
-    # QC sessions occupy a room and operator time, so they use the same
-    # hourly rate-card resolution as the rest of facility scheduling. A
-    # separate fixed-fee QC service can still be selected explicitly when a
-    # facility sells QC per episode.
-    "qc": ("QC", "hour"),
-    "client_review": ("Edit suite", "hour"),
-    "ingest": ("Edit suite", "hour"),
-    "conform": ("Online conform", "hour"),
-}
-
 
 def _duration_hours(start: datetime, end: datetime) -> Decimal:
     """Convert a timedelta to Decimal hours without a float intermediate."""
